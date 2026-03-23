@@ -1,1 +1,1 @@
-"""Shared utility helpers for logging."""
+"""Utility modules for the MCP server."""

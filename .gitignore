@@ -1,10 +1,31 @@
-# Python-generated files
+**.pyc
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
+# Ignore virtual environment directories
+venv/
+env/
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+# Ignore data files
+data/
+# Ignore logs
+logs/
+# Ignore model checkpoints
+checkpoints/
+# Ignore configuration files
+config/
+# Ignore IDE specific files
+.idea/
+.vscode/
+# Ignore system files
+.DS_Store
+Thumbs.db
+# Ignore any other files or directories you want to exclude from version control
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+# Ignore any other files or directories you want to exclude from version control
+*.csv
+.github/copilot-instructions.md
+.git2/**

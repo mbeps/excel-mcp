@@ -1,1 +1,1 @@
-"""Tool modules exposed by the MCP server template."""
+"""Excel manipulation tool modules."""
