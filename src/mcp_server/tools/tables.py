@@ -45,7 +45,7 @@ def create_table(
 
 def list_tables(file_path: str, sheet_name: str) -> list[dict]:
     """List all tables in a sheet."""
-    wb = load_workbook_safe(file_path, read_only=False)
+    wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
         return [
@@ -56,5 +56,94 @@ def list_tables(file_path: str, sheet_name: str) -> list[dict]:
             }
             for table in ws.tables.values()
         ]
+    finally:
+        wb.close()
+
+
+def delete_table(file_path: str, sheet_name: str, table_name: str) -> str:
+    """Remove a table by name, converting it back to a plain range."""
+    wb = load_workbook_safe(file_path)
+    ws = get_sheet(wb, sheet_name)
+    if table_name not in ws.tables:
+        raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+    del ws.tables[table_name]
+    save_workbook_safe(wb, file_path)
+    logger.info("Deleted table '%s' from %s", table_name, file_path)
+    return f"Deleted table '{table_name}' from sheet '{sheet_name}'."
+
+
+def rename_table(file_path: str, sheet_name: str, old_name: str, new_name: str) -> str:
+    """Rename an existing table."""
+    wb = load_workbook_safe(file_path)
+    ws = get_sheet(wb, sheet_name)
+    if old_name not in ws.tables:
+        raise ValueError(f"Table '{old_name}' not found in sheet '{sheet_name}'.")
+    table = ws.tables.pop(old_name)
+    table.name = new_name
+    table.displayName = new_name
+    ws.tables[new_name] = table
+    save_workbook_safe(wb, file_path)
+    logger.info("Renamed table '%s' -> '%s' in %s", old_name, new_name, file_path)
+    return f"Renamed table '{old_name}' to '{new_name}' on sheet '{sheet_name}'."
+
+
+def resize_table(file_path: str, sheet_name: str, table_name: str, new_range: str) -> str:
+    """Change the cell reference range of a table."""
+    wb = load_workbook_safe(file_path)
+    ws = get_sheet(wb, sheet_name)
+    if table_name not in ws.tables:
+        raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+    old_ref = ws.tables[table_name].ref
+    ws.tables[table_name].ref = new_range
+    save_workbook_safe(wb, file_path)
+    logger.info("Resized table '%s' from %s to %s in %s", table_name, old_ref, new_range, file_path)
+    return f"Resized table '{table_name}' from '{old_ref}' to '{new_range}' on sheet '{sheet_name}'."
+
+
+def set_table_totals_row(
+    file_path: str,
+    sheet_name: str,
+    table_name: str,
+    show_totals: bool,
+    column_totals: dict[str, str] | None = None,
+) -> str:
+    """Toggle the totals row and set per-column aggregate functions.
+
+    Valid function names: sum, count, average, max, min, countNums, stdDev, var, none.
+    """
+    wb = load_workbook_safe(file_path)
+    ws = get_sheet(wb, sheet_name)
+    if table_name not in ws.tables:
+        raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+    table = ws.tables[table_name]
+    table.totalsRowCount = 1 if show_totals else None
+    if show_totals and column_totals and table.tableColumns:
+        for col in table.tableColumns:
+            if col.name in column_totals:
+                col.totalsRowFunction = column_totals[col.name]
+    save_workbook_safe(wb, file_path)
+    logger.info("Set totals row for table '%s': show=%s", table_name, show_totals)
+    return f"Totals row {'enabled' if show_totals else 'disabled'} for table '{table_name}'."
+
+
+def get_table_data(file_path: str, sheet_name: str, table_name: str) -> dict:
+    """Read table data as structured output with headers and rows."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if table_name not in ws.tables:
+            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+        table = ws.tables[table_name]
+        cell_rows = list(ws[table.ref])
+        headers = [cell.value for cell in cell_rows[0]]
+        rows = [[cell.value for cell in row] for row in cell_rows[1:]]
+        logger.info("Read table '%s' data: %d rows from %s", table_name, len(rows), file_path)
+        return {
+            "table_name": table_name,
+            "ref": table.ref,
+            "headers": headers,
+            "rows": rows,
+            "row_count": len(rows),
+        }
     finally:
         wb.close()

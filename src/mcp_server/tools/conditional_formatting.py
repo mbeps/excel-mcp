@@ -102,15 +102,31 @@ def add_highlight_rule(
         wb.close()
 
 
-def remove_conditional_formatting(file_path: str, sheet_name: str) -> str:
-    """Remove all conditional formatting from a sheet."""
+def remove_conditional_formatting(file_path: str, sheet_name: str, cell_range: str | None = None) -> str:
+    """Remove conditional formatting from a sheet.
+
+    If cell_range is None, removes all rules from the entire sheet.
+    If cell_range is provided, removes only the rules applied to that specific range.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        ws.conditional_formatting._cf_rules.clear()  # pyright: ignore[reportAttributeAccessIssue]
+        if cell_range is None:
+            ws.conditional_formatting._cf_rules.clear()  # pyright: ignore[reportAttributeAccessIssue]
+            logger.info("Removed all conditional formatting from sheet '%s' in %s", sheet_name, file_path)
+            msg = f"Removed all conditional formatting from sheet '{sheet_name}'."
+        else:
+            cf_rules = ws.conditional_formatting._cf_rules  # pyright: ignore[reportAttributeAccessIssue]
+            key = cell_range.upper()
+            matched = next((k for k in cf_rules if str(k.sqref).upper() == key), None)
+            if matched is not None:
+                del cf_rules[matched]
+            logger.info(
+                "Removed conditional formatting for range '%s' from sheet '%s' in %s", cell_range, sheet_name, file_path
+            )
+            msg = f"Removed conditional formatting for range '{cell_range}' from sheet '{sheet_name}'."
         save_workbook_safe(wb, file_path)
-        logger.info("Removed all conditional formatting from sheet '%s' in %s", sheet_name, file_path)
-        return f"Removed all conditional formatting from sheet '{sheet_name}'."
+        return msg
     finally:
         wb.close()
 
@@ -245,7 +261,7 @@ def list_conditional_formats(file_path: str, sheet_name: str) -> list[dict]:
         for cf in ws.conditional_formatting:
             for rule in cf.rules:
                 entry: dict = {
-                    "range": str(cf),
+                    "range": str(cf.sqref),
                     "type": rule.type,
                     "priority": rule.priority,
                 }

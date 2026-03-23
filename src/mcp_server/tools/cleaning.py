@@ -56,11 +56,22 @@ def _get_target_cols(df: pd.DataFrame, col_names: list[str] | None) -> list[str]
 def _trim_whitespace(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataFrame, int]:
     count = 0
     for col in target_cols:
-        for idx in df.index:
-            val = df.at[idx, col]
-            if isinstance(val, str) and val != val.strip():
-                df.at[idx, col] = val.strip()
-                count += 1
+        col_dtype = df[col].dtype
+        if col_dtype == object:
+            # Object dtype may contain mixed types — only process actual strings
+            str_mask = df[col].apply(lambda x: isinstance(x, str))
+            if not str_mask.any():
+                continue
+            original = df[col][str_mask]
+            stripped = original.str.strip()
+            count += int((original != stripped).sum())
+            df.loc[str_mask, col] = stripped
+        elif isinstance(col_dtype, pd.StringDtype):
+            # Pandas 2.2+ nullable StringDtype — fully vectorized
+            stripped = df[col].str.strip()
+            mask = df[col].notna() & (df[col] != stripped)
+            count += int(mask.sum())
+            df[col] = stripped
     return df, count
 
 

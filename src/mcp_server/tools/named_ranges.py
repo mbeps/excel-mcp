@@ -92,3 +92,28 @@ def update_named_range(file_path: str, name: str, new_destination: str) -> str:
         return f"Named range '{name}' updated to '{new_destination}'."
     finally:
         wb.close()
+
+
+def rename_named_range(file_path: str, name: str, new_name: str) -> str:
+    """Rename an existing named range, preserving its destination and scope."""
+    wb = load_workbook_safe(file_path)
+    try:
+        if name not in wb.defined_names:
+            raise ValueError(f"Named range '{name}' not found.")
+        if new_name in wb.defined_names:
+            raise ValueError(f"Named range '{new_name}' already exists.")
+        old_defn = wb.defined_names[name]
+        local_sheet_id = old_defn.localSheetId
+        attr_text = old_defn.attr_text
+
+        del wb.defined_names[name]
+        new_defn = DefinedName(new_name, attr_text=attr_text)
+        if local_sheet_id is not None:
+            new_defn.localSheetId = local_sheet_id
+        wb.defined_names.add(new_defn)
+
+        save_workbook_safe(wb, file_path)
+        logger.info("Renamed named range '%s' -> '%s' in %s", name, new_name, file_path)
+        return f"Named range '{name}' renamed to '{new_name}'."
+    finally:
+        wb.close()

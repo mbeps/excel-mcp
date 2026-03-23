@@ -539,3 +539,140 @@ def trend_analysis(
         "growth_rates": growth_rates,
         "forecast": forecast,
     }
+
+
+def calculate_xnpv(
+    discount_rate: float,
+    cash_flows: list[float],
+    dates: list[str],
+) -> dict:
+    """Calculate XNPV (NPV with irregular cash flow dates).
+
+    discount_rate: annual discount rate (e.g. 0.10 for 10%)
+    cash_flows: list of cash flow amounts
+    dates: list of ISO-format date strings ("YYYY-MM-DD")
+    """
+    from datetime import date as _date
+
+    if len(cash_flows) != len(dates):
+        raise ValueError("cash_flows and dates must have the same length")
+    if discount_rate <= -1:
+        raise ValueError("discount_rate must be greater than -1")
+
+    parsed = [_date.fromisoformat(d) for d in dates]
+    d0 = parsed[0]
+    xnpv = sum(cf / (1 + discount_rate) ** ((d - d0).days / 365) for cf, d in zip(cash_flows, parsed))
+    logger.info("XNPV: %.4f (rate=%.4f, n=%d)", xnpv, discount_rate, len(cash_flows))
+    return {
+        "xnpv": round(xnpv, 4),
+        "discount_rate": discount_rate,
+        "num_cash_flows": len(cash_flows),
+    }
+
+
+def calculate_xirr(
+    cash_flows: list[float],
+    dates: list[str],
+    guess: float = 0.1,
+) -> dict:
+    """Calculate XIRR (IRR for irregular cash flow dates).
+
+    cash_flows: list of cash flow amounts (must have at least one positive and one negative)
+    dates: list of ISO-format date strings ("YYYY-MM-DD")
+    guess: initial rate guess
+    """
+    from datetime import date as _date
+
+    from scipy.optimize import brentq, fsolve
+
+    if len(cash_flows) != len(dates):
+        raise ValueError("cash_flows and dates must have the same length")
+
+    parsed = [_date.fromisoformat(d) for d in dates]
+    d0 = parsed[0]
+
+    def _xnpv_objective(r: float) -> float:
+        return sum(cf / (1 + r) ** ((d - d0).days / 365) for cf, d in zip(cash_flows, parsed))
+
+    xirr_value: float | None = None
+    try:
+        xirr_value = brentq(_xnpv_objective, -0.999, 100.0, maxiter=1000)
+    except Exception:
+        try:
+            result = fsolve(_xnpv_objective, guess, full_output=True)
+            sol = float(result[0][0])
+            if abs(_xnpv_objective(sol)) < 1e-6:
+                xirr_value = sol
+        except Exception:
+            pass
+
+    if xirr_value is None:
+        return {"xirr": None, "message": "XIRR could not be computed: convergence failed"}
+
+    logger.info("XIRR: %.6f (n=%d)", xirr_value, len(cash_flows))
+    return {
+        "xirr": round(xirr_value, 6),
+        "dates": dates,
+        "cash_flows": cash_flows,
+    }
+
+
+def calculate_cagr(
+    beginning_value: float,
+    ending_value: float,
+    periods: float,
+) -> dict:
+    """Calculate Compound Annual Growth Rate (CAGR).
+
+    beginning_value: starting value (must be > 0)
+    ending_value: ending value
+    periods: number of periods (years)
+    """
+    if beginning_value <= 0:
+        raise ValueError("beginning_value must be greater than 0")
+    if periods <= 0:
+        raise ValueError("periods must be greater than 0")
+
+    cagr = (ending_value / beginning_value) ** (1 / periods) - 1
+    total_growth = (ending_value - beginning_value) / beginning_value
+    logger.info("CAGR: %.6f over %.2f periods", cagr, periods)
+    return {
+        "cagr": round(cagr, 6),
+        "beginning_value": beginning_value,
+        "ending_value": ending_value,
+        "periods": periods,
+        "total_growth": round(total_growth, 4),
+    }
+
+
+def break_even_analysis(
+    fixed_costs: float,
+    price_per_unit: float,
+    variable_cost_per_unit: float,
+) -> dict:
+    """Calculate break-even point in units and revenue.
+
+    fixed_costs: total fixed costs
+    price_per_unit: selling price per unit
+    variable_cost_per_unit: variable cost per unit
+    """
+    if price_per_unit <= variable_cost_per_unit:
+        raise ValueError("Price must exceed variable cost per unit")
+
+    contribution_margin = price_per_unit - variable_cost_per_unit
+    contribution_margin_ratio = contribution_margin / price_per_unit
+    break_even_units = fixed_costs / contribution_margin
+    break_even_revenue = break_even_units * price_per_unit
+
+    logger.info(
+        "Break-even: units=%.2f, revenue=%.2f, contribution_margin=%.4f",
+        break_even_units,
+        break_even_revenue,
+        contribution_margin,
+    )
+    return {
+        "break_even_units": round(break_even_units, 2),
+        "break_even_revenue": round(break_even_revenue, 2),
+        "contribution_margin": contribution_margin,
+        "contribution_margin_ratio": round(contribution_margin_ratio, 4),
+    }

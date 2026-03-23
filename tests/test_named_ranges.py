@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import openpyxl
 
+import pytest
+
 from mcp_server.tools.named_ranges import (
     create_named_range,
     delete_named_range,
     list_named_ranges,
+    rename_named_range,
     update_named_range,
 )
 
@@ -41,3 +44,26 @@ def test_update_named_range(sample_xlsx: str) -> None:
     wb = openpyxl.load_workbook(sample_xlsx)
     assert wb.defined_names["UpdateMe"].attr_text == "Sheet1!$A$1:$D$6"
     wb.close()
+
+
+def test_rename_named_range(sample_xlsx: str) -> None:
+    create_named_range(sample_xlsx, "OldRangeName", "Sheet1!$A$1:$B$3")
+    result = rename_named_range(sample_xlsx, "OldRangeName", "NewRangeName")
+    assert "NewRangeName" in result
+    wb = openpyxl.load_workbook(sample_xlsx)
+    assert "NewRangeName" in wb.defined_names
+    assert "OldRangeName" not in wb.defined_names
+    assert wb.defined_names["NewRangeName"].attr_text == "Sheet1!$A$1:$B$3"
+    wb.close()
+
+
+def test_rename_named_range_not_found(sample_xlsx: str) -> None:
+    with pytest.raises(ValueError, match="not found"):
+        rename_named_range(sample_xlsx, "DoesNotExist", "AnyName")
+
+
+def test_rename_named_range_target_exists(sample_xlsx: str) -> None:
+    create_named_range(sample_xlsx, "Alpha", "Sheet1!$A$1")
+    create_named_range(sample_xlsx, "Beta", "Sheet1!$B$1")
+    with pytest.raises(ValueError, match="already exists"):
+        rename_named_range(sample_xlsx, "Alpha", "Beta")

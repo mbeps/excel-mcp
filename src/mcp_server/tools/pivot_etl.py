@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from logging import Logger
 
 import pandas as pd
@@ -18,29 +19,63 @@ logger: Logger = configure_logging(__name__)
 
 VALID_KEEP = {"first", "last", False}
 
-_EXPRESSION_BLOCKLIST = (
-    "__",
-    "import",
-    "exec(",
-    "eval(",
-    "open(",
-    "system(",
-    "getattr",
-    "setattr",
-    "delattr",
-    "globals",
-    "locals",
-    "compile",
+_FORBIDDEN_NAMES: frozenset[str] = frozenset(
+    {
+        "__builtins__",
+        "__import__",
+        "exec",
+        "eval",
+        "open",
+        "system",
+        "getattr",
+        "setattr",
+        "delattr",
+        "globals",
+        "locals",
+        "compile",
+        "breakpoint",
+        "input",
+        "print",
+        "exit",
+        "quit",
+    }
+)
+
+_ALLOWED_AST_NODES = (
+    ast.Expression,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Constant,
+    ast.Name,
+    ast.Load,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.Pow,
+    ast.Mod,
+    ast.FloorDiv,
+    ast.USub,
+    ast.UAdd,
 )
 
 
 def _validate_eval_expression(expression: str) -> None:
-    """Reject expressions containing dangerous patterns."""
-    lowered = expression.lower()
-    for pattern in _EXPRESSION_BLOCKLIST:
-        if pattern in lowered:
+    """Validate expression using AST whitelist — only arithmetic and column names allowed."""
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as e:
+        raise ValueError(f"Invalid expression syntax: {e}") from e
+
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_AST_NODES):
             raise ValueError(
-                f"Expression contains forbidden pattern '{pattern}'. "
+                f"Expression contains disallowed operation '{type(node).__name__}'. "
+                "Only column references and basic arithmetic are allowed."
+            )
+        if isinstance(node, ast.Name) and node.id in _FORBIDDEN_NAMES:
+            raise ValueError(
+                f"Expression references forbidden name '{node.id}'. "
                 "Only column references and basic arithmetic are allowed."
             )
 

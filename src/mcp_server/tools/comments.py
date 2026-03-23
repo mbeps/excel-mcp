@@ -35,6 +35,29 @@ def add_comment(
         wb.close()
 
 
+def update_comment(
+    file_path: str,
+    sheet_name: str,
+    cell_ref: str,
+    text: str,
+    author: str | None = None,
+) -> str:
+    """Update an existing comment on a cell. Raises ValueError if no comment exists."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        existing = ws[cell_ref].comment
+        if existing is None:
+            raise ValueError(f"No comment found on cell {cell_ref} in sheet '{sheet_name}'.")
+        new_author = author if author is not None else existing.author
+        ws[cell_ref].comment = Comment(text, new_author)
+        save_workbook_safe(wb, file_path)
+        logger.info("Updated comment on %s!%s in %s", sheet_name, cell_ref, file_path)
+        return f"Comment on cell {cell_ref} updated."
+    finally:
+        wb.close()
+
+
 def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> dict | None:
     """Read comment from a cell. Returns dict with text/author or None."""
     wb = load_workbook_safe(file_path)

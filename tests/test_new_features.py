@@ -16,8 +16,10 @@ from mcp_server.tools.charts import create_chart, list_charts, update_chart_prop
 from mcp_server.tools.conditional_formatting import (
     add_duplicate_rule,
     add_formula_rule,
+    add_highlight_rule,
     add_top_bottom_rule,
     list_conditional_formats,
+    remove_conditional_formatting,
 )
 from mcp_server.tools.data_validation import (
     add_date_validation,
@@ -211,6 +213,25 @@ def test_list_conditional_formats(sample_xlsx: str) -> None:
     result = list_conditional_formats(sample_xlsx, "Sheet1")
     assert isinstance(result, list)
     assert len(result) >= 2
+
+
+def test_remove_conditional_formatting_all(sample_xlsx: str) -> None:
+    add_highlight_rule(sample_xlsx, "Sheet1", "D2:D6", operator="greaterThan", formula="70000")
+    add_highlight_rule(sample_xlsx, "Sheet1", "B2:B6", operator="lessThan", formula="30")
+    result = remove_conditional_formatting(sample_xlsx, "Sheet1")
+    assert "removed" in result.lower() or "cleared" in result.lower()
+    remaining = list_conditional_formats(sample_xlsx, "Sheet1")
+    assert len(remaining) == 0
+
+
+def test_remove_conditional_formatting_specific_range(sample_xlsx: str) -> None:
+    add_highlight_rule(sample_xlsx, "Sheet1", "D2:D6", operator="greaterThan", formula="70000")
+    add_highlight_rule(sample_xlsx, "Sheet1", "B2:B6", operator="lessThan", formula="30")
+    remove_conditional_formatting(sample_xlsx, "Sheet1", cell_range="D2:D6")
+    remaining = list_conditional_formats(sample_xlsx, "Sheet1")
+    refs = [r["range"] for r in remaining]
+    assert "D2:D6" not in refs
+    assert "B2:B6" in refs
 
 
 # ── Enhanced data validation ─────────────────────────────────────────

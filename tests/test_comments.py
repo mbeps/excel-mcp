@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import openpyxl
 
+import pytest
+
 from mcp_server.tools.comments import (
     add_comment,
     delete_comment,
     list_comments,
     read_comment,
+    update_comment,
 )
 
 
@@ -45,3 +48,27 @@ def test_list_comments(sample_xlsx: str) -> None:
     assert "A1" in refs
     assert "B1" in refs
     assert len(result) >= 2
+
+
+def test_update_comment_text(sample_xlsx: str) -> None:
+    add_comment(sample_xlsx, "Sheet1", "A2", "Original text", author="Author")
+    result = update_comment(sample_xlsx, "Sheet1", "A2", "Updated text")
+    assert "updated" in result.lower()
+    updated = read_comment(sample_xlsx, "Sheet1", "A2")
+    assert updated is not None
+    assert updated["text"] == "Updated text"
+    assert updated["author"] == "Author"  # author preserved when not provided
+
+
+def test_update_comment_with_author(sample_xlsx: str) -> None:
+    add_comment(sample_xlsx, "Sheet1", "B2", "Hello", author="OldAuthor")
+    update_comment(sample_xlsx, "Sheet1", "B2", "New text", author="NewAuthor")
+    updated = read_comment(sample_xlsx, "Sheet1", "B2")
+    assert updated is not None
+    assert updated["text"] == "New text"
+    assert updated["author"] == "NewAuthor"
+
+
+def test_update_comment_missing_raises(sample_xlsx: str) -> None:
+    with pytest.raises(ValueError, match="No comment found"):
+        update_comment(sample_xlsx, "Sheet1", "Z99", "Should fail")

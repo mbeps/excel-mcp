@@ -124,6 +124,9 @@ from mcp_server.tools.comments import (
     add_comment as _add_comment,
 )
 from mcp_server.tools.comments import (
+    update_comment as _update_comment,
+)
+from mcp_server.tools.comments import (
     delete_comment as _delete_comment,
 )
 from mcp_server.tools.comments import (
@@ -229,6 +232,18 @@ from mcp_server.tools.financial import (
     scenario_analysis as _scenario_analysis,
 )
 from mcp_server.tools.financial import (
+    break_even_analysis as _break_even_analysis,
+)
+from mcp_server.tools.financial import (
+    calculate_cagr as _calculate_cagr,
+)
+from mcp_server.tools.financial import (
+    calculate_xirr as _calculate_xirr,
+)
+from mcp_server.tools.financial import (
+    calculate_xnpv as _calculate_xnpv,
+)
+from mcp_server.tools.financial import (
     trend_analysis as _trend_analysis,
 )
 from mcp_server.tools.formatting import (
@@ -313,6 +328,9 @@ from mcp_server.tools.named_ranges import (
     list_named_ranges as _list_named_ranges,
 )
 from mcp_server.tools.named_ranges import (
+    rename_named_range as _rename_named_range,
+)
+from mcp_server.tools.named_ranges import (
     update_named_range as _update_named_range,
 )
 from mcp_server.tools.pivot_etl import (
@@ -361,7 +379,22 @@ from mcp_server.tools.tables import (
     create_table as _create_table,
 )
 from mcp_server.tools.tables import (
+    delete_table as _delete_table,
+)
+from mcp_server.tools.tables import (
+    get_table_data as _get_table_data,
+)
+from mcp_server.tools.tables import (
     list_tables as _list_tables,
+)
+from mcp_server.tools.tables import (
+    rename_table as _rename_table,
+)
+from mcp_server.tools.tables import (
+    resize_table as _resize_table,
+)
+from mcp_server.tools.tables import (
+    set_table_totals_row as _set_table_totals_row,
 )
 from mcp_server.tools.workbook import (
     copy_sheet as _copy_sheet,
@@ -572,6 +605,12 @@ def update_named_range(file_path: str, name: str, new_destination: str) -> str:
     return _update_named_range(file_path, name, new_destination)
 
 
+@mcp.tool()
+def rename_named_range(file_path: str, name: str, new_name: str) -> str:
+    """Rename an existing named range, preserving its destination and scope."""
+    return _rename_named_range(file_path, name, new_name)
+
+
 # ---------------------------------------------------------------------------
 # --- Comments ---
 # ---------------------------------------------------------------------------
@@ -599,6 +638,12 @@ def delete_comment(file_path: str, sheet_name: str, cell_ref: str) -> str:
 def list_comments(file_path: str, sheet_name: str) -> list[dict]:
     """List all comments in a sheet with cell reference, text, and author."""
     return _list_comments(file_path, sheet_name)
+
+
+@mcp.tool()
+def update_comment(file_path: str, sheet_name: str, cell_ref: str, text: str, author: str | None = None) -> str:
+    """Update an existing comment's text and optionally its author. Raises an error if no comment exists."""
+    return _update_comment(file_path, sheet_name, cell_ref, text, author)
 
 
 # ---------------------------------------------------------------------------
@@ -1165,21 +1210,25 @@ def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-def read_csv_preview(file_path: str, rows: int = 10, delimiter: str = ",") -> dict:
+def read_csv_preview(file_path: str, rows: int = 10, delimiter: str = ",", encoding: str = "utf-8") -> dict:
     """Preview the first N rows of a CSV file."""
-    return _read_csv_preview(file_path, rows, delimiter)
+    return _read_csv_preview(file_path, rows, delimiter, encoding)
 
 
 @mcp.tool()
-def csv_to_xlsx(csv_path: str, xlsx_path: str, sheet_name: str = "Sheet1", delimiter: str = ",") -> str:
+def csv_to_xlsx(
+    csv_path: str, xlsx_path: str, sheet_name: str = "Sheet1", delimiter: str = ",", encoding: str = "utf-8"
+) -> str:
     """Convert a CSV file to .xlsx format."""
-    return _csv_to_xlsx(csv_path, xlsx_path, sheet_name, delimiter)
+    return _csv_to_xlsx(csv_path, xlsx_path, sheet_name, delimiter, encoding)
 
 
 @mcp.tool()
-def xlsx_to_csv(file_path: str, sheet_name: str, output_path: str, delimiter: str = ",") -> str:
+def xlsx_to_csv(
+    file_path: str, sheet_name: str, output_path: str, delimiter: str = ",", encoding: str = "utf-8"
+) -> str:
     """Export a worksheet to CSV."""
-    return _xlsx_to_csv(file_path, sheet_name, output_path, delimiter)
+    return _xlsx_to_csv(file_path, sheet_name, output_path, delimiter, encoding)
 
 
 # ---------------------------------------------------------------------------
@@ -1236,9 +1285,9 @@ def add_highlight_rule(
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-def remove_conditional_formatting(file_path: str, sheet_name: str) -> str:
-    """Remove all conditional formatting rules from a sheet."""
-    return _remove_conditional_formatting(file_path, sheet_name)
+def remove_conditional_formatting(file_path: str, sheet_name: str, cell_range: str | None = None) -> str:
+    """Remove conditional formatting rules. If cell_range is given, only removes rules for that range; otherwise clears all rules from the sheet."""
+    return _remove_conditional_formatting(file_path, sheet_name, cell_range)
 
 
 @mcp.tool()
@@ -1321,6 +1370,45 @@ def create_table(
 def list_tables(file_path: str, sheet_name: str) -> list[dict]:
     """List all tables in a sheet with name, ref, and style."""
     return _list_tables(file_path, sheet_name)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def delete_table(file_path: str, sheet_name: str, table_name: str) -> str:
+    """Remove a table by name, converting it back to a plain range."""
+    return _delete_table(file_path, sheet_name, table_name)
+
+
+@mcp.tool()
+def rename_table(file_path: str, sheet_name: str, old_name: str, new_name: str) -> str:
+    """Rename an existing Excel table."""
+    return _rename_table(file_path, sheet_name, old_name, new_name)
+
+
+@mcp.tool()
+def resize_table(file_path: str, sheet_name: str, table_name: str, new_range: str) -> str:
+    """Change the cell range of an existing table (e.g. expand or contract it)."""
+    return _resize_table(file_path, sheet_name, table_name, new_range)
+
+
+@mcp.tool()
+def set_table_totals_row(
+    file_path: str,
+    sheet_name: str,
+    table_name: str,
+    show_totals: bool,
+    column_totals: dict[str, str] | None = None,
+) -> str:
+    """Toggle totals row for a table and set per-column aggregate functions.
+
+    column_totals maps column names to function names: sum, count, average, max, min, countNums, stdDev, var, none.
+    """
+    return _set_table_totals_row(file_path, sheet_name, table_name, show_totals, column_totals)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def get_table_data(file_path: str, sheet_name: str, table_name: str) -> dict:
+    """Read table data as structured output with headers and rows."""
+    return _get_table_data(file_path, sheet_name, table_name)
 
 
 # ---------------------------------------------------------------------------
@@ -2066,6 +2154,42 @@ def trend_analysis(
 ) -> dict:
     """Analyze trends with linear regression, moving averages, and forecasting."""
     return _trend_analysis(file_path, sheet_name, date_column, value_column, header_row, periods_to_forecast)
+
+
+@mcp.tool()
+def calculate_xnpv(discount_rate: float, cash_flows: list[float], dates: list[str]) -> dict:
+    """Calculate XNPV (Net Present Value with irregular cash flow dates).
+
+    dates: ISO-format strings (YYYY-MM-DD), must align 1:1 with cash_flows.
+    """
+    return _calculate_xnpv(discount_rate, cash_flows, dates)
+
+
+@mcp.tool()
+def calculate_xirr(cash_flows: list[float], dates: list[str], guess: float = 0.1) -> dict:
+    """Calculate XIRR (Internal Rate of Return with irregular cash flow dates).
+
+    dates: ISO-format strings (YYYY-MM-DD), must align 1:1 with cash_flows.
+    """
+    return _calculate_xirr(cash_flows, dates, guess)
+
+
+@mcp.tool()
+def calculate_cagr(beginning_value: float, ending_value: float, periods: float) -> dict:
+    """Calculate Compound Annual Growth Rate (CAGR).
+
+    periods: number of compounding periods (e.g. years).
+    """
+    return _calculate_cagr(beginning_value, ending_value, periods)
+
+
+@mcp.tool()
+def break_even_analysis(fixed_costs: float, price_per_unit: float, variable_cost_per_unit: float) -> dict:
+    """Calculate break-even point in units and revenue.
+
+    Returns break_even_units, break_even_revenue, contribution_margin, and contribution_margin_ratio.
+    """
+    return _break_even_analysis(fixed_costs, price_per_unit, variable_cost_per_unit)
 
 
 # ---------------------------------------------------------------------------

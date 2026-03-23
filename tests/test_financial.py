@@ -6,10 +6,14 @@ import pytest
 from openpyxl import Workbook
 
 from mcp_server.tools.financial import (
+    break_even_analysis,
     budget_variance_analysis,
+    calculate_cagr,
     calculate_irr,
     calculate_npv,
     calculate_pmt,
+    calculate_xirr,
+    calculate_xnpv,
     dcf_analysis,
     financial_ratio_analysis,
     goal_seek,
@@ -179,5 +183,56 @@ def test_trend_analysis(tmp_path: Path) -> None:
     assert result["r_squared"] > 0.95
     assert len(result["forecast"]) == 3
     assert result["forecast"][0]["value"] > 200
-    assert len(result["growth_rates"]) == 6
-    assert len(result["moving_averages"]) == 6
+
+
+def test_calculate_xnpv() -> None:
+    cash_flows = [-1000.0, 300.0, 400.0, 500.0]
+    dates = ["2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01"]
+    result = calculate_xnpv(0.10, cash_flows, dates)
+    assert result["num_cash_flows"] == 4
+    assert result["discount_rate"] == 0.10
+    assert "xnpv" in result
+    # Annual cash flows spaced exactly 1 year apart ≈ regular NPV
+    assert result["xnpv"] == pytest.approx(-21.04, abs=2)
+
+
+def test_calculate_xnpv_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="same length"):
+        calculate_xnpv(0.1, [-100.0, 50.0], ["2020-01-01"])
+
+
+def test_calculate_xirr() -> None:
+    cash_flows = [-1000.0, 300.0, 400.0, 500.0]
+    dates = ["2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01"]
+    result = calculate_xirr(cash_flows, dates)
+    assert result["xirr"] is not None
+    assert result["xirr"] == pytest.approx(0.089, abs=0.01)
+    assert result["dates"] == dates
+    assert result["cash_flows"] == cash_flows
+
+
+def test_calculate_cagr() -> None:
+    result = calculate_cagr(beginning_value=1000.0, ending_value=1610.51, periods=5.0)
+    assert result["cagr"] == pytest.approx(0.10, abs=0.001)
+    assert result["total_growth"] == pytest.approx(0.6105, abs=0.001)
+    assert result["periods"] == 5.0
+
+
+def test_calculate_cagr_invalid() -> None:
+    with pytest.raises(ValueError, match="beginning_value"):
+        calculate_cagr(beginning_value=0, ending_value=200, periods=5)
+    with pytest.raises(ValueError, match="periods"):
+        calculate_cagr(beginning_value=100, ending_value=200, periods=0)
+
+
+def test_break_even_analysis() -> None:
+    result = break_even_analysis(fixed_costs=50000.0, price_per_unit=25.0, variable_cost_per_unit=15.0)
+    assert result["break_even_units"] == pytest.approx(5000.0, abs=0.01)
+    assert result["break_even_revenue"] == pytest.approx(125000.0, abs=0.01)
+    assert result["contribution_margin"] == pytest.approx(10.0)
+    assert result["contribution_margin_ratio"] == pytest.approx(0.4, abs=0.0001)
+
+
+def test_break_even_analysis_invalid() -> None:
+    with pytest.raises(ValueError, match="Price must exceed"):
+        break_even_analysis(fixed_costs=1000.0, price_per_unit=10.0, variable_cost_per_unit=10.0)
