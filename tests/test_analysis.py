@@ -9,12 +9,14 @@ from mcp_server.tools.analysis import (
     column_statistics,
     export_analysis,
     filter_data,
+    filter_data_advanced,
     find_cells_by_format,
     find_duplicates,
     normalize_data,
     profile_data,
     search_replace,
     sort_data,
+    transpose_data,
 )
 from mcp_server.tools.cell_ops import read_cell
 
@@ -167,3 +169,143 @@ def test_export_analysis(tmp_path: str) -> None:
     assert ws["A1"].value == "Name"
     assert ws["A2"].value == "Alice"
     wb.close()
+
+
+def test_transpose_data_correct(tmp_path) -> None:
+    from openpyxl import Workbook as WB
+
+    path = str(tmp_path / "transpose.xlsx")
+    wb = WB()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Name", "Score"])
+    ws.append(["Alice", 95])
+    ws.append(["Bob", 87])
+    wb.save(path)
+
+    transpose_data(path, "Sheet1")
+
+    wb2 = openpyxl.load_workbook(path)
+    ws2 = wb2["Sheet1"]
+    # Row 2 col 1 = original column name "Name"; cols 2,3 = data values
+    assert ws2.cell(row=2, column=1).value == "Name"
+    assert ws2.cell(row=2, column=2).value == "Alice"
+    assert ws2.cell(row=2, column=3).value == "Bob"
+    assert ws2.cell(row=3, column=1).value == "Score"
+    assert ws2.cell(row=3, column=2).value == 95
+    wb2.close()
+
+
+def test_search_replace_regex(tmp_path) -> None:
+    from openpyxl import Workbook as WB
+
+    path = str(tmp_path / "regex.xlsx")
+    wb = WB()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["apple", "orange", "banana"])
+    wb.save(path)
+
+    search_replace(path, "Sheet1", "apple|orange", "fruit", use_regex=True)
+
+    wb2 = openpyxl.load_workbook(path)
+    ws2 = wb2.active
+    assert ws2.cell(row=1, column=1).value == "fruit"
+    assert ws2.cell(row=1, column=2).value == "fruit"
+    assert ws2.cell(row=1, column=3).value == "banana"
+    wb2.close()
+
+
+def test_search_replace_numeric(tmp_path) -> None:
+    from openpyxl import Workbook as WB
+
+    path = str(tmp_path / "numeric.xlsx")
+    wb = WB()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.cell(row=1, column=1, value=42)
+    wb.save(path)
+
+    search_replace(path, "Sheet1", "42", "0")
+
+    wb2 = openpyxl.load_workbook(path)
+    ws2 = wb2.active
+    assert ws2.cell(row=1, column=1).value == "0"
+    wb2.close()
+
+
+def test_filter_data_case_sensitive(sample_xlsx: str) -> None:
+    # Case-insensitive (default): "new york" matches "New York"
+    result_ci = filter_data(sample_xlsx, "Sheet1", "City", "contains", "new york", case_sensitive=False)
+    # Case-sensitive: "new york" does NOT match "New York"
+    result_cs = filter_data(sample_xlsx, "Sheet1", "City", "contains", "new york", case_sensitive=True)
+    assert result_ci["matched_count"] == 2
+    assert result_cs["matched_count"] == 0
+
+
+def test_filter_data_advanced_and(tmp_path) -> None:
+    from openpyxl import Workbook as WB
+
+    path = str(tmp_path / "adv.xlsx")
+    wb = WB()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["City", "Salary"])
+    ws.append(["New York", 70000])
+    ws.append(["Chicago", 55000])
+    ws.append(["New York", 90000])
+    ws.append(["Chicago", 62000])
+    ws.append(["Boston", 80000])
+    wb.save(path)
+
+    result = filter_data_advanced(
+        path,
+        "Sheet1",
+        conditions=[
+            {"column": "City", "operator": "==", "value": "New York"},
+            {"column": "Salary", "operator": ">", "value": 75000},
+        ],
+        logic="AND",
+    )
+    # New York AND Salary > 75000: only New York/90000
+    assert result["rows"] == 1
+
+
+def test_filter_data_advanced_or(tmp_path) -> None:
+    from openpyxl import Workbook as WB
+
+    path = str(tmp_path / "adv.xlsx")
+    wb = WB()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["City", "Salary"])
+    ws.append(["New York", 70000])
+    ws.append(["Chicago", 55000])
+    ws.append(["New York", 90000])
+    ws.append(["Chicago", 62000])
+    ws.append(["Boston", 80000])
+    wb.save(path)
+
+    result = filter_data_advanced(
+        path,
+        "Sheet1",
+        conditions=[
+            {"column": "City", "operator": "==", "value": "Boston"},
+            {"column": "Salary", "operator": ">", "value": 80000},
+        ],
+        logic="OR",
+    )
+    # Boston (1) OR Salary > 80000 (New York/90000): 2 rows
+    assert result["rows"] == 2
+
+
+def test_profile_data_categorical(sample_xlsx: str) -> None:
+    result = profile_data(sample_xlsx, "Sheet1")
+    assert "categorical_columns" in result
+    cat = result["categorical_columns"]
+    # Name and City are string/object columns
+    assert "Name" in cat
+    assert "City" in cat
+    assert cat["Name"]["unique_count"] == 5
+    assert cat["City"]["top_value"] in ("New York", "Chicago")
+    assert cat["City"]["null_count"] == 0

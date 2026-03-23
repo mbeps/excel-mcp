@@ -56,7 +56,7 @@ def test_loan_amortization() -> None:
     assert result["monthly_payment"] > 0
     assert result["total_periods"] == 360
     assert result["total_interest"] > 0
-    assert len(result["schedule"]) == 24  # capped at 24 periods shown
+    assert len(result["schedule"]) == 360
     assert result["schedule"][0]["period"] == 1
     assert result["schedule"][0]["balance"] < 100000
 
@@ -234,5 +234,27 @@ def test_break_even_analysis() -> None:
 
 
 def test_break_even_analysis_invalid() -> None:
-    with pytest.raises(ValueError, match="Price must exceed"):
+    with pytest.raises(ValueError, match="price_per_unit must be greater than variable_cost_per_unit"):
+        break_even_analysis(fixed_costs=1000.0, price_per_unit=10.0, variable_cost_per_unit=10.0)
+
+
+def test_loan_amortization_full() -> None:
+    result = loan_amortization(principal=10000, annual_rate=0.12, years=1)
+    assert result["total_periods"] == 12
+    assert len(result["schedule"]) == 12
+    assert result.get("truncated") is None
+
+
+def test_loan_amortization_truncated() -> None:
+    result = loan_amortization(principal=10000, annual_rate=0.12, years=1, max_periods=3)
+    assert len(result["schedule"]) == 3
+    assert result["truncated"] is True
+
+
+def test_break_even_invalid_inputs() -> None:
+    with pytest.raises(ValueError, match="fixed_costs must be non-negative"):
+        break_even_analysis(fixed_costs=-1000.0, price_per_unit=25.0, variable_cost_per_unit=15.0)
+    with pytest.raises(ValueError, match="price_per_unit must be positive"):
+        break_even_analysis(fixed_costs=1000.0, price_per_unit=0.0, variable_cost_per_unit=15.0)
+    with pytest.raises(ValueError, match="price_per_unit must be greater than variable_cost_per_unit"):
         break_even_analysis(fixed_costs=1000.0, price_per_unit=10.0, variable_cost_per_unit=10.0)

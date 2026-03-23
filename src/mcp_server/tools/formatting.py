@@ -5,7 +5,9 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any, cast
 
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+import copy
+
+from openpyxl.styles import Alignment, Border, Font, GradientFill, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from mcp_server.utils.excel_helpers import (
@@ -43,6 +45,7 @@ def format_cells(
     bottom_border_style: str | None = None,
     left_border_style: str | None = None,
     right_border_style: str | None = None,
+    preserve_existing: bool = False,
 ) -> str:
     """Apply formatting to a cell range (e.g. 'A1:C10' or 'A1')."""
     wb = load_workbook_safe(file_path)
@@ -82,17 +85,47 @@ def format_cells(
             side = Side(style=cast(Any, border_style), color=border_color)
             border = Border(left=side, right=side, top=side, bottom=side)
 
-        for row in ws[cell_range]:
+        range_data = ws[cell_range]
+        if not isinstance(range_data, tuple):
+            range_data = ((range_data,),)
+        for row in range_data:
             cells = row if isinstance(row, tuple) else (row,)
             for cell in cells:
-                cell.font = font
-                if fill:
-                    cell.fill = fill
-                cell.alignment = alignment
-                if border:
-                    cell.border = border
-                if number_format:
-                    cell.number_format = number_format
+                if preserve_existing:
+                    ef = cell.font
+                    cell.font = Font(
+                        name=font_name if font_name is not None else ef.name,
+                        bold=bold if bold else ef.bold,
+                        italic=italic if italic else ef.italic,
+                        size=font_size if font_size is not None else ef.size,
+                        color=font_color if font_color is not None else ef.color,
+                        underline=underline if underline is not None else ef.underline,
+                        strike=strikethrough if strikethrough else ef.strike,
+                    )
+                    if bg_color:
+                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+                    ea = cell.alignment
+                    cell.alignment = Alignment(
+                        horizontal=horizontal_alignment if horizontal_alignment is not None else ea.horizontal,
+                        vertical=vertical_alignment if vertical_alignment is not None else ea.vertical,
+                        wrap_text=wrap_text if wrap_text else ea.wrap_text,
+                        textRotation=text_rotation if text_rotation is not None else (ea.textRotation or 0),
+                        indent=indent if indent is not None else (ea.indent or 0),
+                        shrinkToFit=shrink_to_fit if shrink_to_fit else ea.shrinkToFit,
+                    )
+                    if border:
+                        cell.border = border
+                    if number_format:
+                        cell.number_format = number_format
+                else:
+                    cell.font = font
+                    if fill:
+                        cell.fill = fill
+                    cell.alignment = alignment
+                    if border:
+                        cell.border = border
+                    if number_format:
+                        cell.number_format = number_format
 
         save_workbook_safe(wb, file_path)
         logger.info("Formatted range %s in %s!%s", cell_range, file_path, sheet_name)
@@ -311,5 +344,91 @@ def auto_fit_columns(file_path: str, sheet_name: str) -> str:
         save_workbook_safe(wb, file_path)
         logger.info("Auto-fitted columns in %s!%s", file_path, sheet_name)
         return f"Auto-fitted all column widths in '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def _validate_color(color: str) -> bool:
+    """Validate ARGB hex color string (6 or 8 hex chars)."""
+    if not color or not isinstance(color, str):
+        return False
+    stripped = color.lstrip("#")
+    if len(stripped) not in (6, 8):
+        return False
+    try:
+        int(stripped, 16)
+        return True
+    except ValueError:
+        return False
+
+
+def set_gradient_fill(
+    file_path: str,
+    sheet_name: str,
+    cell_range: str,
+    color1: str,
+    color2: str,
+    gradient_type: str = "linear",
+    degree: float = 0.0,
+) -> str:
+    """Apply a gradient fill to a cell range."""
+    if not _validate_color(color1):
+        raise ValueError(f"Invalid color format: {color1}. Expected 6 or 8 hex characters.")
+    if not _validate_color(color2):
+        raise ValueError(f"Invalid color format: {color2}. Expected 6 or 8 hex characters.")
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        fill = GradientFill(stop=[color1, color2], type=gradient_type, degree=degree)
+
+        range_data = ws[cell_range]
+        if not isinstance(range_data, tuple):
+            range_data = ((range_data,),)
+        for row in range_data:
+            cells = row if isinstance(row, tuple) else (row,)
+            for cell in cells:
+                cell.fill = fill
+
+        save_workbook_safe(wb, file_path)
+        logger.info("Applied gradient fill to %s in %s!%s", cell_range, file_path, sheet_name)
+        return f"Applied gradient fill to {cell_range} in '{sheet_name}'"
+    finally:
+        wb.close()
+
+
+def copy_formatting(
+    file_path: str,
+    sheet_name: str,
+    source_cell: str,
+    target_range: str,
+) -> str:
+    """Copy cell formatting (font, fill, border, alignment, number format) to a target range."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        src = ws[source_cell]
+
+        src_font = copy.copy(src.font)
+        src_fill = copy.copy(src.fill)
+        src_border = copy.copy(src.border)
+        src_alignment = copy.copy(src.alignment)
+        src_number_format = src.number_format
+
+        target_data = ws[target_range]
+        if not isinstance(target_data, tuple):
+            target_data = ((target_data,),)
+        for row in target_data:
+            cells = row if isinstance(row, tuple) else (row,)
+            for cell in cells:
+                cell.font = copy.copy(src_font)
+                cell.fill = copy.copy(src_fill)
+                cell.border = copy.copy(src_border)
+                cell.alignment = copy.copy(src_alignment)
+                cell.number_format = src_number_format
+
+        save_workbook_safe(wb, file_path)
+        logger.info("Copied formatting from %s to %s in %s!%s", source_cell, target_range, file_path, sheet_name)
+        return f"Copied formatting from {source_cell} to {target_range}"
     finally:
         wb.close()

@@ -6,7 +6,9 @@ import pytest
 
 from mcp_server.tools.comments import (
     add_comment,
+    add_comments_bulk,
     delete_comment,
+    delete_comments_bulk,
     list_comments,
     read_comment,
     update_comment,
@@ -72,3 +74,31 @@ def test_update_comment_with_author(sample_xlsx: str) -> None:
 def test_update_comment_missing_raises(sample_xlsx: str) -> None:
     with pytest.raises(ValueError, match="No comment found"):
         update_comment(sample_xlsx, "Sheet1", "Z99", "Should fail")
+
+
+def test_add_comments_bulk(sample_xlsx: str) -> None:
+    entries = [
+        {"cell": "A1", "text": "Bulk comment 1", "author": "Tester"},
+        {"cell": "B2", "text": "Bulk comment 2", "author": "Tester"},
+        {"cell": "C3", "text": "Bulk comment 3"},
+    ]
+    result = add_comments_bulk(sample_xlsx, "Sheet1", entries)
+    assert result["added"] == 3
+    comments = list_comments(sample_xlsx, "Sheet1")
+    refs = [c["cell_ref"] for c in comments]
+    assert "A1" in refs
+    assert "B2" in refs
+    assert "C3" in refs
+
+
+def test_delete_comments_bulk(sample_xlsx: str) -> None:
+    add_comment(sample_xlsx, "Sheet1", "A1", "Keep me")
+    add_comment(sample_xlsx, "Sheet1", "B1", "Delete me 1")
+    add_comment(sample_xlsx, "Sheet1", "C1", "Delete me 2")
+    result = delete_comments_bulk(sample_xlsx, "Sheet1", ["B1", "C1"])
+    assert result["deleted"] == 2
+    comments = list_comments(sample_xlsx, "Sheet1")
+    refs = [c["cell_ref"] for c in comments]
+    assert "A1" in refs
+    assert "B1" not in refs
+    assert "C1" not in refs

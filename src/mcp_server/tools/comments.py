@@ -90,7 +90,12 @@ def list_comments(file_path: str, sheet_name: str) -> list[dict]:
     try:
         ws = get_sheet(wb, sheet_name)
         results = []
-        for row in ws.iter_rows():
+        for row in ws.iter_rows(
+            min_row=ws.min_row,
+            max_row=ws.max_row,
+            min_col=ws.min_column,
+            max_col=ws.max_column,
+        ):
             for cell in row:
                 if cell.comment is not None:
                     results.append(
@@ -101,5 +106,49 @@ def list_comments(file_path: str, sheet_name: str) -> list[dict]:
                         }
                     )
         return results
+    finally:
+        wb.close()
+
+
+def add_comments_bulk(
+    file_path: str,
+    sheet_name: str,
+    comments: list[dict],
+) -> dict:
+    """Add comments to multiple cells at once."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        count = 0
+        for entry in comments:
+            cell_ref = entry["cell"]
+            text = entry["text"]
+            author = entry.get("author", "Excel MCP")
+            ws[cell_ref].comment = Comment(text, author)
+            count += 1
+        save_workbook_safe(wb, file_path)
+        logger.info("Bulk added %d comments to %s in %s", count, sheet_name, file_path)
+        return {"added": count}
+    finally:
+        wb.close()
+
+
+def delete_comments_bulk(
+    file_path: str,
+    sheet_name: str,
+    cells: list[str],
+) -> dict:
+    """Delete comments from multiple cells at once."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        count = 0
+        for cell_ref in cells:
+            if ws[cell_ref].comment is not None:
+                ws[cell_ref].comment = None
+                count += 1
+        save_workbook_safe(wb, file_path)
+        logger.info("Bulk deleted %d comments from %s in %s", count, sheet_name, file_path)
+        return {"deleted": count}
     finally:
         wb.close()

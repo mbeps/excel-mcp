@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from logging import Logger
 
+from openpyxl.utils import range_boundaries
 from openpyxl.worksheet.formula import ArrayFormula
 
 from mcp_server.utils.excel_helpers import (
@@ -77,10 +79,11 @@ def set_formulas_batch(file_path: str, sheet_name: str, formulas: dict[str, str]
     return f"Set {count} formulas in '{sheet_name}'."
 
 
-def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
+def list_formulas(file_path: str, sheet_name: str, pattern: str | None = None) -> list[dict]:
     """List all cells containing formulas in a sheet.
 
     Returns list of {cell_ref: str, formula: str}.
+    If pattern is provided, only return formulas matching the pattern (case-insensitive).
     """
     wb = load_workbook_safe(file_path)
     try:
@@ -88,9 +91,53 @@ def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
         results = []
         for row in ws.iter_rows():
             for cell in row:
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    results.append({"cell_ref": cell.coordinate, "formula": cell.value})
+                if cell.data_type == "f":
+                    formula = (
+                        cell.value if isinstance(cell.value, str) and cell.value.startswith("=") else f"={cell.value}"
+                    )
+                    if pattern is None or re.search(pattern, formula, re.IGNORECASE):
+                        results.append({"cell_ref": cell.coordinate, "formula": formula})
         logger.info("Found %d formulas in %s!%s", len(results), sheet_name, file_path)
         return results
     finally:
         wb.close()
+
+
+def convert_formulas_to_values(file_path: str, sheet_name: str, cell_range: str | None = None) -> dict:
+    """Replace formula cells with their cached calculated values.
+
+    Loads the workbook with data_only=True to read cached values, then loads
+    it normally and overwrites formula cells with those values.
+    Returns {"converted": int, "sheet": str}.
+    """
+    # Read cached (calculated) values
+    wb_data = load_workbook_safe(file_path, data_only=True)
+    ws_data = get_sheet(wb_data, sheet_name)
+    cached: dict[str, object] = {}
+    if cell_range:
+        min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+        rows_iter = ws_data.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col)
+    else:
+        rows_iter = ws_data.iter_rows()
+    for row in rows_iter:
+        for cell in row:
+            cached[cell.coordinate] = cell.value
+    wb_data.close()
+
+    # Write cached values back over formula cells
+    wb = load_workbook_safe(file_path)
+    ws = get_sheet(wb, sheet_name)
+    if cell_range:
+        min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+        rows_iter = ws.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col)
+    else:
+        rows_iter = ws.iter_rows()
+    converted = 0
+    for row in rows_iter:
+        for cell in row:
+            if cell.data_type == "f":
+                cell.value = cached.get(cell.coordinate)
+                converted += 1
+    save_workbook_safe(wb, file_path)
+    logger.info("Converted %d formulas to values in %s!%s", converted, sheet_name, file_path)
+    return {"converted": converted, "sheet": sheet_name}

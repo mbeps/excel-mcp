@@ -192,6 +192,7 @@ def loan_amortization(
     annual_rate: float,
     years: int,
     payments_per_year: int = 12,
+    max_periods: int | None = None,
 ) -> dict:
     """Generate a loan amortization schedule."""
     periodic_rate = annual_rate / payments_per_year
@@ -202,14 +203,14 @@ def loan_amortization(
     balance = principal
     total_interest = 0.0
 
-    max_periods = min(total_periods, 24)
+    periods_to_show = total_periods if max_periods is None else min(max_periods, total_periods)
     for period in range(1, total_periods + 1):
         interest = balance * periodic_rate
         principal_paid = payment - interest
         balance -= principal_paid
         total_interest += interest
 
-        if period <= max_periods:
+        if period <= periods_to_show:
             schedule.append(
                 {
                     "period": period,
@@ -227,14 +228,17 @@ def loan_amortization(
         payment,
         total_interest,
     )
-    return {
+    result: dict = {
         "monthly_payment": round(payment, 2),
         "total_interest": round(total_interest, 2),
         "total_paid": round(total_paid, 2),
         "total_periods": total_periods,
-        "periods_shown": max_periods,
+        "periods_shown": periods_to_show,
         "schedule": schedule,
     }
+    if max_periods is not None and max_periods < total_periods:
+        result["truncated"] = True
+    return result
 
 
 def dcf_analysis(
@@ -656,8 +660,14 @@ def break_even_analysis(
     price_per_unit: selling price per unit
     variable_cost_per_unit: variable cost per unit
     """
+    if fixed_costs < 0:
+        raise ValueError("fixed_costs must be non-negative")
+    if price_per_unit <= 0:
+        raise ValueError("price_per_unit must be positive")
+    if variable_cost_per_unit < 0:
+        raise ValueError("variable_cost_per_unit must be non-negative")
     if price_per_unit <= variable_cost_per_unit:
-        raise ValueError("Price must exceed variable cost per unit")
+        raise ValueError("price_per_unit must be greater than variable_cost_per_unit")
 
     contribution_margin = price_per_unit - variable_cost_per_unit
     contribution_margin_ratio = contribution_margin / price_per_unit

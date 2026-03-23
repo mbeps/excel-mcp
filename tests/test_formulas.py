@@ -3,6 +3,7 @@ from __future__ import annotations
 import openpyxl
 
 from mcp_server.tools.formulas import (
+    convert_formulas_to_values,
     list_formulas,
     set_array_formula,
     set_formula,
@@ -64,3 +65,40 @@ def test_list_formulas(sample_xlsx: str) -> None:
 def test_list_formulas_empty(empty_xlsx: str) -> None:
     result = list_formulas(empty_xlsx, "Sheet1")
     assert result == []
+
+
+def test_list_formulas_pattern(tmp_path: object) -> None:
+    fp = str(tmp_path / "pattern.xlsx")  # type: ignore[operator]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws["A1"] = "=SUM(B1:B5)"
+    ws["A2"] = '=IF(B2>0,"yes","no")'
+    wb.save(fp)
+    wb.close()
+
+    result = list_formulas(fp, "Sheet1", pattern="SUM")
+    assert len(result) == 1
+    assert result[0]["cell_ref"] == "A1"
+    assert "SUM" in result[0]["formula"]
+
+
+def test_convert_formulas_to_values(tmp_path: object) -> None:
+    fp = str(tmp_path / "convert.xlsx")  # type: ignore[operator]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws["A1"] = "=1+2"
+    wb.save(fp)
+    wb.close()
+
+    result = convert_formulas_to_values(fp, "Sheet1")
+    assert result["converted"] == 1
+    assert result["sheet"] == "Sheet1"
+
+    # Verify the cell no longer holds a formula (openpyxl-written formulas have no
+    # cached result, so the value becomes None, but data_type must not be 'f')
+    wb2 = openpyxl.load_workbook(fp)
+    ws2 = wb2["Sheet1"]
+    assert ws2["A1"].data_type != "f"
+    wb2.close()

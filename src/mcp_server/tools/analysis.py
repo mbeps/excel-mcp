@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import re
 from logging import Logger
 
 import openpyxl
@@ -36,6 +37,7 @@ def filter_data(
     operator: str,
     value: str | int | float,
     has_header: bool = True,
+    case_sensitive: bool = False,
 ) -> dict:
     """Filter rows by a column condition."""
     if operator not in FILTER_OPERATORS:
@@ -59,11 +61,19 @@ def filter_data(
     elif operator == "<=":
         mask = col <= value
     elif operator == "contains":
-        mask = col.astype(str).str.contains(str(value), case=False, na=False)
+        mask = col.astype(str).str.contains(str(value), case=case_sensitive, na=False)
     elif operator == "startswith":
-        mask = col.astype(str).str.startswith(str(value), na=False)
+        sv = str(value)
+        if not case_sensitive:
+            mask = col.astype(str).str.lower().str.startswith(sv.lower(), na=False)
+        else:
+            mask = col.astype(str).str.startswith(sv, na=False)
     else:  # endswith
-        mask = col.astype(str).str.endswith(str(value), na=False)
+        sv = str(value)
+        if not case_sensitive:
+            mask = col.astype(str).str.lower().str.endswith(sv.lower(), na=False)
+        else:
+            mask = col.astype(str).str.endswith(sv, na=False)
 
     matched = df[mask]
     return {
@@ -71,6 +81,84 @@ def filter_data(
         "total_rows": len(df),
         "matched_count": len(matched),
         "headers": list(df.columns),
+    }
+
+
+def filter_data_advanced(
+    file_path: str,
+    sheet_name: str,
+    conditions: list[dict],
+    logic: str = "AND",
+    output_sheet: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Multi-condition AND/OR filtering."""
+    if logic not in ("AND", "OR"):
+        raise ValueError(f"Logic must be 'AND' or 'OR', got '{logic}'")
+    if not conditions:
+        raise ValueError("At least one condition is required")
+
+    from mcp_server.utils.excel_helpers import read_sheet_df
+
+    df = read_sheet_df(file_path, sheet_name, header_row=header_row)
+
+    masks = []
+    for cond in conditions:
+        col_name = cond["column"]
+        operator = cond["operator"]
+        value = cond["value"]
+
+        if operator not in FILTER_OPERATORS:
+            raise ValueError(f"Unsupported operator '{operator}'. Allowed: {FILTER_OPERATORS}")
+        if col_name not in df.columns:
+            raise ValueError(f"Column '{col_name}' not found. Available: {list(df.columns)}")
+
+        col = df[col_name]
+        if operator == "==":
+            mask = col == value
+        elif operator == "!=":
+            mask = col != value
+        elif operator == ">":
+            mask = col > value
+        elif operator == "<":
+            mask = col < value
+        elif operator == ">=":
+            mask = col >= value
+        elif operator == "<=":
+            mask = col <= value
+        elif operator == "contains":
+            mask = col.astype(str).str.contains(str(value), case=False, na=False)
+        elif operator == "startswith":
+            mask = col.astype(str).str.startswith(str(value), na=False)
+        else:  # endswith
+            mask = col.astype(str).str.endswith(str(value), na=False)
+        masks.append(mask)
+
+    combined = masks[0]
+    for m in masks[1:]:
+        combined = (combined & m) if logic == "AND" else (combined | m)
+
+    matched = df[combined]
+
+    if output_sheet:
+        wb = load_workbook_safe(file_path)
+        if output_sheet in wb.sheetnames:
+            ws = wb[output_sheet]
+            for row in ws.iter_rows():
+                for cell in row:
+                    cell.value = None
+        else:
+            ws = wb.create_sheet(output_sheet)
+        for c_idx, col_name in enumerate(matched.columns, start=1):
+            ws.cell(row=1, column=c_idx, value=col_name)
+        for r_idx, row_data in enumerate(matched.values.tolist(), start=2):
+            for c_idx, val in enumerate(row_data, start=1):
+                ws.cell(row=r_idx, column=c_idx, value=val)
+        save_workbook_safe(wb, file_path)
+
+    return {
+        "rows": len(matched),
+        "data": matched.values.tolist()[:100],
     }
 
 
@@ -208,12 +296,24 @@ def profile_data(file_path: str, sheet_name: str) -> dict:
         desc = numeric_cols.describe()
         summary = {col: desc[col].to_dict() for col in desc.columns}
 
+    cat_cols = df.select_dtypes(exclude="number")
+    categorical: dict = {}
+    for col in cat_cols.columns:
+        vc = df[col].value_counts()
+        categorical[col] = {
+            "unique_count": int(df[col].nunique()),
+            "top_value": str(vc.index[0]) if len(vc) > 0 else None,
+            "top_count": int(vc.iloc[0]) if len(vc) > 0 else None,
+            "null_count": int(df[col].isna().sum()),
+        }
+
     return {
         "columns": [{"name": col, "dtype": str(df[col].dtype)} for col in df.columns],
         "row_count": len(df),
         "missing_values": missing,
         "duplicates": int(df.duplicated().sum()),
         "summary_statistics": summary,
+        "categorical_columns": categorical,
     }
 
 
@@ -223,6 +323,7 @@ def search_replace(
     search_value: str,
     replace_value: str,
     cell_range: str | None = None,
+    use_regex: bool = False,
 ) -> str:
     """Find and replace values in a sheet or specific range."""
     wb = load_workbook_safe(file_path)
@@ -244,9 +345,14 @@ def search_replace(
 
     for row in cells:
         for cell in row:
-            if cell.value is not None and str(cell.value) == search_value:
-                cell.value = replace_value
-                count += 1
+            if cell.value is not None:
+                if use_regex:
+                    if re.search(search_value, str(cell.value)):
+                        cell.value = re.sub(search_value, replace_value, str(cell.value))
+                        count += 1
+                elif str(cell.value) == str(search_value):
+                    cell.value = replace_value
+                    count += 1
 
     save_workbook_safe(wb, file_path)
     logger.info("Replaced %d occurrences of '%s' in %s!%s", count, search_value, sheet_name, file_path)
@@ -372,7 +478,7 @@ def transpose_data(
 ) -> str:
     """Transpose data (rows <-> columns) and write back."""
     df = _read_sheet_df(file_path, sheet_name, has_header)
-    transposed = df.T.reset_index()
+    transposed = df.T
 
     target_sheet = output_sheet or sheet_name
     wb = load_workbook_safe(file_path)
@@ -385,11 +491,14 @@ def transpose_data(
     else:
         ws = wb.create_sheet(target_sheet)
 
-    for c_idx, col_val in enumerate(transposed.columns, start=1):
+    # Row 1: original row indices as column headers (first cell left blank)
+    for c_idx, col_val in enumerate(transposed.columns.tolist(), start=2):
         ws.cell(row=1, column=c_idx, value=col_val)
 
-    for r_idx, row_data in enumerate(transposed.values.tolist(), start=2):
-        for c_idx, val in enumerate(row_data, start=1):
+    # Rows 2+: original column name in first cell, transposed values after
+    for r_idx, (row_label, row_data) in enumerate(transposed.iterrows(), start=2):
+        ws.cell(row=r_idx, column=1, value=row_label)
+        for c_idx, val in enumerate(row_data.tolist(), start=2):
             ws.cell(row=r_idx, column=c_idx, value=val)
 
     save_workbook_safe(wb, file_path)

@@ -31,6 +31,9 @@ from mcp_server.tools.analysis import (
     filter_data as _filter_data,
 )
 from mcp_server.tools.analysis import (
+    filter_data_advanced as _filter_data_advanced,
+)
+from mcp_server.tools.analysis import (
     find_cells_by_format as _find_cells_by_format,
 )
 from mcp_server.tools.analysis import (
@@ -74,6 +77,9 @@ from mcp_server.tools.cell_ops import (
 )
 from mcp_server.tools.cell_ops import (
     read_cell as _read_cell,
+)
+from mcp_server.tools.cell_ops import (
+    read_ranges_batch as _read_ranges_batch,
 )
 from mcp_server.tools.cell_ops import (
     read_cell_detailed as _read_cell_detailed,
@@ -124,6 +130,12 @@ from mcp_server.tools.comments import (
     add_comment as _add_comment,
 )
 from mcp_server.tools.comments import (
+    add_comments_bulk as _add_comments_bulk,
+)
+from mcp_server.tools.comments import (
+    delete_comments_bulk as _delete_comments_bulk,
+)
+from mcp_server.tools.comments import (
     update_comment as _update_comment,
 )
 from mcp_server.tools.comments import (
@@ -161,6 +173,12 @@ from mcp_server.tools.conditional_formatting import (
 )
 from mcp_server.tools.csv_ops import (
     csv_to_xlsx as _csv_to_xlsx,
+)
+from mcp_server.tools.csv_ops import (
+    detect_csv_dialect as _detect_csv_dialect,
+)
+from mcp_server.tools.csv_ops import (
+    validate_csv as _validate_csv,
 )
 from mcp_server.tools.csv_ops import (
     read_csv_preview as _read_csv_preview,
@@ -250,6 +268,12 @@ from mcp_server.tools.formatting import (
     auto_fit_columns as _auto_fit_columns,
 )
 from mcp_server.tools.formatting import (
+    copy_formatting as _copy_formatting,
+)
+from mcp_server.tools.formatting import (
+    set_gradient_fill as _set_gradient_fill,
+)
+from mcp_server.tools.formatting import (
     format_cells as _format_cells,
 )
 from mcp_server.tools.formatting import (
@@ -274,6 +298,9 @@ from mcp_server.tools.formatting import (
     unmerge_cells as _unmerge_cells,
 )
 from mcp_server.tools.formulas import (
+    convert_formulas_to_values as _convert_formulas_to_values,
+)
+from mcp_server.tools.formulas import (
     list_formulas as _list_formulas,
 )
 from mcp_server.tools.formulas import (
@@ -290,6 +317,9 @@ from mcp_server.tools.formulas import (
 )
 from mcp_server.tools.hyperlinks import (
     add_hyperlink as _add_hyperlink,
+)
+from mcp_server.tools.hyperlinks import (
+    add_internal_hyperlink as _add_internal_hyperlink,
 )
 from mcp_server.tools.hyperlinks import (
     delete_hyperlink as _delete_hyperlink,
@@ -335,6 +365,12 @@ from mcp_server.tools.named_ranges import (
 )
 from mcp_server.tools.pivot_etl import (
     add_computed_column as _add_computed_column,
+)
+from mcp_server.tools.pivot_etl import (
+    append_datasets as _append_datasets,
+)
+from mcp_server.tools.pivot_etl import (
+    find_differences as _find_differences,
 )
 from mcp_server.tools.pivot_etl import (
     create_pivot_table as _create_pivot_table,
@@ -646,6 +682,18 @@ def update_comment(file_path: str, sheet_name: str, cell_ref: str, text: str, au
     return _update_comment(file_path, sheet_name, cell_ref, text, author)
 
 
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def add_comments_bulk(file_path: str, sheet_name: str, comments: list[dict]) -> dict:
+    """Add comments to multiple cells at once. Each entry: {cell, text, author (optional)}."""
+    return _add_comments_bulk(file_path, sheet_name, comments)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def delete_comments_bulk(file_path: str, sheet_name: str, cells: list[str]) -> dict:
+    """Delete comments from multiple cells at once."""
+    return _delete_comments_bulk(file_path, sheet_name, cells)
+
+
 # ---------------------------------------------------------------------------
 # --- Hyperlinks ---
 # ---------------------------------------------------------------------------
@@ -680,6 +728,19 @@ def delete_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> str:
 def list_hyperlinks(file_path: str, sheet_name: str) -> list[dict]:
     """List all hyperlinks in a sheet."""
     return _list_hyperlinks(file_path, sheet_name)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def add_internal_hyperlink(
+    file_path: str,
+    sheet_name: str,
+    cell: str,
+    target_sheet: str,
+    target_cell: str = "A1",
+    display_text: str | None = None,
+) -> str:
+    """Add a hyperlink that navigates to another sheet/cell within the same workbook."""
+    return _add_internal_hyperlink(file_path, sheet_name, cell, target_sheet, target_cell, display_text)
 
 
 # ---------------------------------------------------------------------------
@@ -1014,6 +1075,17 @@ def get_file_info(file_path: str) -> dict:
     return _get_file_info(file_path)
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def read_ranges_batch(
+    file_path: str,
+    sheet_name: str,
+    ranges: list[str],
+    include_empty: bool = True,
+) -> dict:
+    """Read multiple non-contiguous ranges in a single workbook load."""
+    return _read_ranges_batch(file_path, sheet_name, ranges, include_empty)
+
+
 # ---------------------------------------------------------------------------
 # --- Row & Column Operations ---
 # ---------------------------------------------------------------------------
@@ -1169,6 +1241,31 @@ def format_range_per_cell(
     return _format_range_per_cell(file_path, sheet_name, start_cell, styles)
 
 
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def set_gradient_fill(
+    file_path: str,
+    sheet_name: str,
+    cell_range: str,
+    color1: str,
+    color2: str,
+    gradient_type: str = "linear",
+    degree: float = 0.0,
+) -> str:
+    """Apply a gradient fill to a cell range. Colors are 6 or 8 hex characters (e.g. 'FF0000')."""
+    return _set_gradient_fill(file_path, sheet_name, cell_range, color1, color2, gradient_type, degree)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def copy_formatting(
+    file_path: str,
+    sheet_name: str,
+    source_cell: str,
+    target_range: str,
+) -> str:
+    """Copy cell formatting (font, fill, border, alignment, number format) to a target range."""
+    return _copy_formatting(file_path, sheet_name, source_cell, target_range)
+
+
 # ---------------------------------------------------------------------------
 # --- Formulas ---
 # ---------------------------------------------------------------------------
@@ -1204,6 +1301,16 @@ def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
     return _list_formulas(file_path, sheet_name)
 
 
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def convert_formulas_to_values(
+    file_path: str,
+    sheet_name: str,
+    cell_range: str | None = None,
+) -> dict:
+    """Replace formula cells with their cached calculated values. Returns {converted, sheet}."""
+    return _convert_formulas_to_values(file_path, sheet_name, cell_range)
+
+
 # ---------------------------------------------------------------------------
 # --- CSV Operations ---
 # ---------------------------------------------------------------------------
@@ -1229,6 +1336,23 @@ def xlsx_to_csv(
 ) -> str:
     """Export a worksheet to CSV."""
     return _xlsx_to_csv(file_path, sheet_name, output_path, delimiter, encoding)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def detect_csv_dialect(file_path: str, sample_bytes: int = 4096) -> dict:
+    """Auto-detect CSV delimiter, quote character, and encoding."""
+    return _detect_csv_dialect(file_path, sample_bytes)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def validate_csv(
+    file_path: str,
+    expected_columns: list[str] | None = None,
+    delimiter: str = ",",
+    encoding: str = "utf-8",
+) -> dict:
+    """Validate a CSV file's structure and optionally check expected columns."""
+    return _validate_csv(file_path, expected_columns, delimiter, encoding)
 
 
 # ---------------------------------------------------------------------------
@@ -1928,6 +2052,19 @@ def vlookup_helper(
     )
 
 
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def filter_data_advanced(
+    file_path: str,
+    sheet_name: str,
+    conditions: list[dict],
+    logic: str = "AND",
+    output_sheet: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Multi-condition AND/OR filtering. Each condition: {column, operator, value}."""
+    return _filter_data_advanced(file_path, sheet_name, conditions, logic, output_sheet, header_row)
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def find_cells_by_format(
     file_path: str,
@@ -2047,6 +2184,30 @@ def deduplicate_data(
 ) -> str:
     """Remove duplicate rows from a sheet. keep: 'first', 'last', or False."""
     return _deduplicate_data(file_path, sheet_name, columns, keep)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def append_datasets(
+    file_path: str,
+    source_sheet: str,
+    append_sheet: str,
+    output_sheet: str,
+    has_header: bool = True,
+) -> dict:
+    """Vertically concatenate two sheets and write the result to output_sheet."""
+    return _append_datasets(file_path, source_sheet, append_sheet, output_sheet, has_header)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def find_differences(
+    file_path: str,
+    sheet_a: str,
+    sheet_b: str,
+    key_columns: list[str],
+    output_sheet: str,
+) -> dict:
+    """Find rows present in sheet_a but not in sheet_b (by key columns) and write to output_sheet."""
+    return _find_differences(file_path, sheet_a, sheet_b, key_columns, output_sheet)
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from mcp_server.tools.cell_ops import (
     read_cell,
     read_file_chunked,
     read_range,
+    read_ranges_batch,
     write_cell,
     write_range,
 )
@@ -115,3 +116,22 @@ def test_validate_excel_range() -> None:
 
     result = validate_excel_range("ZZZ1")
     assert result["valid"] is False
+
+
+def test_read_ranges_batch(sample_xlsx: str) -> None:
+    """Test reading multiple non-contiguous ranges in a single workbook load."""
+    result = read_ranges_batch(sample_xlsx, "Sheet1", ["A1:B2", "C1:D1"])
+    assert "results" in result
+    assert "A1:B2" in result["results"]
+    assert "C1:D1" in result["results"]
+    # A1:B2 should have 2 rows, 2 cols
+    a1b2 = result["results"]["A1:B2"]
+    assert len(a1b2) == 2
+    assert len(a1b2[0]) == 2
+    assert a1b2[0][0] == "Name"
+    assert a1b2[0][1] == "Age"
+    # C1:D1 should have 1 row, 2 cols
+    c1d1 = result["results"]["C1:D1"]
+    assert len(c1d1) == 1
+    assert c1d1[0][0] == "City"
+    assert c1d1[0][1] == "Salary"

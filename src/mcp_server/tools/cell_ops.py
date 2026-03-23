@@ -448,3 +448,34 @@ def get_file_info(file_path: str) -> dict:
         }
     finally:
         wb.close()
+
+
+def read_ranges_batch(
+    file_path: str,
+    sheet_name: str,
+    ranges: list[str],
+    include_empty: bool = True,
+) -> dict:
+    """Read multiple non-contiguous ranges in a single workbook load."""
+    wb = load_workbook_safe(file_path, read_only=True, data_only=True)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        results: dict[str, list[list]] = {}
+        for range_str in ranges:
+            raw = ws[range_str]
+            # Single cell returns a Cell object; wrap it
+            if not isinstance(raw, tuple):
+                value = raw.value if raw.value is not None else ""
+                results[range_str] = [[value]]
+            else:
+                rows: list[list] = []
+                for row in raw:
+                    if isinstance(row, tuple):
+                        rows.append([c.value if c.value is not None else "" for c in row])
+                    else:
+                        rows.append([row.value if row.value is not None else ""])
+                results[range_str] = rows
+        logger.info("Read %d ranges from %s!%s", len(ranges), sheet_name, file_path)
+        return {"results": results}
+    finally:
+        wb.close()
