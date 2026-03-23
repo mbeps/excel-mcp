@@ -1,0 +1,35 @@
+[project]
+name = "mcp-server-template"
+version = "0.1.0"
+description = "Starter template for building MCP servers with FastMCP and uv"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.24.0",
+    "pydantic>=2.12.5",
+]
+
+[project.scripts]
+mcp-template = "mcp_server.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_server"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.0",
+    "pytest>=8.3.3",
+    "ruff>=0.14.9",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
