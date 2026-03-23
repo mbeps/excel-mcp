@@ -557,3 +557,175 @@ def vlookup_helper(
         "results": results,
         "output_file": output_file,
     }
+
+
+def find_cells_by_format(
+    file_path: str,
+    sheet_name: str,
+    bold: bool | None = None,
+    italic: bool | None = None,
+    fill_color: str | None = None,
+    font_color: str | None = None,
+    number_format: str | None = None,
+) -> list[dict]:
+    """Find cells matching specified formatting conditions.
+
+    At least one condition must be provided.
+    Returns list of {cell_ref, value, bold, italic, fill_color, font_color, number_format}.
+    """
+    if all(v is None for v in (bold, italic, fill_color, font_color, number_format)):
+        raise ValueError("At least one formatting condition must be specified.")
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+
+        results = []
+        for row in ws.iter_rows():
+            for cell in row:
+                font = cell.font
+                fill = cell.fill
+
+                if bold is not None and font.bold != bold:
+                    continue
+                if italic is not None and font.italic != italic:
+                    continue
+                if fill_color is not None:
+                    fg = fill.fgColor
+                    cell_color = fg.rgb if fg.type == "rgb" else str(fg.value or "")
+                    if fill_color.upper() not in cell_color.upper():
+                        continue
+                if font_color is not None:
+                    fc = font.color
+                    cell_font_color = (fc.rgb if fc and fc.type == "rgb" else "") or ""
+                    if font_color.upper() not in cell_font_color.upper():
+                        continue
+                if number_format is not None and number_format not in (cell.number_format or ""):
+                    continue
+
+                fg = fill.fgColor
+                cell_fill_rgb = fg.rgb if fg.type == "rgb" else str(fg.value or "")
+                fc = font.color
+                cell_font_rgb = (fc.rgb if fc and fc.type == "rgb" else "") or ""
+
+                results.append(
+                    {
+                        "cell_ref": cell.coordinate,
+                        "value": cell.value,
+                        "bold": font.bold,
+                        "italic": font.italic,
+                        "fill_color": cell_fill_rgb,
+                        "font_color": cell_font_rgb,
+                        "number_format": cell.number_format,
+                    }
+                )
+
+        logger.info("Found %d cells matching format criteria in %s!%s", len(results), sheet_name, file_path)
+        return results
+    finally:
+        wb.close()
+
+
+def normalize_data(
+    file_path: str,
+    sheet_name: str,
+    columns: list[str],
+    method: str = "min_max",
+    output_sheet: str | None = None,
+    has_header: bool = True,
+) -> str:
+    """Normalize numeric columns using min-max [0,1] or z-score normalization.
+
+    Writes normalized values back to the sheet (in-place or to output_sheet).
+    Returns a summary string.
+    """
+    if method not in ("min_max", "zscore"):
+        raise ValueError(f"Unsupported method '{method}'. Allowed: 'min_max', 'zscore'.")
+
+    df = _read_sheet_df(file_path, sheet_name, has_header)
+    for col in columns:
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' not found. Available: {list(df.columns)}")
+
+    normalized_cols = []
+    skipped_cols = []
+    for col in columns:
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            skipped_cols.append(col)
+            continue
+        if method == "min_max":
+            col_min = df[col].min()
+            col_max = df[col].max()
+            if col_max == col_min:
+                df[col] = 0.0
+            else:
+                df[col] = (df[col] - col_min) / (col_max - col_min)
+        else:  # zscore
+            col_mean = df[col].mean()
+            col_std = df[col].std()
+            if col_std == 0:
+                df[col] = 0.0
+            else:
+                df[col] = (df[col] - col_mean) / col_std
+        normalized_cols.append(col)
+
+    target_sheet = output_sheet or sheet_name
+    wb = load_workbook_safe(file_path)
+    try:
+        if target_sheet in wb.sheetnames:
+            ws = wb[target_sheet]
+            for row in ws.iter_rows():
+                for cell in row:
+                    cell.value = None
+        else:
+            ws = wb.create_sheet(target_sheet)
+
+        if has_header:
+            for c_idx, col_name in enumerate(df.columns, start=1):
+                ws.cell(row=1, column=c_idx, value=col_name)
+            for r_idx, row_data in enumerate(df.values.tolist(), start=2):
+                for c_idx, val in enumerate(row_data, start=1):
+                    ws.cell(row=r_idx, column=c_idx, value=val)
+        else:
+            for r_idx, row_data in enumerate(df.values.tolist(), start=1):
+                for c_idx, val in enumerate(row_data, start=1):
+                    ws.cell(row=r_idx, column=c_idx, value=val)
+
+        save_workbook_safe(wb, file_path)
+    finally:
+        wb.close()
+    logger.info("Normalized columns %s in '%s' using '%s'", normalized_cols, sheet_name, method)
+
+    parts = [f"Normalized {len(normalized_cols)} column(s) using '{method}': {normalized_cols}."]
+    if skipped_cols:
+        parts.append(f"Skipped non-numeric: {skipped_cols}.")
+    return " ".join(parts)
+
+
+def export_analysis(
+    data: list[dict] | list[list],
+    output_file: str,
+    sheet_name: str = "Analysis",
+    headers: list[str] | None = None,
+) -> str:
+    """Write analysis results (list of dicts or list of lists) to a new Excel file."""
+    validate_file_path(output_file, must_exist=False)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+
+    if data and isinstance(data[0], dict):
+        col_headers = headers or list(data[0].keys())
+        ws.append(col_headers)
+        for row in data:
+            ws.append([row.get(h) for h in col_headers])
+    else:
+        if headers:
+            ws.append(headers)
+        for row in data:
+            ws.append(list(row))
+
+    save_workbook_safe(wb, output_file)
+    logger.info("Exported %d rows to '%s'", len(data), output_file)
+    return output_file

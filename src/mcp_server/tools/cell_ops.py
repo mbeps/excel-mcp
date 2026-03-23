@@ -58,6 +58,7 @@ def read_range(
     show_formula: bool = False,
     show_style: bool = False,
     output_format: str = "json",
+    max_cells: int | None = None,
 ) -> dict:
     """Read a rectangular range and return rows as a list of lists.
 
@@ -65,13 +66,31 @@ def read_range(
         show_formula: When True, return stored formulas instead of values.
         show_style: When True, include style metadata per cell.
         output_format: 'json' (default) or 'html' for HTML table output.
+        max_cells: If set, cap total cells returned; excess rows are truncated.
     """
+    from openpyxl.utils import coordinate_to_tuple, get_column_letter
+
     wb = load_workbook_safe(file_path, read_only=not show_style)
     try:
         ws = get_sheet(wb, sheet_name)
+
+        start_r, start_c = coordinate_to_tuple(start_cell)
+        end_r, end_c = coordinate_to_tuple(end_cell)
+        total_rows_available = end_r - start_r + 1
+        col_count_available = end_c - start_c + 1
+        total_cells_available = total_rows_available * col_count_available
+
+        read_end_cell = end_cell
+        truncated = False
+        if max_cells is not None and total_cells_available > max_cells:
+            max_rows = max(1, max_cells // col_count_available)
+            new_end_r = start_r + max_rows - 1
+            read_end_cell = f"{get_column_letter(end_c)}{new_end_r}"
+            truncated = True
+
         rows: list[list] = []
         styles: list[list[dict]] = []
-        for row in ws[f"{start_cell}:{end_cell}"]:
+        for row in ws[f"{start_cell}:{read_end_cell}"]:
             row_values = []
             row_styles = []
             for cell in row:
@@ -133,6 +152,9 @@ def read_range(
 
         if show_style:
             result["styles"] = styles
+        result["truncated"] = truncated
+        if truncated:
+            result["total_cells_available"] = total_cells_available
         return result
     finally:
         wb.close()
@@ -257,11 +279,13 @@ def read_file_chunked(
     total_pages = math.ceil(total_rows / chunk_size) if chunk_size > 0 else 1
     current_page = (start_row // chunk_size) + 1 if chunk_size > 0 else 1
 
+    actual_chunk_size = len(chunk)
     return {
         "rows": chunk.to_dict(orient="records"),
         "chunk_start": start_row,
-        "chunk_size": len(chunk),
+        "chunk_size": actual_chunk_size,
         "has_more": has_more,
+        "next_start_row": start_row + actual_chunk_size if has_more else None,
         "next_offset": end_row if has_more else None,
         "total_rows": total_rows,
         "current_page": current_page,

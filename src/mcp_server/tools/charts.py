@@ -216,3 +216,64 @@ def update_chart_properties(
         return f"Updated chart {chart_index} in '{sheet_name}': {', '.join(updated)}."
     finally:
         wb.close()
+
+
+def add_chart_series(
+    file_path: str,
+    sheet_name: str,
+    chart_index: int,
+    data_range: str,
+    title_from_data: bool = True,
+) -> str:
+    """Add a new data series to an existing chart."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        charts = ws._charts
+        if not charts:
+            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
+        if chart_index < 0 or chart_index >= len(charts):
+            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
+
+        chart = charts[chart_index]
+        min_col, min_row, max_col, max_row = range_boundaries(data_range)
+        ref = Reference(ws, min_col=min_col, min_row=min_row, max_col=max_col, max_row=max_row)
+        try:
+            chart.add_data(ref, titles_from_data=title_from_data)
+        except Exception as exc:
+            raise ValueError(f"Cannot add series to chart type '{type(chart).__name__}': {exc}") from exc
+
+        save_workbook_safe(wb, file_path)
+        logger.info("Added series to chart %d in %s", chart_index, sheet_name)
+        return f"Added series from '{data_range}' to chart {chart_index} in '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def remove_chart_series(
+    file_path: str,
+    sheet_name: str,
+    chart_index: int,
+    series_index: int,
+) -> str:
+    """Remove a data series from an existing chart by series index."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        charts = ws._charts
+        if not charts:
+            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
+        if chart_index < 0 or chart_index >= len(charts):
+            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
+
+        chart = charts[chart_index]
+        series = chart.series
+        if series_index < 0 or series_index >= len(series):
+            raise ValueError(f"Series index {series_index} out of range (0-{len(series) - 1}).")
+
+        del series[series_index]
+        save_workbook_safe(wb, file_path)
+        logger.info("Removed series %d from chart %d in %s", series_index, chart_index, sheet_name)
+        return f"Removed series {series_index} from chart {chart_index} in '{sheet_name}'."
+    finally:
+        wb.close()

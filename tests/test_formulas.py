@@ -3,6 +3,7 @@ from __future__ import annotations
 import openpyxl
 
 from mcp_server.tools.formulas import (
+    list_formulas,
     set_array_formula,
     set_formula,
     set_formulas_batch,
@@ -50,3 +51,16 @@ def test_set_formulas_batch(sample_xlsx: str) -> None:
     assert ws["E2"].value == "=SUM(B2:D2)"
     assert ws["E3"].value == "=AVERAGE(B3:D3)"
     wb.close()
+
+
+def test_list_formulas(sample_xlsx: str) -> None:
+    set_formula(sample_xlsx, "Sheet1", "F1", "=SUM(A1:A5)")
+    result = list_formulas(sample_xlsx, "Sheet1")
+    assert isinstance(result, list)
+    assert any(r["cell_ref"] == "F1" for r in result)
+    assert any("SUM" in r["formula"] for r in result)
+
+
+def test_list_formulas_empty(empty_xlsx: str) -> None:
+    result = list_formulas(empty_xlsx, "Sheet1")
+    assert result == []

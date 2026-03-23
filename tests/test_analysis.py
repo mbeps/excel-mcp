@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import openpyxl
+import pandas as pd
+from openpyxl.styles import Font
+
 from mcp_server.tools.analysis import (
     aggregate_data,
     column_statistics,
+    export_analysis,
     filter_data,
+    find_cells_by_format,
     find_duplicates,
+    normalize_data,
     profile_data,
     search_replace,
     sort_data,
@@ -109,3 +116,54 @@ def test_vlookup_helper(tmp_path) -> None:
     assert result["matched"] == 3
     assert result["unmatched"] == 0
     assert len(result["results"]) == 3
+
+
+def test_find_cells_by_format(sample_xlsx: str) -> None:
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    ws["A1"].font = Font(bold=True)
+    wb.save(sample_xlsx)
+    wb.close()
+
+    result = find_cells_by_format(sample_xlsx, "Sheet1", bold=True)
+    assert any(r["cell_ref"] == "A1" for r in result)
+
+
+def test_find_cells_by_format_no_conditions(sample_xlsx: str) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="At least one"):
+        find_cells_by_format(sample_xlsx, "Sheet1")
+
+
+def test_normalize_data_min_max(sample_xlsx: str) -> None:
+    result = normalize_data(sample_xlsx, "Sheet1", columns=["Age"], method="min_max")
+    assert "normalized" in result.lower() or "Age" in result
+    df = pd.read_excel(sample_xlsx, sheet_name="Sheet1")
+    assert df["Age"].between(0, 1).all()
+
+
+def test_normalize_data_zscore(sample_xlsx: str) -> None:
+    result = normalize_data(sample_xlsx, "Sheet1", columns=["Salary"], method="zscore")
+    assert "normalized" in result.lower() or "Salary" in result
+    df = pd.read_excel(sample_xlsx, sheet_name="Sheet1")
+    # z-score of entire column should have mean ~0
+    assert abs(df["Salary"].mean()) < 1e-9
+
+
+def test_normalize_data_output_sheet(sample_xlsx: str) -> None:
+    normalize_data(sample_xlsx, "Sheet1", columns=["Age"], method="min_max", output_sheet="Normalized")
+    df = pd.read_excel(sample_xlsx, sheet_name="Normalized")
+    assert df["Age"].between(0, 1).all()
+
+
+def test_export_analysis(tmp_path: str) -> None:
+    output = tmp_path / "export.xlsx"
+    data = [{"Name": "Alice", "Score": 95}, {"Name": "Bob", "Score": 87}]
+    result = export_analysis(data, str(output))
+    assert str(output) in result or "export.xlsx" in result
+    wb = openpyxl.load_workbook(str(output))
+    ws = wb.active
+    assert ws["A1"].value == "Name"
+    assert ws["A2"].value == "Alice"
+    wb.close()

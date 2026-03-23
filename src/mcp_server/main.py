@@ -22,13 +22,22 @@ from mcp_server.tools.analysis import (
     create_histogram as _create_histogram,
 )
 from mcp_server.tools.analysis import (
+    export_analysis as _export_analysis,
+)
+from mcp_server.tools.analysis import (
     extract_unique_values as _extract_unique_values,
 )
 from mcp_server.tools.analysis import (
     filter_data as _filter_data,
 )
 from mcp_server.tools.analysis import (
+    find_cells_by_format as _find_cells_by_format,
+)
+from mcp_server.tools.analysis import (
     find_duplicates as _find_duplicates,
+)
+from mcp_server.tools.analysis import (
+    normalize_data as _normalize_data,
 )
 from mcp_server.tools.analysis import (
     profile_data as _profile_data,
@@ -82,6 +91,9 @@ from mcp_server.tools.cell_ops import (
     write_range as _write_range,
 )
 from mcp_server.tools.charts import (
+    add_chart_series as _add_chart_series,
+)
+from mcp_server.tools.charts import (
     create_chart as _create_chart,
 )
 from mcp_server.tools.charts import (
@@ -91,10 +103,22 @@ from mcp_server.tools.charts import (
     list_charts as _list_charts,
 )
 from mcp_server.tools.charts import (
+    remove_chart_series as _remove_chart_series,
+)
+from mcp_server.tools.charts import (
     update_chart_properties as _update_chart_properties,
 )
 from mcp_server.tools.cleaning import (
+    combine_columns as _combine_columns,
+)
+from mcp_server.tools.cleaning import (
     data_cleaner as _data_cleaner,
+)
+from mcp_server.tools.cleaning import (
+    detect_outliers as _detect_outliers,
+)
+from mcp_server.tools.cleaning import (
+    split_column as _split_column,
 )
 from mcp_server.tools.comments import (
     add_comment as _add_comment,
@@ -235,6 +259,9 @@ from mcp_server.tools.formatting import (
     unmerge_cells as _unmerge_cells,
 )
 from mcp_server.tools.formulas import (
+    list_formulas as _list_formulas,
+)
+from mcp_server.tools.formulas import (
     set_array_formula as _set_array_formula,
 )
 from mcp_server.tools.formulas import (
@@ -361,6 +388,9 @@ from mcp_server.tools.workbook import (
     write_multi_sheet as _write_multi_sheet,
 )
 from mcp_server.tools.worksheet_ops import (
+    delete_page_break as _delete_page_break,
+)
+from mcp_server.tools.worksheet_ops import (
     freeze_panes as _freeze_panes,
 )
 from mcp_server.tools.worksheet_ops import (
@@ -377,6 +407,12 @@ from mcp_server.tools.worksheet_ops import (
 )
 from mcp_server.tools.worksheet_ops import (
     hide_sheet as _hide_sheet,
+)
+from mcp_server.tools.worksheet_ops import (
+    insert_page_break as _insert_page_break,
+)
+from mcp_server.tools.worksheet_ops import (
+    list_page_breaks as _list_page_breaks,
 )
 from mcp_server.tools.worksheet_ops import (
     move_sheet as _move_sheet,
@@ -398,6 +434,9 @@ from mcp_server.tools.worksheet_ops import (
 )
 from mcp_server.tools.worksheet_ops import (
     set_print_area as _set_print_area,
+)
+from mcp_server.tools.worksheet_ops import (
+    set_print_titles as _set_print_titles,
 )
 from mcp_server.tools.worksheet_ops import (
     set_sheet_tab_color as _set_sheet_tab_color,
@@ -783,6 +822,51 @@ def set_header_footer(
     )
 
 
+@mcp.tool()
+def insert_page_break(
+    file_path: str,
+    sheet_name: str,
+    position: int,
+    break_type: str = "row",
+) -> str:
+    """Insert a page break before the given row or column position (1-based).
+    break_type: 'row' for horizontal break, 'column' for vertical break.
+    """
+    return _insert_page_break(file_path, sheet_name, position, break_type)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def delete_page_break(
+    file_path: str,
+    sheet_name: str,
+    position: int,
+    break_type: str = "row",
+) -> str:
+    """Delete a page break at the given row or column position."""
+    return _delete_page_break(file_path, sheet_name, position, break_type)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def list_page_breaks(file_path: str, sheet_name: str) -> dict:
+    """List all page breaks in a sheet. Returns {row_breaks: [...], col_breaks: [...]}."""
+    return _list_page_breaks(file_path, sheet_name)
+
+
+@mcp.tool()
+def set_print_titles(
+    file_path: str,
+    sheet_name: str,
+    title_rows: str | None = None,
+    title_cols: str | None = None,
+) -> str:
+    """Set rows/columns to repeat on each printed page.
+    title_rows: e.g. '1:2' to repeat rows 1 and 2.
+    title_cols: e.g. 'A:B' to repeat columns A and B.
+    At least one must be provided.
+    """
+    return _set_print_titles(file_path, sheet_name, title_rows, title_cols)
+
+
 # ---------------------------------------------------------------------------
 # --- Cell Operations ---
 # ---------------------------------------------------------------------------
@@ -814,13 +898,15 @@ def read_range(
     show_formula: bool = False,
     show_style: bool = False,
     output_format: str = "json",
+    max_cells: int | None = None,
 ) -> dict:
     """Read a rectangular range.
 
     Use show_formula=True for formulas, show_style=True for formatting,
     output_format='html' for HTML table.
+    Set max_cells to cap the number of cells returned (adds truncated/total_cells_available fields).
     """
-    return _read_range(file_path, sheet_name, start_cell, end_cell, show_formula, show_style, output_format)
+    return _read_range(file_path, sheet_name, start_cell, end_cell, show_formula, show_style, output_format, max_cells)
 
 
 @mcp.tool()
@@ -1065,6 +1151,12 @@ def validate_formula_syntax(formula: str) -> dict:
 def set_formulas_batch(file_path: str, sheet_name: str, formulas: dict[str, str]) -> str:
     """Set multiple formulas at once. Keys are cell refs, values are formulas."""
     return _set_formulas_batch(file_path, sheet_name, formulas)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
+    """List all cells containing formulas in a sheet. Returns [{cell_ref, formula}]."""
+    return _list_formulas(file_path, sheet_name)
 
 
 # ---------------------------------------------------------------------------
@@ -1452,6 +1544,29 @@ def update_chart_properties(
     )
 
 
+@mcp.tool()
+def add_chart_series(
+    file_path: str,
+    sheet_name: str,
+    chart_index: int,
+    data_range: str,
+    title_from_data: bool = True,
+) -> str:
+    """Add a new data series to an existing chart from a data range."""
+    return _add_chart_series(file_path, sheet_name, chart_index, data_range, title_from_data)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def remove_chart_series(
+    file_path: str,
+    sheet_name: str,
+    chart_index: int,
+    series_index: int,
+) -> str:
+    """Remove a data series from an existing chart by its zero-based series index."""
+    return _remove_chart_series(file_path, sheet_name, chart_index, series_index)
+
+
 # ---------------------------------------------------------------------------
 # --- Images ---
 # ---------------------------------------------------------------------------
@@ -1725,6 +1840,51 @@ def vlookup_helper(
     )
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def find_cells_by_format(
+    file_path: str,
+    sheet_name: str,
+    bold: bool | None = None,
+    italic: bool | None = None,
+    fill_color: str | None = None,
+    font_color: str | None = None,
+    number_format: str | None = None,
+) -> list[dict]:
+    """Find cells matching specified formatting conditions (bold, italic, fill color, font color, number format).
+    All specified conditions are ANDed. At least one must be provided.
+    Returns [{cell_ref, value, bold, italic, fill_color, font_color, number_format}].
+    """
+    return _find_cells_by_format(file_path, sheet_name, bold, italic, fill_color, font_color, number_format)
+
+
+@mcp.tool()
+def normalize_data(
+    file_path: str,
+    sheet_name: str,
+    columns: list[str],
+    method: str = "min_max",
+    output_sheet: str | None = None,
+    has_header: bool = True,
+) -> str:
+    """Normalize numeric columns using 'min_max' [0,1] or 'zscore' normalization.
+    Writes results in-place or to output_sheet if specified.
+    """
+    return _normalize_data(file_path, sheet_name, columns, method, output_sheet, has_header)
+
+
+@mcp.tool()
+def export_analysis(
+    data: list[dict] | list[list],
+    output_file: str,
+    sheet_name: str = "Analysis",
+    headers: list[str] | None = None,
+) -> str:
+    """Export analysis results (list of dicts or list of lists) directly to a new Excel file.
+    For list[dict], dict keys become column headers automatically.
+    """
+    return _export_analysis(data, output_file, sheet_name, headers)
+
+
 # ---------------------------------------------------------------------------
 # --- Pivot & ETL ---
 # ---------------------------------------------------------------------------
@@ -1911,6 +2071,58 @@ def trend_analysis(
 # ---------------------------------------------------------------------------
 # --- Data Cleaning ---
 # ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def split_column(
+    file_path: str,
+    sheet_name: str,
+    column: str,
+    delimiter: str = ",",
+    new_column_names: list[str] | None = None,
+    drop_original: bool = True,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Split a text column into multiple columns by delimiter."""
+    return _split_column(
+        file_path, sheet_name, column, delimiter, new_column_names, drop_original, output_file, header_row
+    )
+
+
+@mcp.tool()
+def combine_columns(
+    file_path: str,
+    sheet_name: str,
+    columns: list[str],
+    new_column_name: str,
+    separator: str = " ",
+    drop_originals: bool = False,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Concatenate multiple columns into one with a separator."""
+    return _combine_columns(
+        file_path, sheet_name, columns, new_column_name, separator, drop_originals, output_file, header_row
+    )
+
+
+@mcp.tool()
+def detect_outliers(
+    file_path: str,
+    sheet_name: str,
+    column: str,
+    method: str = "iqr",
+    threshold: float = 1.5,
+    action: str = "flag",
+    flag_column_name: str | None = None,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Detect outliers using IQR or z-score method. Action: 'flag' (add boolean column) or 'remove' (drop rows)."""
+    return _detect_outliers(
+        file_path, sheet_name, column, method, threshold, action, flag_column_name, output_file, header_row
+    )
 
 
 @mcp.tool()

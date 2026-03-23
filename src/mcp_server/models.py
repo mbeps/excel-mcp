@@ -143,6 +143,10 @@ class ChunkReadResult(BaseModel):
     chunk_start: int = Field(..., description="0-based starting row index of this chunk.")
     chunk_size: int = Field(..., description="Number of rows in this chunk.")
     has_more: bool = Field(..., description="Whether more rows remain after this chunk.")
+    next_start_row: int | None = Field(
+        None,
+        description="Row number to pass as start_row to get the next chunk; None if has_more=False.",
+    )
 
 
 # ── Input Models ─────────────────────────────────────────────────────────────

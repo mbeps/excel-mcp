@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import openpyxl
 
-from mcp_server.tools.charts import create_chart, list_charts
+from mcp_server.tools.charts import add_chart_series, create_chart, list_charts, remove_chart_series
 from mcp_server.tools.conditional_formatting import add_highlight_rule, apply_conditional_formatting
 from mcp_server.tools.data_validation import add_dropdown_validation, add_numeric_validation, list_validations
 from mcp_server.tools.protection import protect_sheet, unprotect_sheet
@@ -94,3 +94,17 @@ def test_list_validations_resolve_sources(sample_xlsx: str) -> None:
     validations = list_validations(sample_xlsx, "Sheet1", resolve_sources=True)
     assert len(validations) >= 1
     assert validations[0]["type"] == "list"
+
+
+def test_add_chart_series(sample_xlsx: str) -> None:
+    create_chart(sample_xlsx, "Sheet1", "A1:B6", "column", "E1", "Test")
+    result = add_chart_series(sample_xlsx, "Sheet1", 0, "C1:C6")
+    assert "Added" in result or "series" in result.lower()
+
+
+def test_remove_chart_series(sample_xlsx: str) -> None:
+    create_chart(sample_xlsx, "Sheet1", "A1:C6", "column", "E1", "Test")
+    charts = list_charts(sample_xlsx, "Sheet1")
+    assert len(charts) == 1
+    result = remove_chart_series(sample_xlsx, "Sheet1", 0, 0)
+    assert "Removed" in result or "series" in result.lower()

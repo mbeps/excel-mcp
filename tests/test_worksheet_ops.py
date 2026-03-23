@@ -3,12 +3,15 @@ from __future__ import annotations
 import openpyxl
 
 from mcp_server.tools.worksheet_ops import (
+    delete_page_break,
     freeze_panes,
     group_columns,
     group_rows,
     hide_columns,
     hide_rows,
     hide_sheet,
+    insert_page_break,
+    list_page_breaks,
     move_sheet,
     remove_auto_filter,
     set_auto_filter,
@@ -16,6 +19,7 @@ from mcp_server.tools.worksheet_ops import (
     set_page_margins,
     set_page_setup,
     set_print_area,
+    set_print_titles,
     set_sheet_tab_color,
     set_zoom,
     show_gridlines,
@@ -205,3 +209,92 @@ def test_set_header_footer(sample_xlsx: str) -> None:
     set_header_footer(sample_xlsx, "Sheet1", header_center="My Report")
     wb = openpyxl.load_workbook(sample_xlsx)
     assert wb["Sheet1"].oddHeader.center.text == "My Report"
+
+
+def test_insert_page_break_row(sample_xlsx: str) -> None:
+    result = insert_page_break(sample_xlsx, "Sheet1", 5)
+    assert "Page break inserted" in result
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    assert any(b.id == 5 for b in ws.row_breaks.brk)
+    wb.close()
+
+
+def test_insert_page_break_column(sample_xlsx: str) -> None:
+    result = insert_page_break(sample_xlsx, "Sheet1", 3, break_type="column")
+    assert "Page break inserted" in result
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    assert any(b.id == 3 for b in ws.col_breaks.brk)
+    wb.close()
+
+
+def test_insert_page_break_invalid_type(sample_xlsx: str) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="break_type"):
+        insert_page_break(sample_xlsx, "Sheet1", 5, break_type="diagonal")
+
+
+def test_delete_page_break(sample_xlsx: str) -> None:
+    insert_page_break(sample_xlsx, "Sheet1", 5)
+    result = delete_page_break(sample_xlsx, "Sheet1", 5)
+    assert "deleted" in result
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    assert not any(b.id == 5 for b in ws.row_breaks.brk)
+    wb.close()
+
+
+def test_delete_page_break_column(sample_xlsx: str) -> None:
+    insert_page_break(sample_xlsx, "Sheet1", 3, break_type="column")
+    delete_page_break(sample_xlsx, "Sheet1", 3, break_type="column")
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    assert not any(b.id == 3 for b in ws.col_breaks.brk)
+    wb.close()
+
+
+def test_list_page_breaks(sample_xlsx: str) -> None:
+    insert_page_break(sample_xlsx, "Sheet1", 4)
+    insert_page_break(sample_xlsx, "Sheet1", 8)
+    insert_page_break(sample_xlsx, "Sheet1", 2, break_type="column")
+    result = list_page_breaks(sample_xlsx, "Sheet1")
+    assert "row_breaks" in result
+    assert "col_breaks" in result
+    assert 4 in result["row_breaks"]
+    assert 8 in result["row_breaks"]
+    assert 2 in result["col_breaks"]
+
+
+def test_set_print_titles_rows(sample_xlsx: str) -> None:
+    result = set_print_titles(sample_xlsx, "Sheet1", title_rows="1:2")
+    assert "Print titles set" in result
+    wb = openpyxl.load_workbook(sample_xlsx)
+    assert wb["Sheet1"].print_title_rows == "$1:$2"
+    wb.close()
+
+
+def test_set_print_titles_cols(sample_xlsx: str) -> None:
+    result = set_print_titles(sample_xlsx, "Sheet1", title_cols="A:B")
+    assert "Print titles set" in result
+    wb = openpyxl.load_workbook(sample_xlsx)
+    assert wb["Sheet1"].print_title_cols == "$A:$B"
+    wb.close()
+
+
+def test_set_print_titles_both(sample_xlsx: str) -> None:
+    result = set_print_titles(sample_xlsx, "Sheet1", title_rows="1:1", title_cols="A:A")
+    assert "rows '1:1'" in result
+    assert "cols 'A:A'" in result
+    wb = openpyxl.load_workbook(sample_xlsx)
+    assert wb["Sheet1"].print_title_rows == "$1:$1"
+    assert wb["Sheet1"].print_title_cols == "$A:$A"
+    wb.close()
+
+
+def test_set_print_titles_no_args(sample_xlsx: str) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="At least one"):
+        set_print_titles(sample_xlsx, "Sheet1")

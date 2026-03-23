@@ -75,3 +75,22 @@ def set_formulas_batch(file_path: str, sheet_name: str, formulas: dict[str, str]
     count = len(formulas)
     logger.info("Set %d formulas in %s!%s", count, file_path, sheet_name)
     return f"Set {count} formulas in '{sheet_name}'."
+
+
+def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
+    """List all cells containing formulas in a sheet.
+
+    Returns list of {cell_ref: str, formula: str}.
+    """
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        results = []
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.startswith("="):
+                    results.append({"cell_ref": cell.coordinate, "formula": cell.value})
+        logger.info("Found %d formulas in %s!%s", len(results), sheet_name, file_path)
+        return results
+    finally:
+        wb.close()

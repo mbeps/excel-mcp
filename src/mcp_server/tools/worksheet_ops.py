@@ -5,6 +5,7 @@ from __future__ import annotations
 from logging import Logger
 
 from openpyxl.worksheet.page import PageMargins
+from openpyxl.worksheet.pagebreak import Break
 
 from mcp_server.utils.excel_helpers import (
     col_letter_to_index,
@@ -414,5 +415,119 @@ def set_header_footer(
         save_workbook_safe(wb, file_path)
         logger.info("Set header/footer on '%s' in %s", sheet_name, file_path)
         return f"Header/footer configured for sheet '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def insert_page_break(
+    file_path: str,
+    sheet_name: str,
+    position: int,
+    break_type: str = "row",
+) -> str:
+    """Insert a page break before the given row or column (1-based index).
+
+    break_type: 'row' for horizontal break, 'column' for vertical break.
+    """
+    if break_type not in ("row", "column"):
+        raise ValueError("break_type must be 'row' or 'column'.")
+    if position < 1:
+        raise ValueError(f"position must be a positive integer, got {position}.")
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if break_type == "row":
+            ws.row_breaks.append(Break(id=position))
+        else:
+            ws.col_breaks.append(Break(id=position))
+        save_workbook_safe(wb, file_path)
+        logger.info(
+            "Inserted %s page break at %d in '%s' of %s",
+            break_type,
+            position,
+            sheet_name,
+            file_path,
+        )
+        return f"Page break inserted at {break_type} {position} in sheet '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def delete_page_break(
+    file_path: str,
+    sheet_name: str,
+    position: int,
+    break_type: str = "row",
+) -> str:
+    """Delete a page break at the given row or column position."""
+    if break_type not in ("row", "column"):
+        raise ValueError("break_type must be 'row' or 'column'.")
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if break_type == "row":
+            ws.row_breaks.brk = [b for b in ws.row_breaks.brk if b.id != position]
+        else:
+            ws.col_breaks.brk = [b for b in ws.col_breaks.brk if b.id != position]
+        save_workbook_safe(wb, file_path)
+        logger.info(
+            "Deleted %s page break at %d in '%s' of %s",
+            break_type,
+            position,
+            sheet_name,
+            file_path,
+        )
+        return f"Page break at {break_type} {position} deleted from sheet '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def list_page_breaks(file_path: str, sheet_name: str) -> dict:
+    """List all page breaks in a sheet.
+
+    Returns dict with 'row_breaks' and 'col_breaks' as lists of positions.
+    """
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        result = {
+            "row_breaks": [b.id for b in ws.row_breaks.brk],
+            "col_breaks": [b.id for b in ws.col_breaks.brk],
+        }
+        logger.info("Listed page breaks in '%s' of %s", sheet_name, file_path)
+        return result
+    finally:
+        wb.close()
+
+
+def set_print_titles(
+    file_path: str,
+    sheet_name: str,
+    title_rows: str | None = None,
+    title_cols: str | None = None,
+) -> str:
+    """Set rows/columns to repeat on each printed page.
+
+    title_rows: row range string like '1:2' to repeat rows 1-2.
+    title_cols: column range string like 'A:B' to repeat columns A-B.
+    At least one of title_rows or title_cols must be provided.
+    """
+    if title_rows is None and title_cols is None:
+        raise ValueError("At least one of title_rows or title_cols must be provided.")
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if title_rows is not None:
+            ws.print_title_rows = title_rows
+        if title_cols is not None:
+            ws.print_title_cols = title_cols
+        save_workbook_safe(wb, file_path)
+        logger.info("Set print titles on '%s' in %s", sheet_name, file_path)
+        parts = []
+        if title_rows is not None:
+            parts.append(f"rows '{title_rows}'")
+        if title_cols is not None:
+            parts.append(f"cols '{title_cols}'")
+        return f"Print titles set ({', '.join(parts)}) for sheet '{sheet_name}'."
     finally:
         wb.close()
