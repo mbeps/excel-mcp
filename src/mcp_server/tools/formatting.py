@@ -232,6 +232,68 @@ def list_merged_ranges(file_path: str, sheet_name: str) -> list[str]:
         wb.close()
 
 
+def format_range_per_cell(
+    file_path: str,
+    sheet_name: str,
+    start_cell: str,
+    styles: list[list[dict | None]],
+) -> str:
+    """Apply per-cell formatting using a 2D array of style dicts matching range dimensions."""
+    from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+
+        col_letter, start_row = coordinate_from_string(start_cell)
+        start_col = column_index_from_string(col_letter)
+
+        cells_formatted = 0
+        for row_offset, row_styles in enumerate(styles):
+            for col_offset, style in enumerate(row_styles):
+                if style is None:
+                    continue
+
+                cell = ws.cell(row=start_row + row_offset, column=start_col + col_offset)
+
+                if any(k in style for k in ("font_name", "font_size", "bold", "italic", "font_color")):
+                    cell.font = Font(
+                        name=style.get("font_name"),
+                        size=style.get("font_size"),
+                        bold=style.get("bold", False),
+                        italic=style.get("italic", False),
+                        color=style.get("font_color"),
+                    )
+
+                if "fill_color" in style:
+                    cell.fill = PatternFill(
+                        start_color=style["fill_color"],
+                        end_color=style["fill_color"],
+                        fill_type="solid",
+                    )
+
+                if "number_format" in style:
+                    cell.number_format = style["number_format"]
+
+                if any(k in style for k in ("horizontal_alignment", "vertical_alignment")):
+                    cell.alignment = Alignment(
+                        horizontal=style.get("horizontal_alignment"),
+                        vertical=style.get("vertical_alignment"),
+                    )
+
+                if "border_style" in style:
+                    side = Side(style=cast(Any, style["border_style"]))
+                    cell.border = Border(left=side, right=side, top=side, bottom=side)
+
+                cells_formatted += 1
+
+        save_workbook_safe(wb, file_path)
+        logger.info("Formatted %d cells in %s!%s", cells_formatted, file_path, sheet_name)
+        return f"Formatted {cells_formatted} cells starting at {start_cell} in '{sheet_name}'."
+    finally:
+        wb.close()
+
+
 def auto_fit_columns(file_path: str, sheet_name: str) -> str:
     """Auto-fit all column widths based on content length."""
     wb = load_workbook_safe(file_path)

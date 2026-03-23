@@ -86,3 +86,11 @@ def test_list_charts(sample_xlsx: str) -> None:
     charts = list_charts(sample_xlsx, "Sheet1")
     assert len(charts) == 1
     assert charts[0]["type"] == "BarChart"
+
+
+def test_list_validations_resolve_sources(sample_xlsx: str) -> None:
+    """Test list_validations with resolve_sources enabled."""
+    add_dropdown_validation(sample_xlsx, "Sheet1", "E2:E6", options=["Yes", "No"])
+    validations = list_validations(sample_xlsx, "Sheet1", resolve_sources=True)
+    assert len(validations) >= 1
+    assert validations[0]["type"] == "list"

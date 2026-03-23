@@ -5,6 +5,7 @@ from __future__ import annotations
 from logging import Logger
 
 from openpyxl import Workbook
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 from mcp_server.utils.excel_helpers import (
@@ -137,3 +138,57 @@ def copy_sheet(file_path: str, source_sheet: str, new_name: str) -> str:
     save_workbook_safe(wb, file_path)
     logger.info("Copied sheet '%s' as '%s' in %s", source_sheet, new_name, file_path)
     return f"Sheet '{source_sheet}' copied as '{new_name}'."
+
+
+def write_multi_sheet(
+    file_path: str,
+    sheets: list[dict],
+) -> dict:
+    """Create a new workbook with multiple named sheets, data, and headers in one call."""
+    validate_file_path(file_path, must_exist=False)
+    wb = Workbook()
+
+    # Remove the default sheet
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
+
+    summary: list[dict] = []
+    for sheet_def in sheets:
+        name = sheet_def["name"]
+        headers = sheet_def.get("headers")
+        data = sheet_def.get("data")
+        column_widths = sheet_def.get("column_widths")
+
+        ws = wb.create_sheet(title=name)
+        current_row = 1
+
+        if headers:
+            for col_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=current_row, column=col_idx, value=header)
+                cell.font = Font(bold=True)
+            current_row += 1
+
+        rows_written = 0
+        if data:
+            for row_data in data:
+                for col_idx, value in enumerate(row_data, start=1):
+                    ws.cell(row=current_row, column=col_idx, value=value)
+                current_row += 1
+                rows_written += 1
+
+        if column_widths:
+            for col_letter, width in column_widths.items():
+                ws.column_dimensions[col_letter.upper()].width = width
+
+        summary.append(
+            {
+                "name": name,
+                "header_count": len(headers) if headers else 0,
+                "row_count": rows_written,
+                "column_widths_set": list(column_widths.keys()) if column_widths else [],
+            }
+        )
+
+    save_workbook_safe(wb, file_path)
+    logger.info("Created multi-sheet workbook: %s with %d sheets", file_path, len(sheets))
+    return {"file_path": file_path, "sheets_created": summary}

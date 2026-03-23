@@ -113,21 +113,57 @@ def add_formula_validation(
         wb.close()
 
 
-def list_validations(file_path: str, sheet_name: str) -> list[dict]:
-    """List all data validations on a sheet."""
+def _resolve_range_values(ws: Any, formula: str) -> list | None:
+    """Resolve a range reference formula to actual cell values."""
+    from openpyxl.utils.cell import range_boundaries
+
+    ref = formula.lstrip("=").strip()
+    # Handle sheet-qualified references like Sheet1!$A$1:$A$5
+    if "!" in ref:
+        ref = ref.split("!", 1)[1]
+    ref = ref.replace("$", "")
+
+    try:
+        min_col, min_row, max_col, max_row = range_boundaries(ref)
+    except Exception:
+        return None
+
+    values = []
+    for row in range(min_row, max_row + 1):
+        for col in range(min_col, max_col + 1):
+            v = ws.cell(row=row, column=col).value
+            if v is not None:
+                values.append(v)
+    return values
+
+
+def list_validations(file_path: str, sheet_name: str, resolve_sources: bool = True) -> list[dict]:
+    """List all data validations on a sheet, optionally resolving dropdown range sources."""
     wb = load_workbook_safe(file_path, read_only=False)
     try:
         ws = get_sheet(wb, sheet_name)
-        return [
-            {
+        result = []
+        for dv in ws.data_validations.dataValidation:
+            entry: dict[str, Any] = {
                 "type": dv.type,
                 "formula1": dv.formula1,
                 "formula2": dv.formula2,
                 "ranges": str(dv.sqref),
                 "allow_blank": dv.allow_blank,
             }
-            for dv in ws.data_validations.dataValidation
-        ]
+
+            if (
+                resolve_sources
+                and dv.type == "list"
+                and dv.formula1
+                and (dv.formula1.startswith("=") or "$" in dv.formula1)
+            ):
+                resolved = _resolve_range_values(ws, dv.formula1)
+                if resolved is not None:
+                    entry["resolved_values"] = resolved
+
+            result.append(entry)
+        return result
     finally:
         wb.close()
 

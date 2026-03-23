@@ -59,3 +59,15 @@ def test_unmerge_cells(sample_xlsx: str) -> None:
 def test_auto_fit_columns(sample_xlsx: str) -> None:
     result = auto_fit_columns(sample_xlsx, "Sheet1")
     assert "Auto-fitted" in result
+
+
+def test_format_range_per_cell(sample_xlsx: str) -> None:
+    """Test applying per-cell 2D styles."""
+    from mcp_server.tools.formatting import format_range_per_cell
+
+    styles = [
+        [{"bold": True, "font_color": "FF0000"}, {"italic": True}],
+        [None, {"fill_color": "00FF00"}],
+    ]
+    result = format_range_per_cell(sample_xlsx, "Sheet1", "A1", styles)
+    assert "2" in result or "formatted" in result.lower()

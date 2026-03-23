@@ -46,9 +46,9 @@ def _validate_eval_expression(expression: str) -> None:
 
 
 def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
-    path = validate_file_path(file_path)
-    header = 0 if has_header else None
-    return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="openpyxl")
+    from mcp_server.utils.excel_helpers import read_sheet_df
+
+    return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
 
 def _write_df_to_sheet(wb, sheet_name: str, df: pd.DataFrame) -> None:

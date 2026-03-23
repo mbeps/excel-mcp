@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from logging import Logger
 from pathlib import Path
 
 import openpyxl
+import pandas as pd
 from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -65,3 +67,77 @@ def col_letter_to_index(letter: str) -> int:
 def index_to_col_letter(index: int) -> str:
     """Convert 1-based column index to letter(s). 1=A, 2=B, ..., 26=Z, 27=AA."""
     return get_column_letter(index)
+
+
+def read_sheet_df(file_path: str, sheet_name: str, header_row: int = 1) -> pd.DataFrame:
+    """Read a sheet into a pandas DataFrame.
+
+    Args:
+        header_row: 1-based row number of the header. 0 means no header.
+    """
+    path = validate_file_path(file_path)
+    header = header_row - 1 if header_row >= 1 else None
+    return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="openpyxl")
+
+
+_CELL_REF_RE = re.compile(r"^([A-Z]{1,3})(\d+)$", re.IGNORECASE)
+MAX_COL_INDEX = 16384  # XFD
+MAX_ROW = 1048576
+
+
+def _validate_single_cell(ref: str) -> dict:
+    """Validate a single cell reference like 'A1' or 'XFD1048576'."""
+    m = _CELL_REF_RE.match(ref)
+    if not m:
+        return {"valid": False, "message": f"Invalid cell reference format: '{ref}'"}
+    col_letters = m.group(1).upper()
+    row_num = int(m.group(2))
+    try:
+        col_idx = column_index_from_string(col_letters)
+    except ValueError:
+        return {"valid": False, "message": f"Invalid column letters: '{col_letters}'"}
+    if col_idx > MAX_COL_INDEX:
+        return {"valid": False, "message": f"Column '{col_letters}' exceeds max (XFD)"}
+    if row_num < 1 or row_num > MAX_ROW:
+        return {"valid": False, "message": f"Row {row_num} out of range (1-{MAX_ROW})"}
+    return {"valid": True, "column": col_letters, "row": row_num, "col_index": col_idx}
+
+
+def validate_excel_range(range_str: str) -> dict:
+    """Validate A1-style range notation.
+
+    Accepts single cell refs ('A1') and ranges ('A1:C10').
+    Returns dict with 'valid', 'message', and parsed info.
+    """
+    range_str = range_str.strip()
+    if not range_str:
+        return {"valid": False, "message": "Range string is empty"}
+
+    parts = range_str.split(":")
+    if len(parts) > 2:
+        return {"valid": False, "message": f"Invalid range format: '{range_str}'"}
+
+    start = _validate_single_cell(parts[0])
+    if not start["valid"]:
+        return start
+
+    if len(parts) == 1:
+        return {
+            "valid": True,
+            "message": "Valid single cell reference",
+            "start_cell": parts[0].upper(),
+            "end_cell": None,
+            "is_range": False,
+        }
+
+    end = _validate_single_cell(parts[1])
+    if not end["valid"]:
+        return end
+
+    return {
+        "valid": True,
+        "message": "Valid range",
+        "start_cell": parts[0].upper(),
+        "end_cell": parts[1].upper(),
+        "is_range": True,
+    }

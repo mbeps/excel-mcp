@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import difflib
 from logging import Logger
 
+import openpyxl
 import pandas as pd
+from scipy import stats
 
 from mcp_server.utils.excel_helpers import (
     get_sheet,
@@ -21,9 +24,9 @@ AGGREGATE_OPERATIONS = {"sum", "mean", "count", "min", "max", "median", "std"}
 
 
 def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
-    path = validate_file_path(file_path)
-    header = 0 if has_header else None
-    return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="openpyxl")
+    from mcp_server.utils.excel_helpers import read_sheet_df
+
+    return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
 
 def filter_data(
@@ -128,7 +131,7 @@ def column_statistics(file_path: str, sheet_name: str, column: str, has_header: 
         }
 
     desc = col.describe()
-    return {
+    result = {
         "column": column,
         "count": int(desc["count"]),
         "mean": float(desc["mean"]),
@@ -138,6 +141,16 @@ def column_statistics(file_path: str, sheet_name: str, column: str, has_header: 
         "std": float(desc["std"]),
         "sum_val": float(col.sum()),
     }
+
+    numeric_vals = col.dropna()
+    if len(numeric_vals) >= 3:
+        result["skewness"] = float(stats.skew(numeric_vals, bias=False))
+        result["kurtosis"] = float(stats.kurtosis(numeric_vals, bias=False))
+    else:
+        result["skewness"] = None
+        result["kurtosis"] = None
+
+    return result
 
 
 def aggregate_data(
@@ -400,4 +413,147 @@ def extract_unique_values(
         "column": column,
         "unique_values": unique,
         "count": len(unique),
+    }
+
+
+def vlookup_helper(
+    lookup_file: str,
+    data_file: str,
+    lookup_column: str,
+    data_key_column: str,
+    data_return_columns: list[str],
+    lookup_sheet: str = "Sheet1",
+    data_sheet: str = "Sheet1",
+    fuzzy: bool = False,
+    fuzzy_threshold: float = 0.8,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Cross-file VLOOKUP-like join with optional fuzzy string matching."""
+    from openpyxl.utils import column_index_from_string
+
+    # Load lookup workbook
+    lookup_wb = load_workbook_safe(lookup_file, read_only=True)
+    lookup_ws = get_sheet(lookup_wb, lookup_sheet)
+    lookup_col_idx = column_index_from_string(lookup_column)
+
+    # Extract lookup values (skip header row)
+    lookup_values: list[tuple[int, str | int | float | None]] = []
+    for row in lookup_ws.iter_rows(min_row=header_row + 1, max_row=lookup_ws.max_row):
+        cell = row[lookup_col_idx - 1] if lookup_col_idx - 1 < len(row) else None
+        if cell is not None:
+            lookup_values.append((cell.row, cell.value))
+    lookup_wb.close()
+
+    # Load data workbook
+    data_wb = load_workbook_safe(data_file, read_only=True)
+    data_ws = get_sheet(data_wb, data_sheet)
+    data_key_idx = column_index_from_string(data_key_column)
+    return_col_idxs = [column_index_from_string(c) for c in data_return_columns]
+
+    # Extract header names from the data file
+    header_cells = list(data_ws.iter_rows(min_row=header_row, max_row=header_row))[0]
+    return_headers = []
+    for idx in return_col_idxs:
+        if idx - 1 < len(header_cells) and header_cells[idx - 1].value is not None:
+            return_headers.append(str(header_cells[idx - 1].value))
+        else:
+            return_headers.append(f"Col_{idx}")
+
+    # Build data lookup index: key_value -> list of return-column values
+    data_rows: list[tuple[object, list[object]]] = []
+    for row in data_ws.iter_rows(min_row=header_row + 1, max_row=data_ws.max_row):
+        key_cell = row[data_key_idx - 1] if data_key_idx - 1 < len(row) else None
+        key_val = key_cell.value if key_cell is not None else None
+        ret_vals = []
+        for idx in return_col_idxs:
+            c = row[idx - 1] if idx - 1 < len(row) else None
+            ret_vals.append(c.value if c is not None else None)
+        data_rows.append((key_val, ret_vals))
+    data_wb.close()
+
+    # Perform matching
+    results: list[dict] = []
+    for _src_row, lv in lookup_values:
+        if lv is None:
+            continue
+
+        best_match: dict | None = None
+
+        if not fuzzy:
+            # Exact match
+            for dk, dvals in data_rows:
+                if dk == lv:
+                    best_match = {
+                        "lookup_value": lv,
+                        "matched_value": dk,
+                        "return_values": dict(zip(return_headers, dvals)),
+                    }
+                    break
+        else:
+            # Fuzzy string matching
+            lv_str = str(lv)
+            best_score = 0.0
+            for dk, dvals in data_rows:
+                if dk is None:
+                    continue
+                score = difflib.SequenceMatcher(None, lv_str.lower(), str(dk).lower()).ratio()
+                if score >= fuzzy_threshold and score > best_score:
+                    best_score = score
+                    best_match = {
+                        "lookup_value": lv,
+                        "matched_value": dk,
+                        "similarity": round(best_score, 4),
+                        "return_values": dict(zip(return_headers, dvals)),
+                    }
+
+        if best_match:
+            results.append(best_match)
+        else:
+            results.append(
+                {
+                    "lookup_value": lv,
+                    "matched_value": None,
+                    "return_values": {h: None for h in return_headers},
+                }
+            )
+
+    # Optionally write results to output file
+    if output_file:
+        validate_file_path(output_file, must_exist=False)
+        out_wb = openpyxl.Workbook()
+        out_ws = out_wb.active
+        out_ws.title = "VLookup Results"
+
+        # Write headers
+        out_headers = ["Lookup Value", "Matched Value"]
+        if fuzzy:
+            out_headers.append("Similarity")
+        out_headers.extend(return_headers)
+        for c_idx, h in enumerate(out_headers, start=1):
+            out_ws.cell(row=1, column=c_idx, value=h)
+
+        # Write data rows
+        for r_idx, row_data in enumerate(results, start=2):
+            c = 1
+            out_ws.cell(row=r_idx, column=c, value=row_data["lookup_value"])
+            c += 1
+            out_ws.cell(row=r_idx, column=c, value=row_data["matched_value"])
+            c += 1
+            if fuzzy:
+                out_ws.cell(row=r_idx, column=c, value=row_data.get("similarity"))
+                c += 1
+            for h in return_headers:
+                out_ws.cell(row=r_idx, column=c, value=row_data["return_values"].get(h))
+                c += 1
+
+        save_workbook_safe(out_wb, output_file)
+        logger.info("VLookup results written to %s", output_file)
+
+    return {
+        "matched": sum(1 for r in results if r["matched_value"] is not None),
+        "unmatched": sum(1 for r in results if r["matched_value"] is None),
+        "total": len(results),
+        "results": results,
+        "output_file": output_file,
     }

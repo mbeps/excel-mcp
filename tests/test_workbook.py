@@ -61,3 +61,23 @@ def test_copy_sheet(sample_xlsx: str) -> None:
     names = [s["name"] for s in sheets]
     assert "Sheet1_Copy" in names
     assert len(sheets) == 2
+
+
+def test_write_multi_sheet(tmp_path) -> None:
+    """Test creating a workbook with multiple sheets, headers, and data."""
+    from mcp_server.tools.workbook import write_multi_sheet
+
+    file_path = str(tmp_path / "multi.xlsx")
+    sheets = [
+        {"name": "Sales", "headers": ["Product", "Revenue"], "data": [["Widget", 100], ["Gadget", 200]]},
+        {"name": "Costs", "headers": ["Item", "Amount"], "data": [["Rent", 500], ["Utils", 100]]},
+    ]
+    result = write_multi_sheet(file_path, sheets)
+    assert "sheets_created" in result
+    assert len(result["sheets_created"]) == 2
+    from openpyxl import load_workbook
+
+    wb = load_workbook(file_path)
+    assert "Sales" in wb.sheetnames
+    assert "Costs" in wb.sheetnames
+    wb.close()

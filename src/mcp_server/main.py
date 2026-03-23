@@ -4,6 +4,7 @@ import json
 from logging import Logger
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from mcp_server.tools.analysis import (
     aggregate_data as _aggregate_data,
@@ -47,8 +48,20 @@ from mcp_server.tools.analysis import (
 from mcp_server.tools.analysis import (
     transpose_data as _transpose_data,
 )
+from mcp_server.tools.analysis import (
+    vlookup_helper as _vlookup_helper,
+)
 from mcp_server.tools.cell_ops import (
     clear_range as _clear_range,
+)
+from mcp_server.tools.cell_ops import (
+    copy_range as _copy_range,
+)
+from mcp_server.tools.cell_ops import (
+    delete_range as _delete_range,
+)
+from mcp_server.tools.cell_ops import (
+    get_file_info as _get_file_info,
 )
 from mcp_server.tools.cell_ops import (
     read_cell as _read_cell,
@@ -79,6 +92,9 @@ from mcp_server.tools.charts import (
 )
 from mcp_server.tools.charts import (
     update_chart_properties as _update_chart_properties,
+)
+from mcp_server.tools.cleaning import (
+    data_cleaner as _data_cleaner,
 )
 from mcp_server.tools.comments import (
     add_comment as _add_comment,
@@ -162,6 +178,9 @@ from mcp_server.tools.doc_properties import (
     unprotect_workbook as _unprotect_workbook,
 )
 from mcp_server.tools.financial import (
+    budget_variance_analysis as _budget_variance_analysis,
+)
+from mcp_server.tools.financial import (
     calculate_irr as _calculate_irr,
 )
 from mcp_server.tools.financial import (
@@ -171,16 +190,31 @@ from mcp_server.tools.financial import (
     calculate_pmt as _calculate_pmt,
 )
 from mcp_server.tools.financial import (
+    dcf_analysis as _dcf_analysis,
+)
+from mcp_server.tools.financial import (
+    financial_ratio_analysis as _financial_ratio_analysis,
+)
+from mcp_server.tools.financial import (
     goal_seek as _goal_seek,
 )
 from mcp_server.tools.financial import (
     loan_amortization as _loan_amortization,
+)
+from mcp_server.tools.financial import (
+    scenario_analysis as _scenario_analysis,
+)
+from mcp_server.tools.financial import (
+    trend_analysis as _trend_analysis,
 )
 from mcp_server.tools.formatting import (
     auto_fit_columns as _auto_fit_columns,
 )
 from mcp_server.tools.formatting import (
     format_cells as _format_cells,
+)
+from mcp_server.tools.formatting import (
+    format_range_per_cell as _format_range_per_cell,
 )
 from mcp_server.tools.formatting import (
     get_cell_formatting as _get_cell_formatting,
@@ -232,6 +266,15 @@ from mcp_server.tools.images import (
 )
 from mcp_server.tools.images import (
     list_images as _list_images,
+)
+from mcp_server.tools.multi_file import (
+    bulk_aggregate_multi_files as _bulk_aggregate_multi_files,
+)
+from mcp_server.tools.multi_file import (
+    bulk_filter_multi_files as _bulk_filter_multi_files,
+)
+from mcp_server.tools.multi_file import (
+    validate_data_consistency as _validate_data_consistency,
 )
 from mcp_server.tools.named_ranges import (
     create_named_range as _create_named_range,
@@ -314,6 +357,9 @@ from mcp_server.tools.workbook import (
 from mcp_server.tools.workbook import (
     rename_sheet as _rename_sheet,
 )
+from mcp_server.tools.workbook import (
+    write_multi_sheet as _write_multi_sheet,
+)
 from mcp_server.tools.worksheet_ops import (
     freeze_panes as _freeze_panes,
 )
@@ -380,6 +426,7 @@ from mcp_server.tools.worksheet_ops import (
 from mcp_server.tools.worksheet_ops import (
     unhide_sheet as _unhide_sheet,
 )
+from mcp_server.utils.excel_helpers import validate_excel_range as _validate_excel_range
 from mcp_server.utils.logger import configure_logging
 
 mcp: FastMCP = FastMCP("excel-mcp-server")
@@ -409,13 +456,13 @@ def resource_sheet_preview(file_path: str, sheet_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def get_workbook_metadata(file_path: str) -> dict:
     """Get workbook metadata including sheet names, dimensions, active sheet, and named ranges."""
     return _get_workbook_metadata(file_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_sheets(file_path: str) -> list[dict]:
     """List all sheets in a workbook with their names and dimensions."""
     return _list_sheets(file_path)
@@ -427,7 +474,7 @@ def create_workbook(file_path: str, sheet_names: list[str] | None = None) -> dic
     return _create_workbook(file_path, sheet_names)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def get_sheet_summary(file_path: str, sheet_name: str) -> dict:
     """Get sheet summary: name, row/col counts, headers, and used range."""
     return _get_sheet_summary(file_path, sheet_name)
@@ -439,7 +486,7 @@ def rename_sheet(file_path: str, old_name: str, new_name: str) -> str:
     return _rename_sheet(file_path, old_name, new_name)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_sheet(file_path: str, sheet_name: str) -> str:
     """Delete a worksheet. Fails if it's the only sheet."""
     return _delete_sheet(file_path, sheet_name)
@@ -451,12 +498,18 @@ def copy_sheet(file_path: str, source_sheet: str, new_name: str) -> str:
     return _copy_sheet(file_path, source_sheet, new_name)
 
 
+@mcp.tool()
+def write_multi_sheet(file_path: str, sheets: list[dict]) -> dict:
+    """Create a new workbook with multiple named sheets, headers, data, and column widths in one call."""
+    return _write_multi_sheet(file_path, sheets)
+
+
 # ---------------------------------------------------------------------------
 # --- Named Ranges ---
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_named_ranges(file_path: str) -> list[dict]:
     """List all named ranges in a workbook with name, destination, and scope."""
     return _list_named_ranges(file_path)
@@ -468,7 +521,7 @@ def create_named_range(file_path: str, name: str, destination: str, scope: str =
     return _create_named_range(file_path, name, destination, scope)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_named_range(file_path: str, name: str) -> str:
     """Delete a named range by name."""
     return _delete_named_range(file_path, name)
@@ -491,19 +544,19 @@ def add_comment(file_path: str, sheet_name: str, cell_ref: str, text: str, autho
     return _add_comment(file_path, sheet_name, cell_ref, text, author)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> dict | None:
     """Read a comment from a cell. Returns dict with text and author, or None."""
     return _read_comment(file_path, sheet_name, cell_ref)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_comment(file_path: str, sheet_name: str, cell_ref: str) -> str:
     """Delete a comment from a cell."""
     return _delete_comment(file_path, sheet_name, cell_ref)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_comments(file_path: str, sheet_name: str) -> list[dict]:
     """List all comments in a sheet with cell reference, text, and author."""
     return _list_comments(file_path, sheet_name)
@@ -527,19 +580,19 @@ def add_hyperlink(
     return _add_hyperlink(file_path, sheet_name, cell_ref, url, display_text, tooltip)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def read_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> dict | None:
     """Read hyperlink from a cell. Returns dict with target, location, tooltip, or None."""
     return _read_hyperlink(file_path, sheet_name, cell_ref)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> str:
     """Delete a hyperlink from a cell."""
     return _delete_hyperlink(file_path, sheet_name, cell_ref)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_hyperlinks(file_path: str, sheet_name: str) -> list[dict]:
     """List all hyperlinks in a sheet."""
     return _list_hyperlinks(file_path, sheet_name)
@@ -568,7 +621,7 @@ def set_auto_filter(file_path: str, sheet_name: str, cell_range: str) -> str:
     return _set_auto_filter(file_path, sheet_name, cell_range)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def remove_auto_filter(file_path: str, sheet_name: str) -> str:
     """Remove auto-filter from a sheet."""
     return _remove_auto_filter(file_path, sheet_name)
@@ -735,7 +788,7 @@ def set_header_footer(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def read_cell(file_path: str, sheet_name: str, cell_ref: str) -> dict:
     """Read a single cell's value and data type."""
     return _read_cell(file_path, sheet_name, cell_ref)
@@ -752,10 +805,22 @@ def write_cell(
     return _write_cell(file_path, sheet_name, cell_ref, value)
 
 
-@mcp.tool()
-def read_range(file_path: str, sheet_name: str, start_cell: str, end_cell: str) -> dict:
-    """Read a rectangular range and return rows as a list of lists."""
-    return _read_range(file_path, sheet_name, start_cell, end_cell)
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def read_range(
+    file_path: str,
+    sheet_name: str,
+    start_cell: str,
+    end_cell: str,
+    show_formula: bool = False,
+    show_style: bool = False,
+    output_format: str = "json",
+) -> dict:
+    """Read a rectangular range.
+
+    Use show_formula=True for formulas, show_style=True for formatting,
+    output_format='html' for HTML table.
+    """
+    return _read_range(file_path, sheet_name, start_cell, end_cell, show_formula, show_style, output_format)
 
 
 @mcp.tool()
@@ -764,13 +829,13 @@ def write_range(file_path: str, sheet_name: str, start_cell: str, data: list[lis
     return _write_range(file_path, sheet_name, start_cell, data)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def clear_range(file_path: str, sheet_name: str, start_cell: str, end_cell: str) -> str:
     """Clear all values in a rectangular cell range."""
     return _clear_range(file_path, sheet_name, start_cell, end_cell)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def read_file_chunked(
     file_path: str,
     sheet_name: str,
@@ -781,7 +846,7 @@ def read_file_chunked(
     return _read_file_chunked(file_path, sheet_name, start_row, chunk_size)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def read_cell_detailed(
     file_path: str,
     sheet_name: str,
@@ -790,6 +855,32 @@ def read_cell_detailed(
 ) -> dict:
     """Read a cell with full detail: value, type, formula, comment, hyperlink, merge status."""
     return _read_cell_detailed(file_path, sheet_name, cell_ref, data_only)
+
+
+@mcp.tool()
+def copy_range(
+    file_path: str,
+    source_sheet: str,
+    source_range: str,
+    dest_sheet: str,
+    dest_range: str,
+    copy_values: bool = True,
+    copy_styles: bool = True,
+) -> str:
+    """Copy cells from source range to destination range within same or across sheets."""
+    return _copy_range(file_path, source_sheet, source_range, dest_sheet, dest_range, copy_values, copy_styles)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+def delete_range(file_path: str, sheet_name: str, range_str: str, shift_direction: str = "up") -> str:
+    """Delete range contents and shift remaining cells up or left."""
+    return _delete_range(file_path, sheet_name, range_str, shift_direction)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def get_file_info(file_path: str) -> dict:
+    """Get file metadata: size, sheets, dimensions, recommended chunk size."""
+    return _get_file_info(file_path)
 
 
 # ---------------------------------------------------------------------------
@@ -803,7 +894,7 @@ def insert_rows(file_path: str, sheet_name: str, row_index: int, count: int = 1)
     return _insert_rows(file_path, sheet_name, row_index, count)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_rows(file_path: str, sheet_name: str, row_index: int, count: int = 1) -> str:
     """Delete rows starting at a 1-based position."""
     return _delete_rows(file_path, sheet_name, row_index, count)
@@ -815,7 +906,7 @@ def insert_cols(file_path: str, sheet_name: str, col_index: int, count: int = 1)
     return _insert_cols(file_path, sheet_name, col_index, count)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_cols(file_path: str, sheet_name: str, col_index: int, count: int = 1) -> str:
     """Delete columns starting at a 1-based position."""
     return _delete_cols(file_path, sheet_name, col_index, count)
@@ -827,7 +918,7 @@ def insert_columns_by_letter(file_path: str, sheet_name: str, column: str, count
     return _insert_columns_by_letter(file_path, sheet_name, column, count)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_columns_by_letter(file_path: str, sheet_name: str, column: str, count: int = 1) -> str:
     """Delete columns starting at the specified column letter (e.g. 'C')."""
     return _delete_columns_by_letter(file_path, sheet_name, column, count)
@@ -924,16 +1015,27 @@ def auto_fit_columns(file_path: str, sheet_name: str) -> str:
     return _auto_fit_columns(file_path, sheet_name)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def get_cell_formatting(file_path: str, sheet_name: str, cell_ref: str) -> dict:
     """Read all formatting properties of a cell (font, fill, border, alignment, number format, protection)."""
     return _get_cell_formatting(file_path, sheet_name, cell_ref)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_merged_ranges(file_path: str, sheet_name: str) -> list[str]:
     """List all merged cell ranges in a sheet."""
     return _list_merged_ranges(file_path, sheet_name)
+
+
+@mcp.tool()
+def format_range_per_cell(
+    file_path: str,
+    sheet_name: str,
+    start_cell: str,
+    styles: list[list[dict | None]],
+) -> str:
+    """Apply individual styles per cell using a 2D array matching range dimensions."""
+    return _format_range_per_cell(file_path, sheet_name, start_cell, styles)
 
 
 # ---------------------------------------------------------------------------
@@ -953,7 +1055,7 @@ def set_array_formula(file_path: str, sheet_name: str, target_range: str, formul
     return _set_array_formula(file_path, sheet_name, target_range, formula)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def validate_formula_syntax(formula: str) -> dict:
     """Validate an Excel formula's syntax and return token info."""
     return _validate_formula_syntax(formula)
@@ -970,7 +1072,7 @@ def set_formulas_batch(file_path: str, sheet_name: str, formulas: dict[str, str]
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def read_csv_preview(file_path: str, rows: int = 10, delimiter: str = ",") -> dict:
     """Preview the first N rows of a CSV file."""
     return _read_csv_preview(file_path, rows, delimiter)
@@ -1041,7 +1143,7 @@ def add_highlight_rule(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def remove_conditional_formatting(file_path: str, sheet_name: str) -> str:
     """Remove all conditional formatting rules from a sheet."""
     return _remove_conditional_formatting(file_path, sheet_name)
@@ -1100,7 +1202,7 @@ def add_duplicate_rule(
     return _add_duplicate_rule(file_path, sheet_name, cell_range, font_color, bg_color)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_conditional_formats(file_path: str, sheet_name: str) -> list[dict]:
     """List all conditional formatting rules on a sheet."""
     return _list_conditional_formats(file_path, sheet_name)
@@ -1123,7 +1225,7 @@ def create_table(
     return _create_table(file_path, sheet_name, data_range, table_name, style_name)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_tables(file_path: str, sheet_name: str) -> list[dict]:
     """List all tables in a sheet with name, ref, and style."""
     return _list_tables(file_path, sheet_name)
@@ -1180,10 +1282,10 @@ def add_formula_validation(
     return _add_formula_validation(file_path, sheet_name, cell_range, formula, allow_blank)
 
 
-@mcp.tool()
-def list_validations(file_path: str, sheet_name: str) -> list[dict]:
-    """List all data validation rules on a sheet."""
-    return _list_validations(file_path, sheet_name)
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def list_validations(file_path: str, sheet_name: str, resolve_sources: bool = True) -> list[dict]:
+    """List all data validation rules on a sheet. Use resolve_sources=True to resolve dropdown range values."""
+    return _list_validations(file_path, sheet_name, resolve_sources)
 
 
 @mcp.tool()
@@ -1214,7 +1316,7 @@ def add_text_length_validation(
     return _add_text_length_validation(file_path, sheet_name, cell_range, operator, length1, length2, allow_blank)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def remove_validation(file_path: str, sheet_name: str, cell_range: str) -> str:
     """Remove data validations from a specific range."""
     return _remove_validation(file_path, sheet_name, cell_range)
@@ -1257,7 +1359,7 @@ def protect_sheet(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def unprotect_sheet(file_path: str, sheet_name: str, password: str | None = None) -> str:
     """Remove sheet protection."""
     return _unprotect_sheet(file_path, sheet_name, password)
@@ -1312,13 +1414,13 @@ def create_chart(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0) -> str:
     """Delete a chart from a sheet by its zero-based index."""
     return _delete_chart(file_path, sheet_name, chart_index)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_charts(file_path: str, sheet_name: str) -> list[dict]:
     """List all charts on a sheet with title, type, and position."""
     return _list_charts(file_path, sheet_name)
@@ -1368,13 +1470,13 @@ def insert_image(
     return _insert_image(file_path, sheet_name, image_path, cell_ref, width, height)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_images(file_path: str, sheet_name: str) -> list[dict]:
     """List all images in a sheet with index, dimensions, and anchor."""
     return _list_images(file_path, sheet_name)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def delete_image(file_path: str, sheet_name: str, image_index: int = 0) -> str:
     """Delete an image by its zero-based index from a sheet."""
     return _delete_image(file_path, sheet_name, image_index)
@@ -1385,7 +1487,7 @@ def delete_image(file_path: str, sheet_name: str, image_index: int = 0) -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def get_document_properties(file_path: str) -> dict:
     """Get workbook document properties (title, creator, dates, etc.)."""
     return _get_document_properties(file_path)
@@ -1417,7 +1519,7 @@ def protect_workbook(
     return _protect_workbook(file_path, password, lock_structure, lock_windows)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def unprotect_workbook(file_path: str) -> str:
     """Remove workbook-level protection."""
     return _unprotect_workbook(file_path)
@@ -1434,7 +1536,7 @@ def set_calculation_mode(file_path: str, mode: str = "auto") -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def filter_data(
     file_path: str,
     sheet_name: str,
@@ -1460,13 +1562,13 @@ def sort_data(
     return _sort_data(file_path, sheet_name, sort_by, column, ascending, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> dict:
     """Compute descriptive statistics (mean, median, std, min, max, sum) for a numeric column."""
     return _column_statistics(file_path, sheet_name, column, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def aggregate_data(
     file_path: str,
     sheet_name: str,
@@ -1486,13 +1588,13 @@ def aggregate_data(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def find_duplicates(file_path: str, sheet_name: str, columns: list[str], has_header: bool = True) -> dict:
     """Find duplicate rows based on specified columns."""
     return _find_duplicates(file_path, sheet_name, columns, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def profile_data(file_path: str, sheet_name: str) -> dict:
     """Comprehensive data profiling: column types, missing values, duplicates, and summary stats."""
     return _profile_data(file_path, sheet_name)
@@ -1510,7 +1612,7 @@ def search_replace(
     return _search_replace(file_path, sheet_name, search_value, replace_value, cell_range)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def calculate_correlation(
     file_path: str,
     sheet_name: str,
@@ -1521,7 +1623,7 @@ def calculate_correlation(
     return _calculate_correlation(file_path, sheet_name, columns, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def rank_data(
     file_path: str,
     sheet_name: str,
@@ -1534,7 +1636,7 @@ def rank_data(
     return _rank_data(file_path, sheet_name, column, method, ascending, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def calculate_percentiles(
     file_path: str,
     sheet_name: str,
@@ -1546,7 +1648,7 @@ def calculate_percentiles(
     return _calculate_percentiles(file_path, sheet_name, column, percentiles, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def sample_data(
     file_path: str,
     sheet_name: str,
@@ -1559,7 +1661,7 @@ def sample_data(
     return _sample_data(file_path, sheet_name, n, fraction, random_state, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def create_histogram(
     file_path: str,
     sheet_name: str,
@@ -1582,7 +1684,7 @@ def transpose_data(
     return _transpose_data(file_path, sheet_name, output_sheet, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def extract_unique_values(
     file_path: str,
     sheet_name: str,
@@ -1591,6 +1693,36 @@ def extract_unique_values(
 ) -> dict:
     """Extract unique values from a column."""
     return _extract_unique_values(file_path, sheet_name, column, has_header)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def vlookup_helper(
+    lookup_file: str,
+    data_file: str,
+    lookup_column: str,
+    data_key_column: str,
+    data_return_columns: list[str],
+    lookup_sheet: str = "Sheet1",
+    data_sheet: str = "Sheet1",
+    fuzzy: bool = False,
+    fuzzy_threshold: float = 0.8,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Cross-file VLOOKUP with optional fuzzy string matching."""
+    return _vlookup_helper(
+        lookup_file,
+        data_file,
+        lookup_column,
+        data_key_column,
+        data_return_columns,
+        lookup_sheet,
+        data_sheet,
+        fuzzy,
+        fuzzy_threshold,
+        output_file,
+        header_row,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1658,7 +1790,7 @@ def add_computed_column(
     return _add_computed_column(file_path, sheet_name, new_column_name, expression, has_header)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 def deduplicate_data(
     file_path: str,
     sheet_name: str,
@@ -1674,19 +1806,19 @@ def deduplicate_data(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def calculate_npv(discount_rate: float, cash_flows: list[float]) -> dict:
     """Calculate Net Present Value given a discount rate and cash flows."""
     return _calculate_npv(discount_rate, cash_flows)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def calculate_irr(cash_flows: list[float]) -> dict:
     """Calculate Internal Rate of Return for a series of cash flows."""
     return _calculate_irr(cash_flows)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def calculate_pmt(rate: float, nper: int, pv: float, fv: float = 0) -> dict:
     """Calculate periodic payment for a loan or annuity."""
     return _calculate_pmt(rate, nper, pv, fv)
@@ -1711,6 +1843,148 @@ def loan_amortization(
 ) -> dict:
     """Generate a loan amortization schedule with payment breakdown."""
     return _loan_amortization(principal, annual_rate, years, payments_per_year)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def dcf_analysis(
+    cash_flows: list[float],
+    discount_rate: float,
+    terminal_growth_rate: float = 0.02,
+    initial_investment: float = 0.0,
+) -> dict:
+    """Discounted Cash Flow valuation with Gordon Growth Model terminal value."""
+    return _dcf_analysis(cash_flows, discount_rate, terminal_growth_rate, initial_investment)
+
+
+@mcp.tool()
+def budget_variance_analysis(
+    file_path: str,
+    sheet_name: str = "Sheet1",
+    category_column: str = "A",
+    budget_column: str = "B",
+    actual_column: str = "C",
+    header_row: int = 1,
+    output_file: str | None = None,
+) -> dict:
+    """Analyze budget vs actual spending. Returns variance per category with status."""
+    return _budget_variance_analysis(
+        file_path,
+        sheet_name,
+        category_column,
+        budget_column,
+        actual_column,
+        header_row,
+        output_file,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def financial_ratio_analysis(ratios: dict, industry_benchmarks: dict | None = None) -> dict:
+    """Compute financial ratios (current, D/E, ROE, ROA, margins) with optional benchmark comparison."""
+    return _financial_ratio_analysis(ratios, industry_benchmarks)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def scenario_analysis(
+    base_case: dict,
+    scenarios: list[dict],
+    formula: str,
+    periods: int = 1,
+) -> dict:
+    """Evaluate a formula across multiple scenarios for what-if analysis."""
+    return _scenario_analysis(base_case, scenarios, formula, periods)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def trend_analysis(
+    file_path: str,
+    sheet_name: str = "Sheet1",
+    date_column: str = "A",
+    value_column: str = "B",
+    header_row: int = 1,
+    periods_to_forecast: int = 3,
+) -> dict:
+    """Analyze trends with linear regression, moving averages, and forecasting."""
+    return _trend_analysis(file_path, sheet_name, date_column, value_column, header_row, periods_to_forecast)
+
+
+# ---------------------------------------------------------------------------
+# --- Data Cleaning ---
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def data_cleaner(
+    file_path: str,
+    sheet_name: str = "Sheet1",
+    operations: list[str] | None = None,
+    columns: list[str] | None = None,
+    preview: bool = False,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Batch data cleaning pipeline.
+
+    Operations: trim_whitespace, remove_empty_rows, remove_empty_columns,
+    normalize_text, fix_numbers, remove_duplicates, fill_missing.
+    Use preview=True for dry run.
+    """
+    return _data_cleaner(file_path, sheet_name, operations, columns, preview, output_file, header_row)
+
+
+# ---------------------------------------------------------------------------
+# --- Cross-File Operations ---
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def bulk_aggregate_multi_files(
+    file_paths: list[str],
+    column: str,
+    operation: str = "sum",
+    sheet_name: str = "Sheet1",
+    header_row: int = 1,
+    output_file: str | None = None,
+) -> dict:
+    """Aggregate a column across multiple files (sum, mean, min, max, count)."""
+    return _bulk_aggregate_multi_files(file_paths, column, operation, sheet_name, header_row, output_file)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def bulk_filter_multi_files(
+    file_paths: list[str],
+    column: str,
+    operator: str,
+    value: str | float,
+    sheet_name: str = "Sheet1",
+    header_row: int = 1,
+    output_file: str | None = None,
+) -> dict:
+    """Filter rows across multiple files by condition (equals, contains, greater_than, etc.)."""
+    return _bulk_filter_multi_files(file_paths, column, operator, value, sheet_name, header_row, output_file)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def validate_data_consistency(
+    file_paths: list[str],
+    key_column: str,
+    check_columns: list[str] | None = None,
+    sheet_name: str = "Sheet1",
+    header_row: int = 1,
+) -> dict:
+    """Cross-file referential integrity check: find missing keys and mismatched values."""
+    return _validate_data_consistency(file_paths, key_column, check_columns, sheet_name, header_row)
+
+
+# ---------------------------------------------------------------------------
+# --- Utilities ---
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def validate_excel_range(range_str: str) -> dict:
+    """Validate A1-style range notation (e.g. 'A1:C10'). Returns valid/invalid with parsed info."""
+    return _validate_excel_range(range_str)
 
 
 # ---------------------------------------------------------------------------

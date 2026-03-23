@@ -64,3 +64,48 @@ def test_search_replace(sample_xlsx: str) -> None:
     search_replace(sample_xlsx, "Sheet1", "Alice", "Alicia")
     cell = read_cell(sample_xlsx, "Sheet1", "A2")
     assert cell["value"] == "Alicia"
+
+
+def test_column_statistics_skewness_kurtosis(sample_xlsx: str) -> None:
+    """Test that column_statistics includes skewness and kurtosis."""
+    result = column_statistics(sample_xlsx, "Sheet1", "Salary")
+    assert "skewness" in result
+    assert "kurtosis" in result
+
+
+def test_vlookup_helper(tmp_path) -> None:
+    """Test vlookup helper with exact matching."""
+    from openpyxl import Workbook
+
+    from mcp_server.tools.analysis import vlookup_helper
+
+    lookup_path = str(tmp_path / "lookup.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["ID", "Name"])
+    ws.append([1, "Alice"])
+    ws.append([2, "Bob"])
+    ws.append([3, "Charlie"])
+    wb.save(lookup_path)
+
+    data_path = str(tmp_path / "data.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["ID", "Score", "Grade"])
+    ws.append([1, 95, "A"])
+    ws.append([2, 87, "B"])
+    ws.append([3, 92, "A"])
+    wb.save(data_path)
+
+    result = vlookup_helper(
+        lookup_file=lookup_path,
+        data_file=data_path,
+        lookup_column="A",
+        data_key_column="A",
+        data_return_columns=["B", "C"],
+    )
+    assert result["matched"] == 3
+    assert result["unmatched"] == 0
+    assert len(result["results"]) == 3
