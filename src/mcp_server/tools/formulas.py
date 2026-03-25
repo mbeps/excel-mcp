@@ -92,9 +92,8 @@ def list_formulas(file_path: str, sheet_name: str, pattern: str | None = None) -
         for row in ws.iter_rows():
             for cell in row:
                 if cell.data_type == "f":
-                    formula = (
-                        cell.value if isinstance(cell.value, str) and cell.value.startswith("=") else f"={cell.value}"
-                    )
+                    raw = cell.value.text if isinstance(cell.value, ArrayFormula) else cell.value
+                    formula = raw if isinstance(raw, str) and raw.startswith("=") else f"={raw}"
                     if pattern is None or re.search(pattern, formula, re.IGNORECASE):
                         results.append({"cell_ref": cell.coordinate, "formula": formula})
         logger.info("Found %d formulas in %s!%s", len(results), sheet_name, file_path)

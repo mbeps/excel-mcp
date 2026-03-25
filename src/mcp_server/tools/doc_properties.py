@@ -107,7 +107,13 @@ def unprotect_workbook(file_path: str) -> str:
     try:
         wb.security.lockStructure = False
         wb.security.lockWindows = False
-        wb.security.workbookPassword = None
+        # The workbookPassword setter always calls hash_password() which crashes on None.
+        # Set the private backing field directly to clear it safely.
+        wb.security._workbook_password = None
+        wb.security.workbookAlgorithmName = None
+        wb.security.workbookHashValue = None
+        wb.security.workbookSaltValue = None
+        wb.security.workbookSpinCount = None
         save_workbook_safe(wb, file_path)
         logger.info("Unprotected workbook %s", file_path)
         return "Workbook protection removed."

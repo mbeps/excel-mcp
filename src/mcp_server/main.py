@@ -1869,7 +1869,7 @@ def filter_data(
     sheet_name: str,
     column: str,
     operator: str,
-    value: str | int | float,
+    value: int | float | str,
     has_header: bool = True,
 ) -> dict:
     """Filter rows by a column condition. Operators: ==, !=, >, <, >=, <=, contains, startswith, endswith."""

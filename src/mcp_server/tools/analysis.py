@@ -35,7 +35,7 @@ def filter_data(
     sheet_name: str,
     column: str,
     operator: str,
-    value: str | int | float,
+    value: int | float | str,
     has_header: bool = True,
     case_sensitive: bool = False,
 ) -> dict:
@@ -52,14 +52,29 @@ def filter_data(
         mask = col == value
     elif operator == "!=":
         mask = col != value
-    elif operator == ">":
-        mask = col > value
-    elif operator == "<":
-        mask = col < value
-    elif operator == ">=":
-        mask = col >= value
-    elif operator == "<=":
-        mask = col <= value
+    elif operator in {">", "<", ">=", "<="}:
+        numeric_value = pd.to_numeric(value, errors="coerce")
+        if pd.notna(numeric_value):
+            numeric_col = pd.to_numeric(col, errors="coerce")
+            if operator == ">":
+                mask = numeric_col > numeric_value
+            elif operator == "<":
+                mask = numeric_col < numeric_value
+            elif operator == ">=":
+                mask = numeric_col >= numeric_value
+            else:
+                mask = numeric_col <= numeric_value
+        else:
+            str_col = col.astype(str)
+            str_val = str(value)
+            if operator == ">":
+                mask = str_col > str_val
+            elif operator == "<":
+                mask = str_col < str_val
+            elif operator == ">=":
+                mask = str_col >= str_val
+            else:
+                mask = str_col <= str_val
     elif operator == "contains":
         mask = col.astype(str).str.contains(str(value), case=case_sensitive, na=False)
     elif operator == "startswith":

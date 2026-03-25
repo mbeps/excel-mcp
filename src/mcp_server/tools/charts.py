@@ -17,6 +17,7 @@ from openpyxl.chart import (
     StockChart,
 )
 from openpyxl.chart.legend import Legend
+from openpyxl.chart.title import Title as _ChartTitle
 from openpyxl.utils import range_boundaries
 
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
@@ -25,6 +26,26 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 CHART_TYPES = {"bar", "column", "line", "pie", "scatter", "area", "radar", "doughnut", "bubble", "stock"}
+
+
+def _chart_title_str(title: object) -> str:
+    """Safely extract a string from a chart title (str, openpyxl Title object, or None)."""
+    if title is None:
+        return "(untitled)"
+    if isinstance(title, str):
+        return title
+    if isinstance(title, _ChartTitle):
+        try:
+            tx = title.tx
+            if tx is not None and tx.rich is not None:
+                texts = [run.t for para in tx.rich.p for run in (para.r or []) if run.t is not None]
+                if texts:
+                    return " ".join(texts)
+            if tx is not None and getattr(tx, "strRef", None) is not None and tx.strRef.f:
+                return str(tx.strRef.f)
+        except Exception:
+            pass
+    return str(title)
 
 
 def _make_chart(
@@ -152,7 +173,7 @@ def list_charts(file_path: str, sheet_name: str) -> list[dict]:
         for chart in ws._charts:
             result.append(
                 {
-                    "title": chart.title or "(untitled)",
+                    "title": _chart_title_str(chart.title),
                     "type": type(chart).__name__,
                     "position": (
                         getattr(chart, "anchor", None) and str(chart.anchor._from)

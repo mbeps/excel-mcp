@@ -28,4 +28,5 @@ Thumbs.db
 # Ignore any other files or directories you want to exclude from version control
 *.csv
 .github/copilot-instructions.md
-.git2/**
+**.xlsx
+.github/prompts/**

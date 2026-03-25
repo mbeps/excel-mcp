@@ -20,6 +20,25 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 
+def _serialize_color(color: Any) -> str | None:
+    """Safely serialize an openpyxl Color object to a string, handling theme/indexed/rgb types."""
+    if not color:
+        return None
+    color_type = getattr(color, "type", "rgb")
+    if color_type == "theme":
+        tint = getattr(color, "tint", 0)
+        return f"theme:{color.theme},tint:{tint}" if tint else f"theme:{color.theme}"
+    if color_type == "indexed":
+        return f"indexed:{color.indexed}"
+    if color_type == "auto":
+        return "auto"
+    try:
+        rgb = color.rgb
+        return str(rgb) if rgb and rgb != "00000000" else None
+    except (ValueError, TypeError):
+        return None
+
+
 def format_cells(
     file_path: str,
     sheet_name: str,
@@ -201,15 +220,15 @@ def get_cell_formatting(file_path: str, sheet_name: str, cell_ref: str) -> dict:
             "italic": f.italic,
             "underline": f.underline,
             "strike": f.strike,
-            "color": str(f.color.rgb) if f.color and f.color.rgb else None,
+            "color": _serialize_color(f.color),
             "vertAlign": f.vertAlign,
         }
 
         fl = cell.fill
         fill_info = {
             "fill_type": fl.fill_type,
-            "fgColor": str(fl.fgColor.rgb) if fl.fgColor and fl.fgColor.rgb and fl.fgColor.rgb != "00000000" else None,
-            "bgColor": str(fl.bgColor.rgb) if fl.bgColor and fl.bgColor.rgb and fl.bgColor.rgb != "00000000" else None,
+            "fgColor": _serialize_color(fl.fgColor),
+            "bgColor": _serialize_color(fl.bgColor),
         }
 
         b = cell.border
@@ -217,7 +236,7 @@ def get_cell_formatting(file_path: str, sheet_name: str, cell_ref: str) -> dict:
         def _side_dict(s: Any) -> dict:
             return {
                 "style": s.style,
-                "color": str(s.color.rgb) if s.color and s.color.rgb else None,
+                "color": _serialize_color(s.color),
             }
 
         border_info = {
