@@ -60,33 +60,6 @@ def list_tables(file_path: str, sheet_name: str) -> list[dict]:
         wb.close()
 
 
-def delete_table(file_path: str, sheet_name: str, table_name: str) -> str:
-    """Remove a table by name, converting it back to a plain range."""
-    wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
-    if table_name not in ws.tables:
-        raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
-    del ws.tables[table_name]
-    save_workbook_safe(wb, file_path)
-    logger.info("Deleted table '%s' from %s", table_name, file_path)
-    return f"Deleted table '{table_name}' from sheet '{sheet_name}'."
-
-
-def rename_table(file_path: str, sheet_name: str, old_name: str, new_name: str) -> str:
-    """Rename an existing table."""
-    wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
-    if old_name not in ws.tables:
-        raise ValueError(f"Table '{old_name}' not found in sheet '{sheet_name}'.")
-    table = ws.tables.pop(old_name)
-    table.name = new_name
-    table.displayName = new_name
-    ws.tables[new_name] = table
-    save_workbook_safe(wb, file_path)
-    logger.info("Renamed table '%s' -> '%s' in %s", old_name, new_name, file_path)
-    return f"Renamed table '{old_name}' to '{new_name}' on sheet '{sheet_name}'."
-
-
 def resize_table(file_path: str, sheet_name: str, table_name: str, new_range: str) -> str:
     """Change the cell reference range of a table."""
     wb = load_workbook_safe(file_path)

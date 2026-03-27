@@ -7,6 +7,7 @@ from logging import Logger
 import pandas as pd
 
 from mcp_server.utils.excel_helpers import (
+    load_workbook_safe,
     read_sheet_df,
     validate_file_path,
 )
@@ -245,3 +246,62 @@ def validate_data_consistency(
         "missing_keys": missing_keys,
         "mismatched_values": mismatched_values,
     }
+
+
+def compare_workbooks(
+    file_path_a: str,
+    file_path_b: str,
+    sheet_name: str | None = None,
+    output_file: str | None = None,
+) -> dict:
+    """Compare two workbooks cell-by-cell. If sheet_name given, compare only that sheet."""
+    wb_a = load_workbook_safe(file_path_a, data_only=True)
+    wb_b = load_workbook_safe(file_path_b, data_only=True)
+    try:
+        if sheet_name:
+            if sheet_name not in wb_a.sheetnames or sheet_name not in wb_b.sheetnames:
+                raise ValueError(f"Sheet '{sheet_name}' not found in both workbooks.")
+            sheets_to_compare = [sheet_name]
+        else:
+            sheets_to_compare = [s for s in wb_a.sheetnames if s in wb_b.sheetnames]
+
+        differences: list[dict] = []
+        for sn in sheets_to_compare:
+            ws_a = wb_a[sn]
+            ws_b = wb_b[sn]
+            max_row = max(ws_a.max_row or 0, ws_b.max_row or 0)
+            max_col = max(ws_a.max_column or 0, ws_b.max_column or 0)
+            for row in range(1, max_row + 1):
+                for col in range(1, max_col + 1):
+                    val_a = ws_a.cell(row=row, column=col).value
+                    val_b = ws_b.cell(row=row, column=col).value
+                    if val_a != val_b:
+                        from openpyxl.utils import get_column_letter
+
+                        cell_ref = f"{get_column_letter(col)}{row}"
+                        differences.append(
+                            {
+                                "sheet": sn,
+                                "cell": cell_ref,
+                                "value_a": val_a,
+                                "value_b": val_b,
+                            }
+                        )
+
+        result: dict = {
+            "differences": differences,
+            "total_differences": len(differences),
+            "sheets_compared": sheets_to_compare,
+            "identical": len(differences) == 0,
+        }
+
+        if output_file and differences:
+            diff_df = pd.DataFrame(differences)
+            _write_df_to_new_file(diff_df, output_file, sheet_name="Differences")
+            logger.info("Comparison differences written to %s", output_file)
+
+        logger.info("Compared %d sheets; %d differences found", len(sheets_to_compare), len(differences))
+        return result
+    finally:
+        wb_a.close()
+        wb_b.close()

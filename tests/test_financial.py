@@ -8,47 +8,24 @@ from openpyxl import Workbook
 from mcp_server.tools.financial import (
     break_even_analysis,
     budget_variance_analysis,
-    calculate_cagr,
-    calculate_irr,
-    calculate_npv,
-    calculate_pmt,
-    calculate_xirr,
-    calculate_xnpv,
     dcf_analysis,
     financial_ratio_analysis,
     goal_seek,
     loan_amortization,
-    scenario_analysis,
-    trend_analysis,
 )
 
 
-def test_calculate_npv() -> None:
-    result = calculate_npv(0.1, [-1000, 300, 400, 500])
-    assert result["npv"] == pytest.approx(-21.04, abs=1)
-    assert result["discount_rate"] == 0.1
-
-
-def test_calculate_irr() -> None:
-    result = calculate_irr([-1000, 300, 400, 500])
-    assert result["irr"] is not None
-    assert result["irr"] == pytest.approx(0.089, abs=0.01)
-
-
-def test_calculate_pmt() -> None:
-    result = calculate_pmt(0.05 / 12, 360, 200000)
-    assert result["payment"] == pytest.approx(-1073.64, abs=1)
-
-
-def test_goal_seek() -> None:
-    result = goal_seek("x**2", target_value=9.0, initial_guess=2.0)
+def test_goal_seek(sample_xlsx):
+    result = goal_seek(
+        file_path=str(sample_xlsx),
+        sheet_name="Sheet1",
+        variable_cell="A1",
+        expression="x * 2",
+        target_value=10.0,
+        initial_value=1.0,
+    )
     assert result["converged"] is True
-    assert result["result"] == pytest.approx(3.0, abs=0.01)
-
-
-def test_goal_seek_unsafe_expression() -> None:
-    with pytest.raises(ValueError, match="Unsafe"):
-        goal_seek("__import__('os').system('echo hi')", target_value=0)
+    assert abs(result["found_value"] - 5.0) < 0.001
 
 
 def test_loan_amortization() -> None:
@@ -141,90 +118,6 @@ def test_financial_ratio_analysis_with_benchmarks() -> None:
     assert cr["comparison"] == "below_benchmark"
 
 
-def test_scenario_analysis() -> None:
-    base = {"revenue": 1000, "costs": 600, "growth_rate": 0.05}
-    scenarios = [
-        {"name": "Bull", "adjustments": {"revenue": 1200, "growth_rate": 0.08}},
-        {"name": "Bear", "adjustments": {"revenue": 800, "growth_rate": 0.02}},
-    ]
-    result = scenario_analysis(
-        base_case=base,
-        scenarios=scenarios,
-        formula="(revenue - costs) * (1 + growth_rate)",
-    )
-    assert len(result["base_case"]["results"]) == 1
-    assert result["base_case"]["results"][0] == pytest.approx(420.0, abs=1)
-    assert len(result["scenarios"]) == 2
-    assert result["scenarios"][0]["name"] == "Bull"
-
-
-def test_scenario_analysis_unsafe_formula() -> None:
-    with pytest.raises(ValueError, match="Unsafe"):
-        scenario_analysis(
-            base_case={"x": 1},
-            scenarios=[],
-            formula="__import__('os').system('echo hi')",
-        )
-
-
-def test_trend_analysis(tmp_path: Path) -> None:
-    fp = str(tmp_path / "trends.xlsx")
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Sheet1"
-    ws.append(["Period", "Revenue"])
-    for i, val in enumerate([100, 120, 140, 160, 180, 200], 1):
-        ws.append([f"Q{i}", val])
-    wb.save(fp)
-
-    result = trend_analysis(fp, periods_to_forecast=3)
-    assert result["trend_direction"] == "increasing"
-    assert result["slope"] > 0
-    assert result["r_squared"] > 0.95
-    assert len(result["forecast"]) == 3
-    assert result["forecast"][0]["value"] > 200
-
-
-def test_calculate_xnpv() -> None:
-    cash_flows = [-1000.0, 300.0, 400.0, 500.0]
-    dates = ["2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01"]
-    result = calculate_xnpv(0.10, cash_flows, dates)
-    assert result["num_cash_flows"] == 4
-    assert result["discount_rate"] == 0.10
-    assert "xnpv" in result
-    # Annual cash flows spaced exactly 1 year apart ≈ regular NPV
-    assert result["xnpv"] == pytest.approx(-21.04, abs=2)
-
-
-def test_calculate_xnpv_length_mismatch() -> None:
-    with pytest.raises(ValueError, match="same length"):
-        calculate_xnpv(0.1, [-100.0, 50.0], ["2020-01-01"])
-
-
-def test_calculate_xirr() -> None:
-    cash_flows = [-1000.0, 300.0, 400.0, 500.0]
-    dates = ["2020-01-01", "2021-01-01", "2022-01-01", "2023-01-01"]
-    result = calculate_xirr(cash_flows, dates)
-    assert result["xirr"] is not None
-    assert result["xirr"] == pytest.approx(0.089, abs=0.01)
-    assert result["dates"] == dates
-    assert result["cash_flows"] == cash_flows
-
-
-def test_calculate_cagr() -> None:
-    result = calculate_cagr(beginning_value=1000.0, ending_value=1610.51, periods=5.0)
-    assert result["cagr"] == pytest.approx(0.10, abs=0.001)
-    assert result["total_growth"] == pytest.approx(0.6105, abs=0.001)
-    assert result["periods"] == 5.0
-
-
-def test_calculate_cagr_invalid() -> None:
-    with pytest.raises(ValueError, match="beginning_value"):
-        calculate_cagr(beginning_value=0, ending_value=200, periods=5)
-    with pytest.raises(ValueError, match="periods"):
-        calculate_cagr(beginning_value=100, ending_value=200, periods=0)
-
-
 def test_break_even_analysis() -> None:
     result = break_even_analysis(fixed_costs=50000.0, price_per_unit=25.0, variable_cost_per_unit=15.0)
     assert result["break_even_units"] == pytest.approx(5000.0, abs=0.01)
@@ -258,3 +151,206 @@ def test_break_even_invalid_inputs() -> None:
         break_even_analysis(fixed_costs=1000.0, price_per_unit=0.0, variable_cost_per_unit=15.0)
     with pytest.raises(ValueError, match="price_per_unit must be greater than variable_cost_per_unit"):
         break_even_analysis(fixed_costs=1000.0, price_per_unit=10.0, variable_cost_per_unit=10.0)
+
+
+# ── comprehensive financial_ratio_analysis coverage ─────────────────────────
+
+
+class TestFinancialRatioAnalysisComprehensive:
+    """Thorough coverage of all 7 ratios, partial keys, division-by-zero, and benchmarks."""
+
+    def test_basic_current_ratio_two_to_one(self) -> None:
+        """current_assets=200, current_liabilities=100 → current_ratio=2.0."""
+        result = financial_ratio_analysis({"current_assets": 200, "current_liabilities": 100})
+        assert result["ratios"]["current_ratio"]["value"] == pytest.approx(2.0)
+
+    def test_all_seven_ratios_present(self) -> None:
+        """All 7 ratios are computed when all input keys are supplied."""
+        data = {
+            "current_assets": 400,
+            "current_liabilities": 200,
+            "total_debt": 300,
+            "total_equity": 600,
+            "net_income": 90,
+            "total_assets": 900,
+            "revenue": 1000,
+            "gross_profit": 500,
+            "ebitda": 150,
+            "interest_expense": 30,
+        }
+        result = financial_ratio_analysis(data)
+        r = result["ratios"]
+        assert set(r.keys()) == {
+            "current_ratio",
+            "debt_to_equity",
+            "roe",
+            "roa",
+            "gross_margin",
+            "net_margin",
+            "interest_coverage",
+        }
+        assert len(r) == 7
+
+    def test_all_seven_ratio_values_correct(self) -> None:
+        """Verify numerical accuracy of all 7 ratios simultaneously."""
+        data = {
+            "current_assets": 400,
+            "current_liabilities": 200,
+            "total_debt": 300,
+            "total_equity": 600,
+            "net_income": 90,
+            "total_assets": 900,
+            "revenue": 1000,
+            "gross_profit": 500,
+            "ebitda": 150,
+            "interest_expense": 30,
+        }
+        result = financial_ratio_analysis(data)
+        r = result["ratios"]
+        assert r["current_ratio"]["value"] == pytest.approx(2.0)
+        assert r["debt_to_equity"]["value"] == pytest.approx(0.5)
+        assert r["roe"]["value"] == pytest.approx(0.15)
+        assert r["roa"]["value"] == pytest.approx(0.1)
+        assert r["gross_margin"]["value"] == pytest.approx(0.5)
+        assert r["net_margin"]["value"] == pytest.approx(0.09)
+        assert r["interest_coverage"]["value"] == pytest.approx(5.0)
+
+    def test_partial_keys_only_matching_ratios_computed(self) -> None:
+        """Partial keys: only ratios with both numerator and denominator present are computed."""
+        data = {"net_income": 50000, "total_assets": 500000}  # only roa computable
+        result = financial_ratio_analysis(data)
+        r = result["ratios"]
+        assert "roa" in r
+        assert r["roa"]["value"] == pytest.approx(0.1)
+        assert "current_ratio" not in r
+        assert "debt_to_equity" not in r
+        assert "roe" not in r
+        assert "gross_margin" not in r
+        assert "net_margin" not in r
+
+    def test_division_by_zero_yields_error_entry(self) -> None:
+        """denominator=0 produces {"value": None, "error": "Division by zero"}."""
+        data = {"current_assets": 100, "current_liabilities": 0}
+        result = financial_ratio_analysis(data)
+        cr = result["ratios"]["current_ratio"]
+        assert cr["value"] is None
+        assert "error" in cr
+        assert "zero" in cr["error"].lower()
+
+    def test_division_by_zero_multiple_ratios(self) -> None:
+        """Multiple zero denominators each get their own error entry."""
+        data = {
+            "current_assets": 100,
+            "current_liabilities": 0,
+            "total_debt": 200,
+            "total_equity": 0,
+        }
+        result = financial_ratio_analysis(data)
+        assert result["ratios"]["current_ratio"]["value"] is None
+        assert result["ratios"]["debt_to_equity"]["value"] is None
+
+    def test_completely_wrong_keys_returns_empty_ratios(self) -> None:
+        """No recognized keys → {"ratios": {}} — regression guard."""
+        data = {"foo": 100, "bar": 200, "baz": 300}
+        result = financial_ratio_analysis(data)
+        assert result == {"ratios": {}}
+
+    def test_empty_financial_data_returns_empty_ratios(self) -> None:
+        """Empty dict → {"ratios": {}}."""
+        result = financial_ratio_analysis({})
+        assert result == {"ratios": {}}
+
+    def test_current_ratio_isolated(self) -> None:
+        """current_assets / current_liabilities computed in isolation."""
+        result = financial_ratio_analysis({"current_assets": 300, "current_liabilities": 150})
+        assert result["ratios"]["current_ratio"]["value"] == pytest.approx(2.0)
+
+    def test_debt_to_equity_isolated(self) -> None:
+        """total_debt / total_equity computed in isolation."""
+        result = financial_ratio_analysis({"total_debt": 500, "total_equity": 250})
+        assert result["ratios"]["debt_to_equity"]["value"] == pytest.approx(2.0)
+
+    def test_roe_isolated(self) -> None:
+        """net_income / total_equity = roe."""
+        result = financial_ratio_analysis({"net_income": 75, "total_equity": 500})
+        assert result["ratios"]["roe"]["value"] == pytest.approx(0.15)
+
+    def test_roa_isolated(self) -> None:
+        """net_income / total_assets = roa."""
+        result = financial_ratio_analysis({"net_income": 50, "total_assets": 1000})
+        assert result["ratios"]["roa"]["value"] == pytest.approx(0.05)
+
+    def test_gross_margin_isolated(self) -> None:
+        """gross_profit / revenue = gross_margin."""
+        result = financial_ratio_analysis({"gross_profit": 300, "revenue": 500})
+        assert result["ratios"]["gross_margin"]["value"] == pytest.approx(0.6)
+
+    def test_net_margin_isolated(self) -> None:
+        """net_income / revenue = net_margin."""
+        result = financial_ratio_analysis({"net_income": 100, "revenue": 1000})
+        assert result["ratios"]["net_margin"]["value"] == pytest.approx(0.1)
+
+    def test_interest_coverage_isolated(self) -> None:
+        """ebitda / interest_expense = interest_coverage."""
+        result = financial_ratio_analysis({"ebitda": 200, "interest_expense": 40})
+        assert result["ratios"]["interest_coverage"]["value"] == pytest.approx(5.0)
+
+    def test_benchmark_above(self) -> None:
+        """value > benchmark (>5%) → comparison = 'above_benchmark'."""
+        data = {"current_assets": 300, "current_liabilities": 100}
+        result = financial_ratio_analysis(data, industry_benchmarks={"current_ratio": 2.0})
+        cr = result["ratios"]["current_ratio"]
+        assert cr["value"] == pytest.approx(3.0)
+        assert cr["comparison"] == "above_benchmark"
+        assert cr["benchmark"] == 2.0
+
+    def test_benchmark_below(self) -> None:
+        """value < benchmark (>5% difference) → comparison = 'below_benchmark'."""
+        data = {"current_assets": 100, "current_liabilities": 200}
+        result = financial_ratio_analysis(data, industry_benchmarks={"current_ratio": 2.0})
+        cr = result["ratios"]["current_ratio"]
+        assert cr["value"] == pytest.approx(0.5)
+        assert cr["comparison"] == "below_benchmark"
+
+    def test_benchmark_at(self) -> None:
+        """value == benchmark → comparison = 'at_benchmark'."""
+        data = {"current_assets": 200, "current_liabilities": 100}
+        result = financial_ratio_analysis(data, industry_benchmarks={"current_ratio": 2.0})
+        cr = result["ratios"]["current_ratio"]
+        assert cr["comparison"] == "at_benchmark"
+
+    def test_benchmark_only_for_ratios_in_benchmarks_dict(self) -> None:
+        """Benchmark comparison only added for ratios present in industry_benchmarks."""
+        data = {
+            "current_assets": 200,
+            "current_liabilities": 100,
+            "net_income": 50,
+            "total_assets": 500,
+        }
+        result = financial_ratio_analysis(data, industry_benchmarks={"current_ratio": 2.0})
+        # current_ratio has benchmark info
+        assert "comparison" in result["ratios"]["current_ratio"]
+        assert "benchmark" in result["ratios"]["current_ratio"]
+        # roa does NOT have benchmark info (not in benchmarks dict)
+        assert "comparison" not in result["ratios"]["roa"]
+        assert "benchmark" not in result["ratios"]["roa"]
+
+    def test_output_structure_each_ratio_has_value_key(self) -> None:
+        """Every computed ratio entry always has a 'value' key."""
+        data = {
+            "current_assets": 200,
+            "current_liabilities": 100,
+            "total_debt": 100,
+            "total_equity": 200,
+        }
+        result = financial_ratio_analysis(data)
+        for ratio_name, entry in result["ratios"].items():
+            assert "value" in entry, f"Ratio '{ratio_name}' missing 'value' key"
+
+    def test_ratio_values_rounded_to_four_decimal_places(self) -> None:
+        """Ratio values are rounded to 4 decimal places."""
+        data = {"net_income": 1, "revenue": 3}  # 1/3 = 0.3333...
+        result = financial_ratio_analysis(data)
+        val = result["ratios"]["net_margin"]["value"]
+        # Should be 0.3333 (4 decimals), not 0.33333333...
+        assert val == pytest.approx(round(1 / 3, 4))

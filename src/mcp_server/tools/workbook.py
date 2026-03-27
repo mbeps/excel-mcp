@@ -11,6 +11,7 @@ from openpyxl.utils import get_column_letter
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
+    read_sheet_df,
     save_workbook_safe,
     validate_file_path,
 )
@@ -46,28 +47,13 @@ def get_workbook_metadata(file_path: str) -> dict:
         wb.close()
 
 
-def list_sheets(file_path: str) -> list[dict]:
-    """Return a list of sheet info dicts with name and dimensions."""
-    wb = load_workbook_safe(file_path, read_only=True)
-    try:
-        return [
-            {
-                "name": ws.title,
-                "min_row": ws.min_row,
-                "max_row": ws.max_row,
-                "min_col": ws.min_column,
-                "max_col": ws.max_column,
-            }
-            for ws in wb.worksheets
-        ]
-    finally:
-        wb.close()
-
-
-def create_workbook(file_path: str, sheet_names: list[str] | None = None) -> dict:
+def create_workbook(file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None) -> dict:
     """Create a new .xlsx workbook with optional sheet names."""
     validate_file_path(file_path, must_exist=False)
     wb = Workbook()
+
+    if sheet_name and not sheet_names:
+        sheet_names = [sheet_name]
 
     if sheet_names:
         for name in sheet_names:
@@ -86,20 +72,30 @@ def get_sheet_summary(file_path: str, sheet_name: str) -> dict:
     try:
         ws = get_sheet(wb, sheet_name)
         min_row = ws.min_row or 1
-        max_row = ws.max_row or 1
         min_col = ws.min_column or 1
-        max_col = ws.max_column or 1
+
+        try:
+            df = read_sheet_df(file_path, sheet_name)
+            row_count = len(df) + 1  # +1 for header
+            col_count = len(df.columns)
+        except Exception:
+            row_count = ws.max_row or 0
+            col_count = ws.max_column or 0
+
+        max_row = min_row + row_count - 1
+        max_col = min_col + col_count - 1
 
         headers = []
-        for row in ws.iter_rows(min_row=min_row, max_row=min_row, min_col=min_col, max_col=max_col):
-            headers = [cell.value for cell in row]
+        if col_count > 0:
+            for row in ws.iter_rows(min_row=min_row, max_row=min_row, min_col=min_col, max_col=min_col + col_count - 1):
+                headers = [cell.value for cell in row]
 
         used_range = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
 
         return {
             "name": ws.title,
-            "row_count": max_row - min_row + 1,
-            "col_count": max_col - min_col + 1,
+            "row_count": row_count,
+            "col_count": col_count,
             "headers": [str(h) if h is not None else "" for h in headers],
             "used_range": used_range,
         }
@@ -156,7 +152,7 @@ def write_multi_sheet(
     for sheet_def in sheets:
         name = sheet_def["name"]
         headers = sheet_def.get("headers")
-        data = sheet_def.get("data")
+        data = sheet_def.get("data") or sheet_def.get("values")
         column_widths = sheet_def.get("column_widths")
 
         ws = wb.create_sheet(title=name)

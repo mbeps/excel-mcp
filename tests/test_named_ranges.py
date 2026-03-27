@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import openpyxl
 
-import pytest
-
 from mcp_server.tools.named_ranges import (
     create_named_range,
     delete_named_range,
     list_named_ranges,
-    rename_named_range,
     update_named_range,
 )
 
@@ -45,25 +42,23 @@ def test_update_named_range(sample_xlsx: str) -> None:
     assert wb.defined_names["UpdateMe"].attr_text == "Sheet1!$A$1:$D$6"
     wb.close()
 
+import pytest
 
-def test_rename_named_range(sample_xlsx: str) -> None:
-    create_named_range(sample_xlsx, "OldRangeName", "Sheet1!$A$1:$B$3")
-    result = rename_named_range(sample_xlsx, "OldRangeName", "NewRangeName")
-    assert "NewRangeName" in result
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert "NewRangeName" in wb.defined_names
-    assert "OldRangeName" not in wb.defined_names
-    assert wb.defined_names["NewRangeName"].attr_text == "Sheet1!$A$1:$B$3"
-    wb.close()
+def test_named_range_with_scope(sample_xlsx: str) -> None:
+    # Test local scope
+    create_named_range(sample_xlsx, "LocalRange", "Sheet1!$A$1:$A$2", scope="Sheet1")
+    result = list_named_ranges(sample_xlsx)
+    local_range = next(r for r in result if r["name"] == "LocalRange")
+    assert local_range["scope"] == "Sheet1"
 
+    # Test error on invalid scope
+    with pytest.raises(ValueError, match="Sheet 'MissingSheet' not found"):
+        create_named_range(sample_xlsx, "Fail", "Sheet1!$A$1", scope="MissingSheet")
 
-def test_rename_named_range_not_found(sample_xlsx: str) -> None:
-    with pytest.raises(ValueError, match="not found"):
-        rename_named_range(sample_xlsx, "DoesNotExist", "AnyName")
+def test_delete_missing_named_range_error(sample_xlsx: str) -> None:
+    with pytest.raises(ValueError, match="Named range 'Missing' not found"):
+        delete_named_range(sample_xlsx, "Missing")
 
-
-def test_rename_named_range_target_exists(sample_xlsx: str) -> None:
-    create_named_range(sample_xlsx, "Alpha", "Sheet1!$A$1")
-    create_named_range(sample_xlsx, "Beta", "Sheet1!$B$1")
-    with pytest.raises(ValueError, match="already exists"):
-        rename_named_range(sample_xlsx, "Alpha", "Beta")
+def test_update_missing_named_range_error(sample_xlsx: str) -> None:
+    with pytest.raises(ValueError, match="Named range 'Missing' not found"):
+        update_named_range(sample_xlsx, "Missing", "Sheet1!$A$1")

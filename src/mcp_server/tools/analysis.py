@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import difflib
-import re
 from logging import Logger
 
 import openpyxl
@@ -13,6 +12,7 @@ from scipy import stats
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
+    read_sheet_df,
     save_workbook_safe,
     validate_file_path,
 )
@@ -25,78 +25,8 @@ AGGREGATE_OPERATIONS = {"sum", "mean", "count", "min", "max", "median", "std"}
 
 
 def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
-    from mcp_server.utils.excel_helpers import read_sheet_df
 
     return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
-
-
-def filter_data(
-    file_path: str,
-    sheet_name: str,
-    column: str,
-    operator: str,
-    value: int | float | str,
-    has_header: bool = True,
-    case_sensitive: bool = False,
-) -> dict:
-    """Filter rows by a column condition."""
-    if operator not in FILTER_OPERATORS:
-        raise ValueError(f"Unsupported operator '{operator}'. Allowed: {FILTER_OPERATORS}")
-
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
-
-    col = df[column]
-    if operator == "==":
-        mask = col == value
-    elif operator == "!=":
-        mask = col != value
-    elif operator in {">", "<", ">=", "<="}:
-        numeric_value = pd.to_numeric(value, errors="coerce")
-        if pd.notna(numeric_value):
-            numeric_col = pd.to_numeric(col, errors="coerce")
-            if operator == ">":
-                mask = numeric_col > numeric_value
-            elif operator == "<":
-                mask = numeric_col < numeric_value
-            elif operator == ">=":
-                mask = numeric_col >= numeric_value
-            else:
-                mask = numeric_col <= numeric_value
-        else:
-            str_col = col.astype(str)
-            str_val = str(value)
-            if operator == ">":
-                mask = str_col > str_val
-            elif operator == "<":
-                mask = str_col < str_val
-            elif operator == ">=":
-                mask = str_col >= str_val
-            else:
-                mask = str_col <= str_val
-    elif operator == "contains":
-        mask = col.astype(str).str.contains(str(value), case=case_sensitive, na=False)
-    elif operator == "startswith":
-        sv = str(value)
-        if not case_sensitive:
-            mask = col.astype(str).str.lower().str.startswith(sv.lower(), na=False)
-        else:
-            mask = col.astype(str).str.startswith(sv, na=False)
-    else:  # endswith
-        sv = str(value)
-        if not case_sensitive:
-            mask = col.astype(str).str.lower().str.endswith(sv.lower(), na=False)
-        else:
-            mask = col.astype(str).str.endswith(sv, na=False)
-
-    matched = df[mask]
-    return {
-        "matched_rows": matched.values.tolist(),
-        "total_rows": len(df),
-        "matched_count": len(matched),
-        "headers": list(df.columns),
-    }
 
 
 def filter_data_advanced(
@@ -112,8 +42,6 @@ def filter_data_advanced(
         raise ValueError(f"Logic must be 'AND' or 'OR', got '{logic}'")
     if not conditions:
         raise ValueError("At least one condition is required")
-
-    from mcp_server.utils.excel_helpers import read_sheet_df
 
     df = read_sheet_df(file_path, sheet_name, header_row=header_row)
 
@@ -259,27 +187,41 @@ def column_statistics(file_path: str, sheet_name: str, column: str, has_header: 
 def aggregate_data(
     file_path: str,
     sheet_name: str,
-    group_by: str,
+    group_by: str | list[str],
     value_column: str,
-    operation: str,
+    operation: str = "sum",
     has_header: bool = True,
+    aggfunc: str | dict | None = None,
 ) -> dict:
-    """Group by a column and apply an aggregation operation."""
-    if operation not in AGGREGATE_OPERATIONS:
-        raise ValueError(f"Unsupported operation '{operation}'. Allowed: {AGGREGATE_OPERATIONS}")
-
+    """Group by one or more columns and apply an aggregation operation."""
+    group_cols = [group_by] if isinstance(group_by, str) else list(group_by)
     df = _read_sheet_df(file_path, sheet_name, has_header)
-    for col_name in (group_by, value_column):
+    for col_name in group_cols:
         if col_name not in df.columns:
             raise ValueError(f"Column '{col_name}' not found. Available: {list(df.columns)}")
 
-    grouped = df.groupby(group_by)[value_column].agg(operation).reset_index()
-    grouped.columns = [group_by, f"{value_column}_{operation}"]
+    effective_aggfunc = aggfunc if aggfunc is not None else operation
+
+    if isinstance(effective_aggfunc, dict):
+        for col_name in effective_aggfunc:
+            if col_name not in df.columns:
+                raise ValueError(f"Column '{col_name}' not found. Available: {list(df.columns)}")
+        grouped = df.groupby(group_cols).agg(effective_aggfunc).reset_index()
+        grouped.columns = [
+            "_".join(str(c) for c in col).strip("_") if isinstance(col, tuple) else col for col in grouped.columns
+        ]
+    else:
+        if effective_aggfunc not in AGGREGATE_OPERATIONS:
+            raise ValueError(f"Unsupported operation '{effective_aggfunc}'. Allowed: {AGGREGATE_OPERATIONS}")
+        if value_column not in df.columns:
+            raise ValueError(f"Column '{value_column}' not found. Available: {list(df.columns)}")
+        grouped = df.groupby(group_cols)[value_column].agg(effective_aggfunc).reset_index()
+        grouped.columns = list(group_cols) + [f"{value_column}_{effective_aggfunc}"]
 
     return {
         "groups": grouped.to_dict(orient="records"),
         "group_by": group_by,
-        "operation": operation,
+        "operation": effective_aggfunc,
     }
 
 
@@ -296,247 +238,6 @@ def find_duplicates(file_path: str, sheet_name: str, columns: list[str], has_hea
         "duplicates": dupes.values.tolist(),
         "count": len(dupes),
         "headers": list(df.columns),
-    }
-
-
-def profile_data(file_path: str, sheet_name: str) -> dict:
-    """Comprehensive data profiling: types, missing values, duplicates, summary stats."""
-    df = _read_sheet_df(file_path, sheet_name, has_header=True)
-
-    missing = {col: int(df[col].isna().sum()) for col in df.columns}
-
-    numeric_cols = df.select_dtypes(include="number")
-    summary = {}
-    if not numeric_cols.empty:
-        desc = numeric_cols.describe()
-        summary = {col: desc[col].to_dict() for col in desc.columns}
-
-    cat_cols = df.select_dtypes(exclude="number")
-    categorical: dict = {}
-    for col in cat_cols.columns:
-        vc = df[col].value_counts()
-        categorical[col] = {
-            "unique_count": int(df[col].nunique()),
-            "top_value": str(vc.index[0]) if len(vc) > 0 else None,
-            "top_count": int(vc.iloc[0]) if len(vc) > 0 else None,
-            "null_count": int(df[col].isna().sum()),
-        }
-
-    return {
-        "columns": [{"name": col, "dtype": str(df[col].dtype)} for col in df.columns],
-        "row_count": len(df),
-        "missing_values": missing,
-        "duplicates": int(df.duplicated().sum()),
-        "summary_statistics": summary,
-        "categorical_columns": categorical,
-    }
-
-
-def search_replace(
-    file_path: str,
-    sheet_name: str,
-    search_value: str,
-    replace_value: str,
-    cell_range: str | None = None,
-    use_regex: bool = False,
-) -> str:
-    """Find and replace values in a sheet or specific range."""
-    wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
-
-    count = 0
-    if cell_range:
-        from openpyxl.utils import range_boundaries
-
-        min_col, min_row, max_col, max_row = range_boundaries(cell_range)
-        cells = ws.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col)
-    else:
-        cells = ws.iter_rows(
-            min_row=ws.min_row or 1,
-            max_row=ws.max_row or 1,
-            min_col=ws.min_column or 1,
-            max_col=ws.max_column or 1,
-        )
-
-    for row in cells:
-        for cell in row:
-            if cell.value is not None:
-                if use_regex:
-                    if re.search(search_value, str(cell.value)):
-                        cell.value = re.sub(search_value, replace_value, str(cell.value))
-                        count += 1
-                elif str(cell.value) == str(search_value):
-                    cell.value = replace_value
-                    count += 1
-
-    save_workbook_safe(wb, file_path)
-    logger.info("Replaced %d occurrences of '%s' in %s!%s", count, search_value, sheet_name, file_path)
-    return f"Replaced {count} occurrence(s) of '{search_value}' with '{replace_value}' in '{sheet_name}'."
-
-
-def calculate_correlation(
-    file_path: str,
-    sheet_name: str,
-    columns: list[str],
-    has_header: bool = True,
-) -> dict:
-    """Calculate correlation matrix between specified numeric columns."""
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    for c in columns:
-        if c not in df.columns:
-            raise ValueError(f"Column '{c}' not found. Available: {list(df.columns)}")
-
-    corr = df[columns].corr()
-    return {
-        "columns": columns,
-        "matrix": corr.values.tolist(),
-    }
-
-
-def rank_data(
-    file_path: str,
-    sheet_name: str,
-    column: str,
-    method: str = "dense",
-    ascending: bool = True,
-    has_header: bool = True,
-) -> dict:
-    """Rank values in a column."""
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
-
-    ranks = df[column].rank(method=method, ascending=ascending)
-    rankings = [{"value": v, "rank": r} for v, r in zip(df[column].tolist(), ranks.tolist())]
-    return {
-        "column": column,
-        "method": method,
-        "rankings": rankings,
-    }
-
-
-def calculate_percentiles(
-    file_path: str,
-    sheet_name: str,
-    column: str,
-    percentiles: list[float] | None = None,
-    has_header: bool = True,
-) -> dict:
-    """Calculate percentile values for a column."""
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
-
-    if percentiles is None:
-        percentiles = [0.1, 0.25, 0.5, 0.75, 0.9]
-
-    result = df[column].quantile(percentiles)
-    return {
-        "column": column,
-        "percentile_values": {str(p): float(v) for p, v in result.items()},
-    }
-
-
-def sample_data(
-    file_path: str,
-    sheet_name: str,
-    n: int = 10,
-    fraction: float | None = None,
-    random_state: int | None = None,
-    has_header: bool = True,
-) -> dict:
-    """Random sample of rows from a sheet."""
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-
-    if fraction is not None:
-        sampled = df.sample(frac=fraction, random_state=random_state)
-    else:
-        sampled = df.sample(n=min(n, len(df)), random_state=random_state)
-
-    return {
-        "rows": sampled.values.tolist(),
-        "sample_size": len(sampled),
-        "total_rows": len(df),
-        "headers": list(df.columns),
-    }
-
-
-def create_histogram(
-    file_path: str,
-    sheet_name: str,
-    column: str,
-    bins: int = 10,
-    has_header: bool = True,
-) -> dict:
-    """Create histogram bins for a numeric column."""
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
-
-    cut = pd.cut(df[column], bins=bins)
-    counts = cut.value_counts(sort=False)
-    bin_edges = [float(interval.left) for interval in counts.index] + [float(counts.index[-1].right)]
-    frequencies = counts.tolist()
-
-    return {
-        "column": column,
-        "bin_edges": bin_edges,
-        "frequencies": frequencies,
-    }
-
-
-def transpose_data(
-    file_path: str,
-    sheet_name: str,
-    output_sheet: str | None = None,
-    has_header: bool = True,
-) -> str:
-    """Transpose data (rows <-> columns) and write back."""
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    transposed = df.T
-
-    target_sheet = output_sheet or sheet_name
-    wb = load_workbook_safe(file_path)
-
-    if target_sheet in wb.sheetnames:
-        ws = wb[target_sheet]
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.value = None
-    else:
-        ws = wb.create_sheet(target_sheet)
-
-    # Row 1: original row indices as column headers (first cell left blank)
-    for c_idx, col_val in enumerate(transposed.columns.tolist(), start=2):
-        ws.cell(row=1, column=c_idx, value=col_val)
-
-    # Rows 2+: original column name in first cell, transposed values after
-    for r_idx, (row_label, row_data) in enumerate(transposed.iterrows(), start=2):
-        ws.cell(row=r_idx, column=1, value=row_label)
-        for c_idx, val in enumerate(row_data.tolist(), start=2):
-            ws.cell(row=r_idx, column=c_idx, value=val)
-
-    save_workbook_safe(wb, file_path)
-    logger.info("Transposed data from '%s' to '%s' in %s", sheet_name, target_sheet, file_path)
-    return f"Transposed data from '{sheet_name}' to '{target_sheet}' ({len(df)} rows -> {len(df.columns)} rows)."
-
-
-def extract_unique_values(
-    file_path: str,
-    sheet_name: str,
-    column: str,
-    has_header: bool = True,
-) -> dict:
-    """Extract unique values from a column."""
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
-
-    unique = df[column].dropna().unique().tolist()
-    return {
-        "column": column,
-        "unique_values": unique,
-        "count": len(unique),
     }
 
 
@@ -563,10 +264,13 @@ def vlookup_helper(
 
     # Extract lookup values (skip header row)
     lookup_values: list[tuple[int, str | int | float | None]] = []
-    for row in lookup_ws.iter_rows(min_row=header_row + 1, max_row=lookup_ws.max_row):
+    for row_idx, row in enumerate(
+        lookup_ws.iter_rows(min_row=header_row + 1, max_row=lookup_ws.max_row),
+        start=header_row + 1,
+    ):
         cell = row[lookup_col_idx - 1] if lookup_col_idx - 1 < len(row) else None
-        if cell is not None:
-            lookup_values.append((cell.row, cell.value))
+        if cell is not None and cell.value is not None:
+            lookup_values.append((row_idx, cell.value))
     lookup_wb.close()
 
     # Load data workbook
@@ -681,175 +385,3 @@ def vlookup_helper(
         "results": results,
         "output_file": output_file,
     }
-
-
-def find_cells_by_format(
-    file_path: str,
-    sheet_name: str,
-    bold: bool | None = None,
-    italic: bool | None = None,
-    fill_color: str | None = None,
-    font_color: str | None = None,
-    number_format: str | None = None,
-) -> list[dict]:
-    """Find cells matching specified formatting conditions.
-
-    At least one condition must be provided.
-    Returns list of {cell_ref, value, bold, italic, fill_color, font_color, number_format}.
-    """
-    if all(v is None for v in (bold, italic, fill_color, font_color, number_format)):
-        raise ValueError("At least one formatting condition must be specified.")
-
-    wb = load_workbook_safe(file_path)
-    try:
-        ws = get_sheet(wb, sheet_name)
-
-        results = []
-        for row in ws.iter_rows():
-            for cell in row:
-                font = cell.font
-                fill = cell.fill
-
-                if bold is not None and font.bold != bold:
-                    continue
-                if italic is not None and font.italic != italic:
-                    continue
-                if fill_color is not None:
-                    fg = fill.fgColor
-                    cell_color = fg.rgb if fg.type == "rgb" else str(fg.value or "")
-                    if fill_color.upper() not in cell_color.upper():
-                        continue
-                if font_color is not None:
-                    fc = font.color
-                    cell_font_color = (fc.rgb if fc and fc.type == "rgb" else "") or ""
-                    if font_color.upper() not in cell_font_color.upper():
-                        continue
-                if number_format is not None and number_format not in (cell.number_format or ""):
-                    continue
-
-                fg = fill.fgColor
-                cell_fill_rgb = fg.rgb if fg.type == "rgb" else str(fg.value or "")
-                fc = font.color
-                cell_font_rgb = (fc.rgb if fc and fc.type == "rgb" else "") or ""
-
-                results.append(
-                    {
-                        "cell_ref": cell.coordinate,
-                        "value": cell.value,
-                        "bold": font.bold,
-                        "italic": font.italic,
-                        "fill_color": cell_fill_rgb,
-                        "font_color": cell_font_rgb,
-                        "number_format": cell.number_format,
-                    }
-                )
-
-        logger.info("Found %d cells matching format criteria in %s!%s", len(results), sheet_name, file_path)
-        return results
-    finally:
-        wb.close()
-
-
-def normalize_data(
-    file_path: str,
-    sheet_name: str,
-    columns: list[str],
-    method: str = "min_max",
-    output_sheet: str | None = None,
-    has_header: bool = True,
-) -> str:
-    """Normalize numeric columns using min-max [0,1] or z-score normalization.
-
-    Writes normalized values back to the sheet (in-place or to output_sheet).
-    Returns a summary string.
-    """
-    if method not in ("min_max", "zscore"):
-        raise ValueError(f"Unsupported method '{method}'. Allowed: 'min_max', 'zscore'.")
-
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    for col in columns:
-        if col not in df.columns:
-            raise ValueError(f"Column '{col}' not found. Available: {list(df.columns)}")
-
-    normalized_cols = []
-    skipped_cols = []
-    for col in columns:
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            skipped_cols.append(col)
-            continue
-        if method == "min_max":
-            col_min = df[col].min()
-            col_max = df[col].max()
-            if col_max == col_min:
-                df[col] = 0.0
-            else:
-                df[col] = (df[col] - col_min) / (col_max - col_min)
-        else:  # zscore
-            col_mean = df[col].mean()
-            col_std = df[col].std()
-            if col_std == 0:
-                df[col] = 0.0
-            else:
-                df[col] = (df[col] - col_mean) / col_std
-        normalized_cols.append(col)
-
-    target_sheet = output_sheet or sheet_name
-    wb = load_workbook_safe(file_path)
-    try:
-        if target_sheet in wb.sheetnames:
-            ws = wb[target_sheet]
-            for row in ws.iter_rows():
-                for cell in row:
-                    cell.value = None
-        else:
-            ws = wb.create_sheet(target_sheet)
-
-        if has_header:
-            for c_idx, col_name in enumerate(df.columns, start=1):
-                ws.cell(row=1, column=c_idx, value=col_name)
-            for r_idx, row_data in enumerate(df.values.tolist(), start=2):
-                for c_idx, val in enumerate(row_data, start=1):
-                    ws.cell(row=r_idx, column=c_idx, value=val)
-        else:
-            for r_idx, row_data in enumerate(df.values.tolist(), start=1):
-                for c_idx, val in enumerate(row_data, start=1):
-                    ws.cell(row=r_idx, column=c_idx, value=val)
-
-        save_workbook_safe(wb, file_path)
-    finally:
-        wb.close()
-    logger.info("Normalized columns %s in '%s' using '%s'", normalized_cols, sheet_name, method)
-
-    parts = [f"Normalized {len(normalized_cols)} column(s) using '{method}': {normalized_cols}."]
-    if skipped_cols:
-        parts.append(f"Skipped non-numeric: {skipped_cols}.")
-    return " ".join(parts)
-
-
-def export_analysis(
-    data: list[dict] | list[list],
-    output_file: str,
-    sheet_name: str = "Analysis",
-    headers: list[str] | None = None,
-) -> str:
-    """Write analysis results (list of dicts or list of lists) to a new Excel file."""
-    validate_file_path(output_file, must_exist=False)
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet_name
-
-    if data and isinstance(data[0], dict):
-        col_headers = headers or list(data[0].keys())
-        ws.append(col_headers)
-        for row in data:
-            ws.append([row.get(h) for h in col_headers])
-    else:
-        if headers:
-            ws.append(headers)
-        for row in data:
-            ws.append(list(row))
-
-    save_workbook_safe(wb, output_file)
-    logger.info("Exported %d rows to '%s'", len(data), output_file)
-    return output_file

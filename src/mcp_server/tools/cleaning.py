@@ -57,7 +57,7 @@ def _trim_whitespace(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataF
     count = 0
     for col in target_cols:
         col_dtype = df[col].dtype
-        if col_dtype == object:
+        if col_dtype is object:
             # Object dtype may contain mixed types — only process actual strings
             str_mask = df[col].apply(lambda x: isinstance(x, str))
             if not str_mask.any():
@@ -153,6 +153,53 @@ def _fill_missing(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataFram
     return df, count
 
 
+def _fill_missing_with_strategy(df: pd.DataFrame, target_cols: list[str], strategy: str) -> tuple[pd.DataFrame, int]:
+    """Fill missing values using a named strategy."""
+    if strategy == "value":
+        return _fill_missing(df, target_cols)
+
+    count = 0
+    if strategy == "ffill":
+        before = int(df[target_cols].isna().sum().sum())
+        for col in target_cols:
+            df[col] = df[col].ffill()
+        after = int(df[target_cols].isna().sum().sum())
+        count = before - after
+    elif strategy == "bfill":
+        before = int(df[target_cols].isna().sum().sum())
+        for col in target_cols:
+            df[col] = df[col].bfill()
+        after = int(df[target_cols].isna().sum().sum())
+        count = before - after
+    elif strategy == "mean":
+        for col in target_cols:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                na_count = int(df[col].isna().sum())
+                if na_count > 0:
+                    df[col] = df[col].fillna(df[col].mean())
+                    count += na_count
+    elif strategy == "median":
+        for col in target_cols:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                na_count = int(df[col].isna().sum())
+                if na_count > 0:
+                    df[col] = df[col].fillna(df[col].median())
+                    count += na_count
+    elif strategy == "mode":
+        for col in target_cols:
+            mode_series = df[col].mode()
+            if not mode_series.empty:
+                na_count = int(df[col].isna().sum())
+                if na_count > 0:
+                    df[col] = df[col].fillna(mode_series.iloc[0])
+                    count += na_count
+    else:
+        raise ValueError(
+            f"Unknown fill_missing_strategy '{strategy}'. Allowed: ffill, bfill, mean, median, mode, value"
+        )
+    return df, count
+
+
 _OPERATION_MAP = {
     "trim_whitespace": _trim_whitespace,
     "remove_empty_rows": _remove_empty_rows,
@@ -200,6 +247,7 @@ def data_cleaner(
     preview: bool = False,
     output_file: str | None = None,
     header_row: int = 1,
+    fill_missing_strategy: str = "value",
 ) -> dict:
     """Run a configurable data cleaning pipeline on a sheet."""
     validate_file_path(file_path)
@@ -223,7 +271,10 @@ def data_cleaner(
         if not target:
             changes[op] = 0
             continue
-        df, count = _OPERATION_MAP[op](df, target)
+        if op == "fill_missing" and fill_missing_strategy != "value":
+            df, count = _fill_missing_with_strategy(df, target, fill_missing_strategy)
+        else:
+            df, count = _OPERATION_MAP[op](df, target)
         changes[op] = count
 
     rows_after = len(df)
@@ -352,7 +403,7 @@ def split_column(
     sheet_name: str = "Sheet1",
     column: str = "A",
     delimiter: str = ",",
-    new_column_names: list[str] | None = None,
+    new_columns: list[str] | None = None,
     drop_original: bool = True,
     output_file: str | None = None,
     header_row: int = 1,
@@ -368,8 +419,8 @@ def split_column(
     split_df = df[col_name].astype(str).str.split(delimiter, expand=True)
     num_parts = split_df.shape[1]
 
-    if new_column_names:
-        names = list(new_column_names[:num_parts])
+    if new_columns:
+        names = list(new_columns[:num_parts])
         # Pad with auto-generated names if fewer than num_parts were supplied
         for i in range(len(names), num_parts):
             names.append(f"{col_name}_{i + 1}")
@@ -395,104 +446,45 @@ def split_column(
     }
 
 
-def combine_columns(
+def parse_date_column(
     file_path: str,
-    sheet_name: str = "Sheet1",
-    columns: list[str] | None = None,
-    new_column_name: str = "combined",
-    separator: str = " ",
-    drop_originals: bool = False,
-    output_file: str | None = None,
+    sheet_name: str,
+    column: str,
+    output_column: str | None = None,
+    output_format: str = "%Y-%m-%d",
+    dayfirst: bool = True,
     header_row: int = 1,
 ) -> dict:
-    """Concatenate multiple columns into one with a separator.
-
-    Returns: {new_column: str, rows_affected: int, output_file: str}
-    """
-    validate_file_path(file_path)
-    if not columns:
-        raise ValueError("'columns' must be a non-empty list of column references.")
-
+    """Parse and normalize mixed date formats in a column to a standard format."""
     df = read_sheet_df(file_path, sheet_name, header_row)
-    col_names = [_resolve_col(df, c) for c in columns]
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
 
-    df[new_column_name] = df[col_names].apply(lambda row: separator.join(str(v) for v in row), axis=1)
+    parsed = pd.to_datetime(df[column], dayfirst=dayfirst, errors="coerce")
+    formatted = parsed.dt.strftime(output_format)
+    # Replace NaT results (shown as "NaT") with None
+    formatted = formatted.where(parsed.notna(), other=None)
 
-    if drop_originals:
-        df = df.drop(columns=[c for c in col_names if c != new_column_name])
+    write_col = output_column if output_column else column
 
-    save_path = _write_df_to_workbook(df, file_path, sheet_name, output_file)
-    logger.info("combine_columns: combined %s into '%s' in %s", col_names, new_column_name, save_path)
-
-    return {
-        "new_column": new_column_name,
-        "rows_affected": len(df),
-        "output_file": save_path,
-    }
-
-
-def detect_outliers(
-    file_path: str,
-    sheet_name: str = "Sheet1",
-    column: str = "A",
-    method: str = "iqr",
-    threshold: float = 1.5,
-    action: str = "flag",
-    flag_column_name: str | None = None,
-    output_file: str | None = None,
-    header_row: int = 1,
-) -> dict:
-    """Detect outliers using IQR or z-score method; flag or remove outlier rows.
-
-    Returns: {method, outliers_found: int, outlier_rows: list[int], action, output_file}
-    outlier_rows are 1-based row numbers (header counts as row 1).
-    """
-    validate_file_path(file_path)
-    if method not in ("iqr", "zscore"):
-        raise ValueError(f"method must be 'iqr' or 'zscore', got '{method}'")
-    if action not in ("flag", "remove"):
-        raise ValueError(f"action must be 'flag' or 'remove', got '{action}'")
-
-    df = read_sheet_df(file_path, sheet_name, header_row)
-    col_name = _resolve_col(df, column)
-
-    numeric_col = pd.to_numeric(df[col_name], errors="coerce")
-
-    if method == "iqr":
-        q1 = numeric_col.quantile(0.25)
-        q3 = numeric_col.quantile(0.75)
-        iqr = q3 - q1
-        lower = q1 - threshold * iqr
-        upper = q3 + threshold * iqr
-        outlier_mask = (numeric_col < lower) | (numeric_col > upper)
-    else:  # zscore
-        mean = numeric_col.mean()
-        std = numeric_col.std()
-        if std == 0:
-            outlier_mask = pd.Series(False, index=df.index)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = wb[sheet_name] if sheet_name in wb.sheetnames else None
+        if ws is None:
+            raise ValueError(f"Sheet '{sheet_name}' not found.")
+        header_cells = [ws.cell(row=header_row, column=c).value for c in range(1, ws.max_column + 1)]
+        if write_col in header_cells:
+            col_idx = header_cells.index(write_col) + 1
         else:
-            z = (numeric_col - mean) / std
-            outlier_mask = z.abs() > threshold
+            col_idx = ws.max_column + 1
+            ws.cell(row=header_row, column=col_idx, value=write_col)
+        for r_idx, v in enumerate(formatted.tolist(), start=header_row + 1):
+            ws.cell(row=r_idx, column=col_idx, value=v)
+        save_workbook_safe(wb, file_path)
+    finally:
+        wb.close()
 
-    outlier_indices = df.index[outlier_mask].tolist()
-    # Convert to 1-based row numbers: header is row header_row, first data row is header_row+1
-    outlier_rows = [header_row + 1 + i for i in outlier_indices]
-
-    result: dict = {
-        "method": method,
-        "outliers_found": len(outlier_indices),
-        "outlier_rows": outlier_rows,
-        "action": action,
-    }
-
-    if action == "flag":
-        flag_col = flag_column_name if flag_column_name else f"{col_name}_outlier"
-        df[flag_col] = outlier_mask
-        save_path = _write_df_to_workbook(df, file_path, sheet_name, output_file)
-    else:  # remove
-        df = df[~outlier_mask].reset_index(drop=True)
-        save_path = _write_df_to_workbook(df, file_path, sheet_name, output_file)
-
-    result["output_file"] = save_path
-    logger.info("detect_outliers: found %d outliers in '%s' via %s", len(outlier_indices), col_name, method)
-    return result
+    parsed_count = int(parsed.notna().sum())
+    failed_count = int(parsed.isna().sum())
+    logger.info("parse_date_column: parsed %d/%d dates in column '%s'", parsed_count, len(df), column)
+    return {"column": column, "parsed_count": parsed_count, "failed_count": failed_count, "output_column": write_col}

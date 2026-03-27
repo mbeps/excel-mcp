@@ -17,70 +17,6 @@ logger: Logger = configure_logging(__name__)
 VALID_CALC_MODES = {"auto", "manual", "autoNoTable"}
 
 
-def get_document_properties(file_path: str) -> dict:
-    """Read workbook document properties."""
-    wb = load_workbook_safe(file_path, read_only=True)
-    try:
-        props = wb.properties
-        created = props.created.isoformat() if props.created else None
-        modified = props.modified.isoformat() if props.modified else None
-        return {
-            "title": props.title,
-            "creator": props.creator,
-            "description": props.description,
-            "subject": props.subject,
-            "keywords": props.keywords,
-            "category": props.category,
-            "lastModifiedBy": props.lastModifiedBy,
-            "created": created,
-            "modified": modified,
-            "company": getattr(props, "company", None),
-            "version": props.version,
-        }
-    finally:
-        wb.close()
-
-
-def set_document_properties(
-    file_path: str,
-    title: str | None = None,
-    creator: str | None = None,
-    description: str | None = None,
-    subject: str | None = None,
-    keywords: str | None = None,
-    category: str | None = None,
-    company: str | None = None,
-) -> str:
-    """Set document properties. Only updates fields that are not None."""
-    wb = load_workbook_safe(file_path)
-    try:
-        props = wb.properties
-
-        updated: list[str] = []
-        field_map = {
-            "title": title,
-            "creator": creator,
-            "description": description,
-            "subject": subject,
-            "keywords": keywords,
-            "category": category,
-        }
-        for field, value in field_map.items():
-            if value is not None:
-                setattr(props, field, value)
-                updated.append(field)
-
-        if company is not None and hasattr(props, "company"):
-            props.company = company
-            updated.append("company")
-
-        save_workbook_safe(wb, file_path)
-        logger.info("Updated document properties %s in %s", updated, file_path)
-        return f"Updated properties: {', '.join(updated)}."
-    finally:
-        wb.close()
-
-
 def protect_workbook(
     file_path: str,
     password: str | None = None,
@@ -121,11 +57,34 @@ def unprotect_workbook(file_path: str) -> str:
         wb.close()
 
 
+def get_document_properties(file_path: str) -> dict:
+    """Read workbook document properties."""
+    wb = load_workbook_safe(file_path, read_only=True)
+    try:
+        props = wb.properties
+        created = props.created.isoformat() if props.created else None
+        modified = props.modified.isoformat() if props.modified else None
+        return {
+            "title": props.title,
+            "creator": props.creator,
+            "description": props.description,
+            "subject": props.subject,
+            "keywords": props.keywords,
+            "category": props.category,
+            "lastModifiedBy": props.lastModifiedBy,
+            "created": created,
+            "modified": modified,
+            "company": getattr(props, "company", None),
+            "version": props.version,
+        }
+    finally:
+        wb.close()
+
+
 def set_calculation_mode(file_path: str, mode: str = "auto") -> str:
     """Set workbook calculation mode: 'auto', 'manual', or 'autoNoTable'."""
     if mode not in VALID_CALC_MODES:
         raise ValueError(f"Invalid calculation mode '{mode}'. Must be one of: {VALID_CALC_MODES}")
-
     wb = load_workbook_safe(file_path)
     try:
         if wb.calculation is None:

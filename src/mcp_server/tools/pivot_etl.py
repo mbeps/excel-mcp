@@ -106,21 +106,31 @@ def create_pivot_table(
     sheet_name: str,
     index_cols: list[str],
     value_cols: list[str],
-    aggfunc: str = "sum",
+    aggfunc: str | dict = "sum",
     output_sheet: str | None = None,
     output_file: str | None = None,
     include_margins: bool = False,
+    column_field: str | None = None,
 ) -> dict:
     """Create a static pivot table using pandas and write to a sheet or file."""
     df = _read_sheet_df(file_path, sheet_name)
 
-    for col in index_cols + value_cols:
+    all_required_cols = index_cols + value_cols + ([column_field] if column_field else [])
+    for col in all_required_cols:
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found. Available: {list(df.columns)}")
 
     pivot_kwargs: dict = {"margins": True, "margins_name": "Total"} if include_margins else {}
+    if column_field:
+        pivot_kwargs["columns"] = column_field
     pivot = pd.pivot_table(df, index=index_cols, values=value_cols, aggfunc=aggfunc, **pivot_kwargs)
     pivot = pivot.reset_index()
+
+    # Flatten multi-level column headers produced by column_field
+    if column_field:
+        pivot.columns = [
+            "_".join(str(c) for c in col).strip("_") if isinstance(col, tuple) else str(col) for col in pivot.columns
+        ]
 
     if output_file:
         validate_file_path(output_file, must_exist=False)
@@ -136,6 +146,7 @@ def create_pivot_table(
         "data": pivot.to_dict(orient="records"),
         "index_columns": index_cols,
         "value_columns": value_cols,
+        "column_field": column_field,
         "operation": aggfunc,
     }
 
@@ -272,48 +283,3 @@ def deduplicate_data(
     save_workbook_safe(wb, file_path)
     logger.info("Removed %d duplicates from %s!%s", removed, sheet_name, file_path)
     return f"Removed {removed} duplicate row(s) from '{sheet_name}'. {len(df)} rows remain."
-
-
-def append_datasets(
-    file_path: str,
-    source_sheet: str,
-    append_sheet: str,
-    output_sheet: str,
-    has_header: bool = True,
-) -> dict:
-    """Vertically concatenate two sheets and write the result to output_sheet."""
-    df1 = _read_sheet_df(file_path, source_sheet, has_header)
-    df2 = _read_sheet_df(file_path, append_sheet, has_header)
-    result = pd.concat([df1, df2], ignore_index=True)
-    wb = load_workbook_safe(file_path)
-    _write_df_to_sheet(wb, output_sheet, result)
-    save_workbook_safe(wb, file_path)
-    logger.info("Appended %d rows to sheet '%s' in %s", len(result), output_sheet, file_path)
-    return {"rows": len(result), "output_sheet": output_sheet}
-
-
-def find_differences(
-    file_path: str,
-    sheet_a: str,
-    sheet_b: str,
-    key_columns: list[str],
-    output_sheet: str,
-) -> dict:
-    """Find rows present in sheet_a but not in sheet_b (by key columns)."""
-    df_a = _read_sheet_df(file_path, sheet_a)
-    df_b = _read_sheet_df(file_path, sheet_b)
-
-    for k in key_columns:
-        if k not in df_a.columns:
-            raise ValueError(f"Key '{k}' not found in sheet '{sheet_a}'. Available: {list(df_a.columns)}")
-        if k not in df_b.columns:
-            raise ValueError(f"Key '{k}' not found in sheet '{sheet_b}'. Available: {list(df_b.columns)}")
-
-    merged = pd.merge(df_a, df_b[key_columns].drop_duplicates(), on=key_columns, how="left", indicator=True)
-    only_in_a = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"]).reset_index(drop=True)
-
-    wb = load_workbook_safe(file_path)
-    _write_df_to_sheet(wb, output_sheet, only_in_a)
-    save_workbook_safe(wb, file_path)
-    logger.info("Found %d rows only in '%s'", len(only_in_a), sheet_a)
-    return {"rows_only_in_a": len(only_in_a), "output_sheet": output_sheet}

@@ -20,18 +20,30 @@ def list_named_ranges(file_path: str) -> list[dict]:
     wb = load_workbook_safe(file_path, read_only=True)
     try:
         results = []
-        for defn in wb.defined_names.values():
-            if defn.localSheetId is not None:
-                scope = wb.sheetnames[defn.localSheetId]
-            else:
-                scope = "workbook"
+        # Global named ranges
+        for name, defn in wb.defined_names.items():
+            dest = getattr(defn, "attr_text", str(defn.value))
             results.append(
                 {
-                    "name": defn.name,
-                    "destination": str(defn.attr_text),
-                    "scope": scope,
+                    "name": name,
+                    "destination": str(dest),
+                    "scope": "workbook",
                 }
             )
+
+        # Sheet-scoped named ranges
+        for ws in wb.worksheets:
+            for name, defn in ws.defined_names.items():
+                # Some sheet-scoped ranges might already be in wb.defined_names in older openpyxl?
+                # But typically they are in ws.defined_names in newer versions.
+                dest = getattr(defn, "attr_text", str(defn.value))
+                results.append(
+                    {
+                        "name": name,
+                        "destination": str(dest),
+                        "scope": ws.title,
+                    }
+                )
         return results
     finally:
         wb.close()
@@ -50,7 +62,10 @@ def create_named_range(file_path: str, name: str, destination: str, scope: str =
         defn = DefinedName(name, attr_text=destination)
         if local_sheet_id is not None:
             defn.localSheetId = local_sheet_id
-        wb.defined_names.add(defn)
+            wb.defined_names.add(defn)
+        else:
+            wb.defined_names.add(defn)
+
         save_workbook_safe(wb, file_path)
         logger.info("Created named range '%s' -> %s in %s", name, destination, file_path)
         return f"Named range '{name}' created with destination '{destination}'."
@@ -90,30 +105,5 @@ def update_named_range(file_path: str, name: str, new_destination: str) -> str:
         save_workbook_safe(wb, file_path)
         logger.info("Updated named range '%s' -> %s in %s", name, new_destination, file_path)
         return f"Named range '{name}' updated to '{new_destination}'."
-    finally:
-        wb.close()
-
-
-def rename_named_range(file_path: str, name: str, new_name: str) -> str:
-    """Rename an existing named range, preserving its destination and scope."""
-    wb = load_workbook_safe(file_path)
-    try:
-        if name not in wb.defined_names:
-            raise ValueError(f"Named range '{name}' not found.")
-        if new_name in wb.defined_names:
-            raise ValueError(f"Named range '{new_name}' already exists.")
-        old_defn = wb.defined_names[name]
-        local_sheet_id = old_defn.localSheetId
-        attr_text = old_defn.attr_text
-
-        del wb.defined_names[name]
-        new_defn = DefinedName(new_name, attr_text=attr_text)
-        if local_sheet_id is not None:
-            new_defn.localSheetId = local_sheet_id
-        wb.defined_names.add(new_defn)
-
-        save_workbook_safe(wb, file_path)
-        logger.info("Renamed named range '%s' -> '%s' in %s", name, new_name, file_path)
-        return f"Named range '{name}' renamed to '{new_name}'."
     finally:
         wb.close()

@@ -6,7 +6,6 @@ import ast
 import math
 from logging import Logger
 
-import numpy as np
 import numpy_financial as npf
 
 from mcp_server.utils.excel_helpers import (
@@ -114,76 +113,62 @@ def _eval_expression_vars(expr: str, variables: dict[str, float]) -> float:
     return float(eval(code, {"__builtins__": {}}, namespace))
 
 
-def calculate_npv(discount_rate: float, cash_flows: list[float]) -> dict:
-    """Calculate Net Present Value."""
-    result = npf.npv(discount_rate, cash_flows)
-    logger.info("Calculated NPV: %.2f", result)
-    return {
-        "npv": float(result),
-        "discount_rate": discount_rate,
-        "cash_flows": cash_flows,
-    }
-
-
-def calculate_irr(cash_flows: list[float]) -> dict:
-    """Calculate Internal Rate of Return."""
-    result = npf.irr(cash_flows)
-    if result is None or (hasattr(result, "__float__") and math.isnan(float(result))):
-        return {"irr": None, "message": "IRR could not be computed for the given cash flows."}
-    logger.info("Calculated IRR: %.4f", result)
-    return {"irr": float(result)}
-
-
-def calculate_pmt(rate: float, nper: int, pv: float, fv: float = 0) -> dict:
-    """Calculate periodic payment for a loan or annuity."""
-    result = npf.pmt(rate, nper, pv, fv)
-    logger.info("Calculated PMT: %.2f", result)
-    return {
-        "payment": float(result),
-        "rate": rate,
-        "nper": nper,
-        "pv": pv,
-        "fv": fv,
-    }
-
-
 def goal_seek(
-    target_formula: str,
+    file_path: str,
+    sheet_name: str,
+    variable_cell: str,
+    expression: str,
     target_value: float,
-    initial_guess: float = 1.0,
+    initial_value: float = 0.0,
+    tolerance: float = 1e-6,
+    max_iterations: int = 1000,
 ) -> dict:
-    """Find x such that target_formula(x) = target_value using numerical optimization.
+    """Find x such that expression(x) = target_value and write the result to variable_cell.
 
-    target_formula is a math expression in terms of 'x', e.g. '1000 * (1 + x)**10'.
-    Only basic arithmetic and math functions (sqrt, log, exp, sin, cos, etc.) are allowed.
+    expression is a math expression in terms of 'x', e.g. '1000 * (1 + x)**10'.
+    Only basic arithmetic and basic math functions (sqrt, log, exp, sin, cos, etc.) are allowed.
     """
-    from scipy.optimize import minimize_scalar, root_scalar
+    from scipy.optimize import root_scalar
 
-    _validate_expression(target_formula)
+    _validate_expression(expression)
 
     def objective(x_val: float) -> float:
-        return _eval_expression(target_formula, x_val) - target_value
+        return _eval_expression(expression, x_val) - target_value
 
+    x1 = initial_value * 1.1 if initial_value != 0 else 0.1
     try:
-        x1 = initial_guess * 1.1 if initial_guess != 0 else 0.1
-        result = root_scalar(objective, x0=initial_guess, x1=x1, method="secant", maxiter=1000)
+        result = root_scalar(
+            objective,
+            x0=initial_value,
+            x1=x1,
+            method="secant",
+            maxiter=max_iterations,
+            xtol=tolerance,
+        )
         x_found = result.root
-        converged = result.converged
-    except Exception:
-        try:
-            result = minimize_scalar(lambda x: objective(x) ** 2)
-            x_found = result.x
-            converged = abs(objective(x_found)) < 1e-6
-        except Exception as e:
-            raise ValueError(f"Goal seek failed to converge: {e}") from e
+        converged = bool(result.converged)
+        iterations = int(result.iterations)
+    except Exception as e:
+        raise ValueError(f"Goal seek failed to converge: {e}") from e
 
-    achieved = _eval_expression(target_formula, x_found)
+    achieved = _eval_expression(expression, x_found)
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        ws[variable_cell] = float(x_found)
+        save_workbook_safe(wb, file_path)
+    finally:
+        wb.close()
+
     logger.info("Goal seek: x=%.6f, achieved=%.6f, target=%.6f", x_found, achieved, target_value)
     return {
-        "result": float(x_found),
+        "variable_cell": variable_cell,
+        "found_value": float(x_found),
+        "achieved_result": float(achieved),
         "target_value": target_value,
-        "achieved_value": float(achieved),
-        "converged": bool(converged),
+        "converged": converged,
+        "iterations": iterations,
     }
 
 
@@ -370,10 +355,37 @@ def budget_variance_analysis(
 
 
 def financial_ratio_analysis(
-    ratios: dict,
+    financial_data: dict,
     industry_benchmarks: dict | None = None,
 ) -> dict:
-    """Compute financial ratios from provided data and optionally compare to benchmarks."""
+    """Compute financial ratios from raw financial metric values and optionally compare to benchmarks.
+
+    ``financial_data`` must be a flat dict of financial metric values keyed by the component names
+    listed below.  Do NOT pass computed ratio names (e.g. ``current_ratio``) — those are outputs,
+    not inputs.
+
+    Valid input keys:
+        current_assets       – total current assets
+        current_liabilities  – total current liabilities
+        total_debt           – total debt (for debt-to-equity)
+        total_equity         – shareholders' equity  (also called ``equity``)
+        net_income           – net income / net profit
+        total_assets         – total assets
+        revenue              – total revenue / net sales
+        gross_profit         – gross profit (revenue minus COGS)
+        operating_income     – operating income / EBIT
+        ebitda               – EBITDA (used as numerator for interest-coverage)
+        interest_expense     – interest expense
+
+    Computed ratios (returned when both component keys are present):
+        current_ratio        = current_assets / current_liabilities
+        debt_to_equity       = total_debt / total_equity
+        roe                  = net_income / total_equity
+        roa                  = net_income / total_assets
+        gross_margin         = gross_profit / revenue
+        net_margin           = net_income / revenue
+        interest_coverage    = ebitda / interest_expense
+    """
     computed: dict[str, dict] = {}
 
     ratio_defs: list[tuple[str, str, str, str]] = [
@@ -387,12 +399,12 @@ def financial_ratio_analysis(
     ]
 
     for ratio_name, numerator_key, denominator_key, _ in ratio_defs:
-        if numerator_key in ratios and denominator_key in ratios:
-            denominator = float(ratios[denominator_key])
+        if numerator_key in financial_data and denominator_key in financial_data:
+            denominator = float(financial_data[denominator_key])
             if denominator == 0:
                 computed[ratio_name] = {"value": None, "error": "Division by zero"}
                 continue
-            value = round(float(ratios[numerator_key]) / denominator, 4)
+            value = round(float(financial_data[numerator_key]) / denominator, 4)
             entry: dict = {"value": value}
 
             if industry_benchmarks and ratio_name in industry_benchmarks:
@@ -409,244 +421,6 @@ def financial_ratio_analysis(
 
     logger.info("Financial ratio analysis: %d ratios computed", len(computed))
     return {"ratios": computed}
-
-
-def scenario_analysis(
-    base_case: dict,
-    scenarios: list[dict],
-    formula: str,
-    periods: int = 1,
-) -> dict:
-    """Evaluate a formula across base case and multiple scenarios.
-
-    Uses AST-validated safe expression evaluation (same pattern as goal_seek).
-    """
-    all_vars: set[str] = set(base_case.keys())
-    for sc in scenarios:
-        all_vars.update(sc.get("adjustments", {}).keys())
-    _validate_expression_vars(formula, all_vars)
-
-    def _evaluate_scenario(variables: dict[str, float], num_periods: int) -> list[float]:
-        results = []
-        current = dict(variables)
-        for _ in range(num_periods):
-            value = _eval_expression_vars(formula, current)
-            results.append(round(value, 4))
-        return results
-
-    base_values = {k: float(v) for k, v in base_case.items()}
-    base_results = _evaluate_scenario(base_values, periods)
-
-    scenario_results = []
-    for sc in scenarios:
-        name = sc.get("name", "Unnamed")
-        adjustments = sc.get("adjustments", {})
-        sc_vars = {**base_values, **{k: float(v) for k, v in adjustments.items()}}
-        sc_results = _evaluate_scenario(sc_vars, periods)
-        scenario_results.append(
-            {
-                "name": name,
-                "variables": sc_vars,
-                "results": sc_results,
-            }
-        )
-
-    logger.info("Scenario analysis: %d scenarios evaluated over %d periods", len(scenarios), periods)
-    return {
-        "base_case": {"variables": base_values, "results": base_results},
-        "scenarios": scenario_results,
-        "formula": formula,
-        "periods": periods,
-    }
-
-
-def trend_analysis(
-    file_path: str,
-    sheet_name: str = "Sheet1",
-    date_column: str = "A",
-    value_column: str = "B",
-    header_row: int = 1,
-    periods_to_forecast: int = 3,
-) -> dict:
-    """Analyze trends in time-series data from an Excel file with linear regression forecasting."""
-    wb = load_workbook_safe(file_path, data_only=True)
-    ws = get_sheet(wb, sheet_name)
-
-    date_idx = col_letter_to_index(date_column)
-    val_idx = col_letter_to_index(value_column)
-
-    dates: list[str] = []
-    values: list[float] = []
-
-    for row in range(header_row + 1, ws.max_row + 1):
-        d = ws.cell(row=row, column=date_idx).value
-        v = ws.cell(row=row, column=val_idx).value
-        if d is None or v is None:
-            continue
-        dates.append(str(d))
-        values.append(float(v))
-
-    wb.close()
-
-    if len(values) < 2:
-        raise ValueError("At least 2 data points are required for trend analysis.")
-
-    x = np.arange(len(values), dtype=float)
-    y = np.array(values, dtype=float)
-
-    coeffs = np.polyfit(x, y, 1)
-    slope = float(coeffs[0])
-    intercept = float(coeffs[1])
-
-    y_pred = np.polyval(coeffs, x)
-    ss_res = float(np.sum((y - y_pred) ** 2))
-    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-    r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0.0
-
-    window = max(2, min(3, len(values) // 3))
-    moving_averages: list[float | None] = [None] * (window - 1)
-    for i in range(window - 1, len(values)):
-        ma = sum(values[i - window + 1 : i + 1]) / window
-        moving_averages.append(round(ma, 4))
-
-    growth_rates: list[float | None] = [None]
-    for i in range(1, len(values)):
-        if values[i - 1] != 0:
-            gr = (values[i] - values[i - 1]) / abs(values[i - 1])
-            growth_rates.append(round(gr, 4))
-        else:
-            growth_rates.append(None)
-
-    forecast: list[dict] = []
-    for i in range(1, periods_to_forecast + 1):
-        fx = len(values) - 1 + i
-        fv = float(np.polyval(coeffs, fx))
-        forecast.append({"period": len(values) + i, "value": round(fv, 4)})
-
-    if abs(slope) < 1e-9:
-        trend_direction = "stable"
-    elif slope > 0:
-        trend_direction = "increasing"
-    else:
-        trend_direction = "decreasing"
-
-    logger.info("Trend analysis: direction=%s, slope=%.4f, r²=%.4f", trend_direction, slope, r_squared)
-    return {
-        "trend_direction": trend_direction,
-        "slope": round(slope, 4),
-        "intercept": round(intercept, 4),
-        "r_squared": round(r_squared, 4),
-        "data_points": len(values),
-        "dates": dates,
-        "values": values,
-        "moving_averages": moving_averages,
-        "growth_rates": growth_rates,
-        "forecast": forecast,
-    }
-
-
-def calculate_xnpv(
-    discount_rate: float,
-    cash_flows: list[float],
-    dates: list[str],
-) -> dict:
-    """Calculate XNPV (NPV with irregular cash flow dates).
-
-    discount_rate: annual discount rate (e.g. 0.10 for 10%)
-    cash_flows: list of cash flow amounts
-    dates: list of ISO-format date strings ("YYYY-MM-DD")
-    """
-    from datetime import date as _date
-
-    if len(cash_flows) != len(dates):
-        raise ValueError("cash_flows and dates must have the same length")
-    if discount_rate <= -1:
-        raise ValueError("discount_rate must be greater than -1")
-
-    parsed = [_date.fromisoformat(d) for d in dates]
-    d0 = parsed[0]
-    xnpv = sum(cf / (1 + discount_rate) ** ((d - d0).days / 365) for cf, d in zip(cash_flows, parsed))
-    logger.info("XNPV: %.4f (rate=%.4f, n=%d)", xnpv, discount_rate, len(cash_flows))
-    return {
-        "xnpv": round(xnpv, 4),
-        "discount_rate": discount_rate,
-        "num_cash_flows": len(cash_flows),
-    }
-
-
-def calculate_xirr(
-    cash_flows: list[float],
-    dates: list[str],
-    guess: float = 0.1,
-) -> dict:
-    """Calculate XIRR (IRR for irregular cash flow dates).
-
-    cash_flows: list of cash flow amounts (must have at least one positive and one negative)
-    dates: list of ISO-format date strings ("YYYY-MM-DD")
-    guess: initial rate guess
-    """
-    from datetime import date as _date
-
-    from scipy.optimize import brentq, fsolve
-
-    if len(cash_flows) != len(dates):
-        raise ValueError("cash_flows and dates must have the same length")
-
-    parsed = [_date.fromisoformat(d) for d in dates]
-    d0 = parsed[0]
-
-    def _xnpv_objective(r: float) -> float:
-        return sum(cf / (1 + r) ** ((d - d0).days / 365) for cf, d in zip(cash_flows, parsed))
-
-    xirr_value: float | None = None
-    try:
-        xirr_value = brentq(_xnpv_objective, -0.999, 100.0, maxiter=1000)
-    except Exception:
-        try:
-            result = fsolve(_xnpv_objective, guess, full_output=True)
-            sol = float(result[0][0])
-            if abs(_xnpv_objective(sol)) < 1e-6:
-                xirr_value = sol
-        except Exception:
-            pass
-
-    if xirr_value is None:
-        return {"xirr": None, "message": "XIRR could not be computed: convergence failed"}
-
-    logger.info("XIRR: %.6f (n=%d)", xirr_value, len(cash_flows))
-    return {
-        "xirr": round(xirr_value, 6),
-        "dates": dates,
-        "cash_flows": cash_flows,
-    }
-
-
-def calculate_cagr(
-    beginning_value: float,
-    ending_value: float,
-    periods: float,
-) -> dict:
-    """Calculate Compound Annual Growth Rate (CAGR).
-
-    beginning_value: starting value (must be > 0)
-    ending_value: ending value
-    periods: number of periods (years)
-    """
-    if beginning_value <= 0:
-        raise ValueError("beginning_value must be greater than 0")
-    if periods <= 0:
-        raise ValueError("periods must be greater than 0")
-
-    cagr = (ending_value / beginning_value) ** (1 / periods) - 1
-    total_growth = (ending_value - beginning_value) / beginning_value
-    logger.info("CAGR: %.6f over %.2f periods", cagr, periods)
-    return {
-        "cagr": round(cagr, 6),
-        "beginning_value": beginning_value,
-        "ending_value": ending_value,
-        "periods": periods,
-        "total_growth": round(total_growth, 4),
-    }
 
 
 def break_even_analysis(
@@ -685,4 +459,235 @@ def break_even_analysis(
         "break_even_revenue": round(break_even_revenue, 2),
         "contribution_margin": contribution_margin,
         "contribution_margin_ratio": round(contribution_margin_ratio, 4),
+    }
+
+
+def calculate_fv(
+    rate: float,
+    nper: int,
+    pmt: float,
+    pv: float = 0.0,
+    when: str = "end",
+) -> dict:
+    """Calculate future value of an annuity or lump sum.
+
+    rate: periodic interest rate (e.g. 0.05 for 5%)
+    nper: number of periods
+    pmt: payment per period (negative = outflow)
+    pv:  present value (negative = outflow)
+    when: 'end' (ordinary annuity) or 'begin' (annuity due)
+    """
+    when_int = 0 if when == "end" else 1
+    result = float(npf.fv(rate, nper, pmt, pv, when=when_int))
+    logger.info("calculate_fv: rate=%.4f nper=%d pmt=%.2f pv=%.2f -> fv=%.4f", rate, nper, pmt, pv, result)
+    return {"rate": rate, "nper": nper, "pmt": pmt, "pv": pv, "when": when, "fv": round(result, 4)}
+
+
+def calculate_pv(
+    rate: float,
+    nper: int,
+    pmt: float,
+    fv: float = 0.0,
+    when: str = "end",
+) -> dict:
+    """Calculate present value of an annuity or lump sum.
+
+    rate: periodic interest rate
+    nper: number of periods
+    pmt: payment per period
+    fv:  future value
+    when: 'end' or 'begin'
+    """
+    when_int = 0 if when == "end" else 1
+    result = float(npf.pv(rate, nper, pmt, fv, when=when_int))
+    logger.info("calculate_pv: rate=%.4f nper=%d pmt=%.2f fv=%.2f -> pv=%.4f", rate, nper, pmt, fv, result)
+    return {"rate": rate, "nper": nper, "pmt": pmt, "fv": fv, "when": when, "pv": round(result, 4)}
+
+
+def calculate_nper(
+    rate: float,
+    pmt: float,
+    pv: float,
+    fv: float = 0.0,
+    when: str = "end",
+) -> dict:
+    """Calculate number of periods for an annuity.
+
+    rate: periodic interest rate
+    pmt: payment per period
+    pv:  present value
+    fv:  future value
+    when: 'end' or 'begin'
+    """
+    when_int = 0 if when == "end" else 1
+    result = float(npf.nper(rate, pmt, pv, fv, when=when_int))
+    logger.info("calculate_nper: rate=%.4f pmt=%.2f pv=%.2f fv=%.2f -> nper=%.4f", rate, pmt, pv, fv, result)
+    return {"rate": rate, "pmt": pmt, "pv": pv, "fv": fv, "when": when, "nper": round(result, 4)}
+
+
+def calculate_rate(
+    nper: int,
+    pmt: float,
+    pv: float,
+    fv: float = 0.0,
+    when: str = "end",
+    guess: float = 0.1,
+) -> dict:
+    """Calculate the periodic interest rate for an annuity.
+
+    nper: number of periods
+    pmt: payment per period
+    pv:  present value
+    fv:  future value
+    when: 'end' or 'begin'
+    guess: starting guess for iteration
+    """
+    when_int = 0 if when == "end" else 1
+    result = float(npf.rate(nper, pmt, pv, fv, when=when_int, guess=guess))
+    logger.info("calculate_rate: nper=%d pmt=%.2f pv=%.2f fv=%.2f -> rate=%.6f", nper, pmt, pv, fv, result)
+    return {"nper": nper, "pmt": pmt, "pv": pv, "fv": fv, "when": when, "rate": round(result, 6)}
+
+
+def calculate_depreciation(
+    cost: float,
+    salvage: float,
+    life: int,
+    method: str = "sln",
+    period: int | None = None,
+) -> dict:
+    """Calculate depreciation using SLN, SYD, or DDB method.
+
+    cost:    initial asset cost
+    salvage: residual value at end of life
+    life:    useful life in periods
+    method:  'sln' (straight-line), 'syd' (sum-of-years-digits), 'ddb' (double-declining-balance)
+    period:  required for 'syd' and 'ddb' (1-based period number)
+    """
+    method = method.lower()
+    if method == "sln":
+        result = (cost - salvage) / life
+        logger.info("depreciation SLN: %.2f", result)
+        return {
+            "method": method,
+            "cost": cost,
+            "salvage": salvage,
+            "life": life,
+            "period": None,
+            "depreciation": round(result, 2),
+        }
+    elif method in ("syd", "ddb"):
+        if period is None:
+            raise ValueError(f"'period' is required for method='{method}'")
+        if period < 1 or period > life:
+            raise ValueError(f"period must be between 1 and {life}")
+        if method == "syd":
+            syd_sum = life * (life + 1) / 2
+            result = (cost - salvage) * (life - period + 1) / syd_sum
+        else:
+            ddb_rate = 2.0 / life
+            accumulated = 0.0
+            result = 0.0
+            for p in range(1, period + 1):
+                dep = ddb_rate * (cost - accumulated)
+                if accumulated + dep > cost - salvage:
+                    dep = max(cost - salvage - accumulated, 0.0)
+                accumulated += dep
+                if p == period:
+                    result = dep
+                    break
+        logger.info("depreciation %s period %d: %.2f", method.upper(), period, result)
+        return {
+            "method": method,
+            "cost": cost,
+            "salvage": salvage,
+            "life": life,
+            "period": period,
+            "depreciation": round(result, 2),
+        }
+    else:
+        raise ValueError(f"Unknown method '{method}'. Valid values: 'sln', 'syd', 'ddb'")
+
+
+def create_sensitivity_table(
+    file_path: str,
+    sheet_name: str,
+    output_cell: str,
+    expression: str,
+    var1_name: str,
+    var1_values: list[float],
+    var2_name: str | None = None,
+    var2_values: list[float] | None = None,
+) -> dict:
+    """Create a one- or two-variable sensitivity table in the sheet.
+
+    Evaluates `expression` over a grid of variable values and writes the
+    results starting at `output_cell`.
+
+    expression: arithmetic expression using var1_name (and var2_name).
+                Only arithmetic ops and math functions are allowed.
+    var1_values: list of values for the row variable.
+    var2_values: optional list of values for the column variable (2-var table).
+    output_cell: top-left cell where the table will be written.
+    """
+    from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
+
+    # Validate expression
+    all_vars = {var1_name}
+    if var2_name:
+        all_vars.add(var2_name)
+    _validate_expression_vars(expression, all_vars)
+
+    # Compute results
+    if var2_name and var2_values:
+        table: list[list[float | str]] = []
+        for v2 in var2_values:
+            row: list[float | str] = []
+            for v1 in var1_values:
+                val = _eval_expression_vars(expression, {var1_name: v1, var2_name: v2})
+                row.append(round(val, 4))
+            table.append(row)
+    else:
+        table = []
+        for v1 in var1_values:
+            val = _eval_expression_vars(expression, {var1_name: v1})
+            table.append([round(val, 4)])
+
+    # Write to workbook
+    col_str, start_row = coordinate_from_string(output_cell)
+    start_col = column_index_from_string(col_str)
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        # Header row: label in corner, then var1 values across columns
+        ws.cell(row=start_row, column=start_col, value=f"{var1_name} →")
+        for ci, v1 in enumerate(var1_values):
+            ws.cell(row=start_row, column=start_col + 1 + ci, value=v1)
+        # Data rows
+        for ri, result_row in enumerate(table):
+            label: float | str = var2_values[ri] if (var2_values and var2_name) else ""
+            ws.cell(row=start_row + 1 + ri, column=start_col, value=label)
+            for ci, val in enumerate(result_row):
+                ws.cell(row=start_row + 1 + ri, column=start_col + 1 + ci, value=val)
+        save_workbook_safe(wb, file_path)
+    finally:
+        wb.close()
+
+    logger.info(
+        "create_sensitivity_table: %s (%d×%d) written at %s in %s",
+        expression,
+        len(table),
+        len(var1_values),
+        output_cell,
+        file_path,
+    )
+    return {
+        "expression": expression,
+        "var1": var1_name,
+        "var1_values": var1_values,
+        "var2": var2_name,
+        "var2_values": var2_values,
+        "table": table,
+        "output_cell": output_cell,
+        "file_path": file_path,
     }

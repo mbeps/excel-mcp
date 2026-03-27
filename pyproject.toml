@@ -13,6 +13,7 @@ dependencies = [
     "numpy-financial>=1.0.0",
     "scipy>=1.14.0",
     "pillow>=10.0",
+    "pytest-cov>=7.1.0",
 ]
 
 [project.scripts]

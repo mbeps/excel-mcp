@@ -16,8 +16,6 @@ from openpyxl.chart import (
     ScatterChart,
     StockChart,
 )
-from openpyxl.chart.legend import Legend
-from openpyxl.chart.title import Title as _ChartTitle
 from openpyxl.utils import range_boundaries
 
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
@@ -26,26 +24,6 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 CHART_TYPES = {"bar", "column", "line", "pie", "scatter", "area", "radar", "doughnut", "bubble", "stock"}
-
-
-def _chart_title_str(title: object) -> str:
-    """Safely extract a string from a chart title (str, openpyxl Title object, or None)."""
-    if title is None:
-        return "(untitled)"
-    if isinstance(title, str):
-        return title
-    if isinstance(title, _ChartTitle):
-        try:
-            tx = title.tx
-            if tx is not None and tx.rich is not None:
-                texts = [run.t for para in tx.rich.p for run in (para.r or []) if run.t is not None]
-                if texts:
-                    return " ".join(texts)
-            if tx is not None and getattr(tx, "strRef", None) is not None and tx.strRef.f:
-                return str(tx.strRef.f)
-        except Exception:
-            pass
-    return str(title)
 
 
 def _make_chart(
@@ -157,11 +135,47 @@ def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0) -> str:
 
         removed = charts.pop(chart_index)
         save_workbook_safe(wb, file_path)
-        title = removed.title or "(untitled)"
+        title = _safe_chart_title(removed.title)
         logger.info("Deleted chart %d ('%s') from %s", chart_index, title, sheet_name)
         return f"Deleted chart {chart_index} ('{title}') from '{sheet_name}'."
     finally:
         wb.close()
+
+
+def _safe_chart_title(title) -> str:
+    """Extract chart title as a plain string, handling openpyxl Title/Text objects."""
+    if title is None:
+        return "(untitled)"
+    if isinstance(title, str):
+        return title
+    # openpyxl.chart.title.Title (loaded from file) wraps text in .tx (a Text object)
+    try:
+        tx = getattr(title, "tx", None) or title  # unwrap Title.tx; fall back to title itself
+        if hasattr(tx, "strRef") and tx.strRef is not None:
+            f = getattr(tx.strRef, "f", None)
+            if f:
+                return str(f)
+        if hasattr(tx, "rich") and tx.rich is not None:
+            parts = []
+            for para in getattr(tx.rich, "paragraphs", []):
+                # openpyxl uses .r for RegularTextRun elements; mocks/aliases may use .runs
+                r_attr = getattr(para, "r", None)
+                runs = r_attr if isinstance(r_attr, list) else getattr(para, "runs", [])
+                if not isinstance(runs, list):
+                    runs = []
+                for run in runs:
+                    t = getattr(run, "t", None)
+                    if t:
+                        parts.append(str(t))
+            if parts:
+                return " ".join(parts)
+    except Exception:
+        pass
+    # If the object has openpyxl Title/Text attributes but no text was extractable → "(untitled)".
+    # For genuinely unknown objects, fall back to str() to avoid hiding useful information.
+    if hasattr(title, "tx") or hasattr(title, "strRef") or hasattr(title, "rich"):
+        return "(untitled)"
+    return str(title)
 
 
 def list_charts(file_path: str, sheet_name: str) -> list[dict]:
@@ -173,7 +187,7 @@ def list_charts(file_path: str, sheet_name: str) -> list[dict]:
         for chart in ws._charts:
             result.append(
                 {
-                    "title": _chart_title_str(chart.title),
+                    "title": _safe_chart_title(chart.title),
                     "type": type(chart).__name__,
                     "position": (
                         getattr(chart, "anchor", None) and str(chart.anchor._from)
@@ -183,58 +197,6 @@ def list_charts(file_path: str, sheet_name: str) -> list[dict]:
                 }
             )
         return result
-    finally:
-        wb.close()
-
-
-def update_chart_properties(
-    file_path: str,
-    sheet_name: str,
-    chart_index: int = 0,
-    title: str | None = None,
-    x_axis_title: str | None = None,
-    y_axis_title: str | None = None,
-    legend_position: str | None = None,
-    show_legend: bool | None = None,
-    style: int | None = None,
-) -> str:
-    """Update properties of an existing chart."""
-    wb = load_workbook_safe(file_path)
-    try:
-        ws = get_sheet(wb, sheet_name)
-
-        charts = ws._charts
-        if not charts:
-            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
-        if chart_index < 0 or chart_index >= len(charts):
-            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
-
-        chart = charts[chart_index]
-        updated: list[str] = []
-
-        if title is not None:
-            chart.title = title or None
-            updated.append("title")
-        if style is not None:
-            chart.style = style
-            updated.append("style")
-        if x_axis_title is not None and hasattr(chart, "x_axis"):
-            chart.x_axis.title = x_axis_title
-            updated.append("x_axis_title")
-        if y_axis_title is not None and hasattr(chart, "y_axis"):
-            chart.y_axis.title = y_axis_title
-            updated.append("y_axis_title")
-        if show_legend is False:
-            chart.legend = None
-            updated.append("legend (hidden)")
-        elif legend_position is not None:
-            chart.legend = Legend()
-            chart.legend.position = legend_position
-            updated.append(f"legend_position={legend_position}")
-
-        save_workbook_safe(wb, file_path)
-        logger.info("Updated chart %d in %s: %s", chart_index, sheet_name, updated)
-        return f"Updated chart {chart_index} in '{sheet_name}': {', '.join(updated)}."
     finally:
         wb.close()
 
@@ -271,13 +233,20 @@ def add_chart_series(
         wb.close()
 
 
-def remove_chart_series(
+def set_chart_axes(
     file_path: str,
     sheet_name: str,
-    chart_index: int,
-    series_index: int,
+    chart_index: int = 0,
+    x_title: str | None = None,
+    y_title: str | None = None,
+    x_min: float | None = None,
+    x_max: float | None = None,
+    y_min: float | None = None,
+    y_max: float | None = None,
+    y_number_format: str | None = None,
+    log_scale_y: bool = False,
 ) -> str:
-    """Remove a data series from an existing chart by series index."""
+    """Configure chart axes: titles, min/max bounds, number format, log scale."""
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -286,15 +255,142 @@ def remove_chart_series(
             raise ValueError(f"No charts found in sheet '{sheet_name}'.")
         if chart_index < 0 or chart_index >= len(charts):
             raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
-
         chart = charts[chart_index]
-        series = chart.series
+        no_axis_types = {"PieChart", "DoughnutChart"}
+        if type(chart).__name__ in no_axis_types:
+            raise ValueError(f"Chart type '{type(chart).__name__}' does not support axes.")
+        if x_title is not None and hasattr(chart, "x_axis"):
+            chart.x_axis.title = x_title
+        if y_title is not None and hasattr(chart, "y_axis"):
+            chart.y_axis.title = y_title
+        if hasattr(chart, "x_axis"):
+            if x_min is not None:
+                chart.x_axis.scaling.min = x_min
+            if x_max is not None:
+                chart.x_axis.scaling.max = x_max
+        if hasattr(chart, "y_axis"):
+            if y_min is not None:
+                chart.y_axis.scaling.min = y_min
+            if y_max is not None:
+                chart.y_axis.scaling.max = y_max
+            if y_number_format is not None:
+                chart.y_axis.numFmt = y_number_format
+            if log_scale_y:
+                chart.y_axis.scaling.logBase = 10
+        save_workbook_safe(wb, file_path)
+        logger.info("Updated axes for chart %d in %s", chart_index, sheet_name)
+        return f"Axes updated for chart {chart_index} in '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def add_chart_trendline(
+    file_path: str,
+    sheet_name: str,
+    chart_index: int = 0,
+    series_index: int = 0,
+    trendline_type: str = "linear",
+    name: str | None = None,
+    periods_forward: int = 0,
+    periods_backward: int = 0,
+) -> str:
+    """Add a trendline to a chart series.
+
+    trendline_type: 'linear', 'exponential', 'polynomial', 'logarithmic', 'moving_average', 'power'
+    """
+    from openpyxl.chart.trendline import Trendline
+
+    _TYPE_MAP = {
+        "linear": "linear",
+        "exponential": "exp",
+        "polynomial": "poly",
+        "logarithmic": "log",
+        "moving_average": "movingAvg",
+        "power": "power",
+    }
+    if trendline_type not in _TYPE_MAP:
+        raise ValueError(f"Invalid trendline_type '{trendline_type}'. Allowed: {list(_TYPE_MAP)}")
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        charts = ws._charts
+        if not charts:
+            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
+        if chart_index < 0 or chart_index >= len(charts):
+            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
+        chart = charts[chart_index]
+        series = list(chart.series)
         if series_index < 0 or series_index >= len(series):
             raise ValueError(f"Series index {series_index} out of range (0-{len(series) - 1}).")
-
-        del series[series_index]
+        tl = Trendline()
+        tl.trendlineType = _TYPE_MAP[trendline_type]
+        if name:
+            tl.name = name
+        if periods_forward:
+            tl.forward = float(periods_forward)
+        if periods_backward:
+            tl.backward = float(periods_backward)
+        series[series_index].trendline = tl
         save_workbook_safe(wb, file_path)
-        logger.info("Removed series %d from chart %d in %s", series_index, chart_index, sheet_name)
-        return f"Removed series {series_index} from chart {chart_index} in '{sheet_name}'."
+        logger.info(
+            "Added %s trendline to series %d of chart %d in %s",
+            trendline_type,
+            series_index,
+            chart_index,
+            sheet_name,
+        )
+        return f"Added '{trendline_type}' trendline to series {series_index} of chart {chart_index} in '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def create_combo_chart(
+    file_path: str,
+    sheet_name: str,
+    data_range: str,
+    bar_columns: list[int],
+    line_columns: list[int],
+    title: str | None = None,
+    anchor_cell: str = "F1",
+    x_axis_column: int = 0,
+    width: float = 15,
+    height: float = 10,
+) -> str:
+    """Create a combo chart with bar (column) + line series.
+
+    bar_columns: 1-based column indices within the data range for bar series.
+    line_columns: 1-based column indices within the data range for line series.
+    x_axis_column: 0-based column offset within the data range for categories.
+    """
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        min_col, min_row, max_col, max_row = range_boundaries(data_range)
+        cat_col = min_col + x_axis_column
+        categories = Reference(ws, min_col=cat_col, min_row=min_row + 1, max_row=max_row)
+        bar_chart = BarChart()
+        bar_chart.type = "col"
+        bar_chart.title = title or None
+        bar_chart.width = width
+        bar_chart.height = height
+        for col_idx in bar_columns:
+            actual_col = min_col + col_idx - 1
+            ref = Reference(ws, min_col=actual_col, min_row=min_row, max_row=max_row)
+            bar_chart.add_data(ref, titles_from_data=True)
+        bar_chart.set_categories(categories)
+        line_chart = LineChart()
+        for col_idx in line_columns:
+            actual_col = min_col + col_idx - 1
+            ref = Reference(ws, min_col=actual_col, min_row=min_row, max_row=max_row)
+            line_chart.add_data(ref, titles_from_data=True)
+        line_chart.set_categories(categories)
+        bar_chart += line_chart
+        ws.add_chart(bar_chart, anchor_cell)
+        save_workbook_safe(wb, file_path)
+        logger.info("Created combo chart at %s!%s", sheet_name, anchor_cell)
+        return (
+            f"Created combo chart at '{anchor_cell}' in '{sheet_name}'"
+            f" with {len(bar_columns)} bar and {len(line_columns)} line series."
+        )
     finally:
         wb.close()

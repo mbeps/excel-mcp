@@ -1,34 +1,14 @@
 from __future__ import annotations
 
 import openpyxl
+import pytest
 
 from mcp_server.tools.worksheet_ops import (
-    delete_page_break,
+    copy_range_across_sheets,
+    copy_sheet_across_workbooks,
     freeze_panes,
-    group_columns,
-    group_rows,
-    hide_columns,
-    hide_rows,
-    hide_sheet,
-    insert_page_break,
-    list_page_breaks,
-    move_sheet,
-    remove_auto_filter,
+    merge_workbooks,
     set_auto_filter,
-    set_header_footer,
-    set_page_margins,
-    set_page_setup,
-    set_print_area,
-    set_print_titles,
-    set_sheet_tab_color,
-    set_zoom,
-    show_gridlines,
-    unfreeze_panes,
-    ungroup_columns,
-    ungroup_rows,
-    unhide_columns,
-    unhide_rows,
-    unhide_sheet,
 )
 
 
@@ -40,7 +20,7 @@ def test_freeze_panes(sample_xlsx: str) -> None:
 
 def test_unfreeze_panes(sample_xlsx: str) -> None:
     freeze_panes(sample_xlsx, "Sheet1", "B2")
-    unfreeze_panes(sample_xlsx, "Sheet1")
+    freeze_panes(sample_xlsx, "Sheet1", cell_ref=None)
     wb = openpyxl.load_workbook(sample_xlsx)
     assert wb["Sheet1"].freeze_panes is None
 
@@ -53,248 +33,198 @@ def test_set_auto_filter(sample_xlsx: str) -> None:
 
 def test_remove_auto_filter(sample_xlsx: str) -> None:
     set_auto_filter(sample_xlsx, "Sheet1", "A1:D6")
-    remove_auto_filter(sample_xlsx, "Sheet1")
+    set_auto_filter(sample_xlsx, "Sheet1", remove=True)
     wb = openpyxl.load_workbook(sample_xlsx)
     assert wb["Sheet1"].auto_filter.ref is None
 
 
-def test_hide_rows(sample_xlsx: str) -> None:
-    hide_rows(sample_xlsx, "Sheet1", 2, 3)
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws.row_dimensions[2].hidden is True
-    assert ws.row_dimensions[3].hidden is True
+# ── additional coverage ────────────────────────────────────────────────────────
 
 
-def test_unhide_rows(sample_xlsx: str) -> None:
-    hide_rows(sample_xlsx, "Sheet1", 2, 3)
-    unhide_rows(sample_xlsx, "Sheet1", 2, 3)
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws.row_dimensions[2].hidden is False
-    assert ws.row_dimensions[3].hidden is False
-
-
-def test_hide_columns(sample_xlsx: str) -> None:
-    hide_columns(sample_xlsx, "Sheet1", "B", "C")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws.column_dimensions["B"].hidden is True
-    assert ws.column_dimensions["C"].hidden is True
-
-
-def test_unhide_columns(sample_xlsx: str) -> None:
-    hide_columns(sample_xlsx, "Sheet1", "B", "C")
-    unhide_columns(sample_xlsx, "Sheet1", "B", "C")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws.column_dimensions["B"].hidden is False
-    assert ws.column_dimensions["C"].hidden is False
-
-
-def test_group_rows(sample_xlsx: str) -> None:
-    group_rows(sample_xlsx, "Sheet1", 2, 5)
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    for r in range(2, 6):
-        assert ws.row_dimensions[r].outlineLevel == 1
-
-
-def test_ungroup_rows(sample_xlsx: str) -> None:
-    group_rows(sample_xlsx, "Sheet1", 2, 5)
-    ungroup_rows(sample_xlsx, "Sheet1", 2, 5)
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    for r in range(2, 6):
-        assert ws.row_dimensions[r].outlineLevel == 0
-
-
-def test_group_columns(sample_xlsx: str) -> None:
-    group_columns(sample_xlsx, "Sheet1", "B", "D")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    for col in ("B", "C", "D"):
-        assert ws.column_dimensions[col].outlineLevel == 1
-
-
-def test_ungroup_columns(sample_xlsx: str) -> None:
-    group_columns(sample_xlsx, "Sheet1", "B", "D")
-    ungroup_columns(sample_xlsx, "Sheet1", "B", "D")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    for col in ("B", "C", "D"):
-        assert ws.column_dimensions[col].outlineLevel == 0
-
-
-def test_set_sheet_tab_color(sample_xlsx: str) -> None:
-    set_sheet_tab_color(sample_xlsx, "Sheet1", "FF0000")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].sheet_properties.tabColor.rgb == "00FF0000"
-
-
-def test_hide_sheet(tmp_path) -> None:
-    path = str(tmp_path / "multi.xlsx")
+def test_copy_range_across_sheets_values(tmp_path) -> None:
+    """copy_range_across_sheets copies cell values from source to target sheet."""
+    path = str(tmp_path / "wb.xlsx")
     wb = openpyxl.Workbook()
-    wb.active.title = "Sheet1"
+    ws1 = wb.active
+    ws1.title = "Source"
+    ws1["A1"] = "Hello"
+    ws1["B1"] = 42
+    wb.create_sheet("Target")
+    wb.save(path)
+    wb.close()
+
+    result = copy_range_across_sheets(path, "Source", "A1:B1", "Target")
+    assert "Copied" in result
+
+    wb2 = openpyxl.load_workbook(path)
+    assert wb2["Target"]["A1"].value == "Hello"
+    assert wb2["Target"]["B1"].value == 42
+    wb2.close()
+
+
+def test_copy_range_across_sheets_offset(tmp_path) -> None:
+    """copy_range_across_sheets writes at the target_start_cell offset."""
+    path = str(tmp_path / "wb_offset.xlsx")
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Sheet1"
+    ws1["A1"] = 10
+    ws1["B1"] = 20
     wb.create_sheet("Sheet2")
     wb.save(path)
+    wb.close()
 
-    hide_sheet(path, "Sheet2")
-    wb = openpyxl.load_workbook(path)
-    assert wb["Sheet2"].sheet_state == "hidden"
+    copy_range_across_sheets(path, "Sheet1", "A1:B1", "Sheet2", target_start_cell="C3")
+
+    wb2 = openpyxl.load_workbook(path)
+    assert wb2["Sheet2"]["C3"].value == 10
+    assert wb2["Sheet2"]["D3"].value == 20
+    wb2.close()
 
 
-def test_unhide_sheet(tmp_path) -> None:
-    path = str(tmp_path / "multi.xlsx")
+def test_copy_range_across_sheets_nonexistent_source_raises(tmp_path) -> None:
+    """Raises ValueError when source sheet does not exist."""
+    path = str(tmp_path / "wb2.xlsx")
     wb = openpyxl.Workbook()
     wb.active.title = "Sheet1"
-    wb.create_sheet("Sheet2")
     wb.save(path)
+    wb.close()
 
-    hide_sheet(path, "Sheet2")
-    unhide_sheet(path, "Sheet2")
-    wb = openpyxl.load_workbook(path)
-    assert wb["Sheet2"].sheet_state == "visible"
+    with pytest.raises(ValueError, match="not found"):
+        copy_range_across_sheets(path, "NoSheet", "A1:B1", "Sheet1")
 
 
-def test_move_sheet(tmp_path) -> None:
-    path = str(tmp_path / "multi.xlsx")
+def test_copy_sheet_across_workbooks_basic(tmp_path) -> None:
+    """copy_sheet_across_workbooks replicates cell data in the destination file."""
+    src = str(tmp_path / "src.xlsx")
+    dst = str(tmp_path / "dst.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws["A1"] = "X"
+    ws["B2"] = 99
+    wb.save(src)
+    wb.close()
+
+    result = copy_sheet_across_workbooks(src, "Data", dst)
+    assert "Data" in result
+
+    wb2 = openpyxl.load_workbook(dst)
+    assert "Data" in wb2.sheetnames
+    assert wb2["Data"]["A1"].value == "X"
+    assert wb2["Data"]["B2"].value == 99
+    wb2.close()
+
+
+def test_copy_sheet_across_workbooks_custom_name(tmp_path) -> None:
+    """copy_sheet_across_workbooks uses dest_sheet_name when provided."""
+    src = str(tmp_path / "src2.xlsx")
+    dst = str(tmp_path / "dst2.xlsx")
+    wb = openpyxl.Workbook()
+    wb.active.title = "Original"
+    wb["Original"]["A1"] = "hi"
+    wb.save(src)
+    wb.close()
+
+    copy_sheet_across_workbooks(src, "Original", dst, dest_sheet_name="Renamed")
+
+    wb2 = openpyxl.load_workbook(dst)
+    assert "Renamed" in wb2.sheetnames
+    assert "Original" not in wb2.sheetnames
+    wb2.close()
+
+
+def test_copy_sheet_across_workbooks_dest_sheet_exists_raises(tmp_path) -> None:
+    """Raises ValueError when dest already has a sheet with the same name."""
+    src = str(tmp_path / "src3.xlsx")
+    dst = str(tmp_path / "dst3.xlsx")
+    for path in [src, dst]:
+        wb = openpyxl.Workbook()
+        wb.active.title = "Sheet1"
+        wb.save(path)
+        wb.close()
+
+    with pytest.raises(ValueError, match="already exists"):
+        copy_sheet_across_workbooks(src, "Sheet1", dst)
+
+
+def test_copy_sheet_across_workbooks_nonexistent_source_sheet_raises(tmp_path) -> None:
+    """Raises ValueError when source sheet does not exist in the source file."""
+    src = str(tmp_path / "src4.xlsx")
+    dst = str(tmp_path / "dst4.xlsx")
     wb = openpyxl.Workbook()
     wb.active.title = "Sheet1"
-    wb.create_sheet("Sheet2")
-    wb.create_sheet("Sheet3")
-    wb.save(path)
-
-    move_sheet(path, "Sheet1", 2)
-    wb = openpyxl.load_workbook(path)
-    assert wb.sheetnames == ["Sheet2", "Sheet3", "Sheet1"]
-
-
-def test_set_zoom(sample_xlsx: str) -> None:
-    set_zoom(sample_xlsx, "Sheet1", 150)
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].sheet_view.zoomScale == 150
-
-
-def test_show_gridlines(sample_xlsx: str) -> None:
-    show_gridlines(sample_xlsx, "Sheet1", show=False)
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].sheet_view.showGridLines is False
-
-
-def test_set_print_area(sample_xlsx: str) -> None:
-    set_print_area(sample_xlsx, "Sheet1", "A1:D10")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert "$A$1" in wb["Sheet1"].print_area
-    assert "$D$10" in wb["Sheet1"].print_area
-
-
-def test_set_page_setup(sample_xlsx: str) -> None:
-    set_page_setup(sample_xlsx, "Sheet1", orientation="landscape")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].page_setup.orientation == "landscape"
-
-
-def test_set_page_margins(sample_xlsx: str) -> None:
-    set_page_margins(sample_xlsx, "Sheet1", top=1.0, bottom=1.0, left=0.5, right=0.5)
-    wb = openpyxl.load_workbook(sample_xlsx)
-    margins = wb["Sheet1"].page_margins
-    assert float(margins.top) == 1.0
-    assert float(margins.bottom) == 1.0
-    assert float(margins.left) == 0.5
-    assert float(margins.right) == 0.5
-
-
-def test_set_header_footer(sample_xlsx: str) -> None:
-    set_header_footer(sample_xlsx, "Sheet1", header_center="My Report")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].oddHeader.center.text == "My Report"
-
-
-def test_insert_page_break_row(sample_xlsx: str) -> None:
-    result = insert_page_break(sample_xlsx, "Sheet1", 5)
-    assert "Page break inserted" in result
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert any(b.id == 5 for b in ws.row_breaks.brk)
+    wb.save(src)
     wb.close()
 
-
-def test_insert_page_break_column(sample_xlsx: str) -> None:
-    result = insert_page_break(sample_xlsx, "Sheet1", 3, break_type="column")
-    assert "Page break inserted" in result
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert any(b.id == 3 for b in ws.col_breaks.brk)
-    wb.close()
+    with pytest.raises(ValueError, match="not found"):
+        copy_sheet_across_workbooks(src, "NoSheet", dst)
 
 
-def test_insert_page_break_invalid_type(sample_xlsx: str) -> None:
-    import pytest
+def test_merge_workbooks_basic(tmp_path) -> None:
+    """merge_workbooks combines sheets from multiple source files."""
+    f1 = str(tmp_path / "f1.xlsx")
+    f2 = str(tmp_path / "f2.xlsx")
+    out = str(tmp_path / "merged.xlsx")
 
-    with pytest.raises(ValueError, match="break_type"):
-        insert_page_break(sample_xlsx, "Sheet1", 5, break_type="diagonal")
+    for path, title, val in [(f1, "Alpha", "aaa"), (f2, "Beta", "bbb")]:
+        wb = openpyxl.Workbook()
+        wb.active.title = title
+        wb[title]["A1"] = val
+        wb.save(path)
+        wb.close()
 
+    result = merge_workbooks([f1, f2], out)
+    assert result["merged_files"] == 2
+    assert result["total_sheets"] == 2
+    assert "Alpha" in result["sheets"]
+    assert "Beta" in result["sheets"]
 
-def test_delete_page_break(sample_xlsx: str) -> None:
-    insert_page_break(sample_xlsx, "Sheet1", 5)
-    result = delete_page_break(sample_xlsx, "Sheet1", 5)
-    assert "deleted" in result
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert not any(b.id == 5 for b in ws.row_breaks.brk)
-    wb.close()
-
-
-def test_delete_page_break_column(sample_xlsx: str) -> None:
-    insert_page_break(sample_xlsx, "Sheet1", 3, break_type="column")
-    delete_page_break(sample_xlsx, "Sheet1", 3, break_type="column")
-    wb = openpyxl.load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert not any(b.id == 3 for b in ws.col_breaks.brk)
-    wb.close()
-
-
-def test_list_page_breaks(sample_xlsx: str) -> None:
-    insert_page_break(sample_xlsx, "Sheet1", 4)
-    insert_page_break(sample_xlsx, "Sheet1", 8)
-    insert_page_break(sample_xlsx, "Sheet1", 2, break_type="column")
-    result = list_page_breaks(sample_xlsx, "Sheet1")
-    assert "row_breaks" in result
-    assert "col_breaks" in result
-    assert 4 in result["row_breaks"]
-    assert 8 in result["row_breaks"]
-    assert 2 in result["col_breaks"]
+    wb_out = openpyxl.load_workbook(out)
+    assert wb_out["Alpha"]["A1"].value == "aaa"
+    assert wb_out["Beta"]["A1"].value == "bbb"
+    wb_out.close()
 
 
-def test_set_print_titles_rows(sample_xlsx: str) -> None:
-    result = set_print_titles(sample_xlsx, "Sheet1", title_rows="1:2")
-    assert "Print titles set" in result
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].print_title_rows == "$1:$2"
-    wb.close()
+def test_merge_workbooks_rename_conflict(tmp_path) -> None:
+    """merge_workbooks renames conflicting sheet names with _2 suffix."""
+    f1 = str(tmp_path / "c1.xlsx")
+    f2 = str(tmp_path / "c2.xlsx")
+    out = str(tmp_path / "conflict.xlsx")
+
+    for path in [f1, f2]:
+        wb = openpyxl.Workbook()
+        wb.active.title = "Sheet1"
+        wb.save(path)
+        wb.close()
+
+    result = merge_workbooks([f1, f2], out, conflict_strategy="rename")
+    assert result["total_sheets"] == 2
+    assert "Sheet1" in result["sheets"]
+    assert "Sheet1_2" in result["sheets"]
 
 
-def test_set_print_titles_cols(sample_xlsx: str) -> None:
-    result = set_print_titles(sample_xlsx, "Sheet1", title_cols="A:B")
-    assert "Print titles set" in result
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].print_title_cols == "$A:$B"
-    wb.close()
+def test_merge_workbooks_overwrite_conflict(tmp_path) -> None:
+    """merge_workbooks overwrites conflicting sheet when strategy is 'overwrite'."""
+    f1 = str(tmp_path / "o1.xlsx")
+    f2 = str(tmp_path / "o2.xlsx")
+    out = str(tmp_path / "overwritten.xlsx")
 
+    wb1 = openpyxl.Workbook()
+    wb1.active.title = "Sheet1"
+    wb1["Sheet1"]["A1"] = "from_f1"
+    wb1.save(f1)
+    wb1.close()
 
-def test_set_print_titles_both(sample_xlsx: str) -> None:
-    result = set_print_titles(sample_xlsx, "Sheet1", title_rows="1:1", title_cols="A:A")
-    assert "rows '1:1'" in result
-    assert "cols 'A:A'" in result
-    wb = openpyxl.load_workbook(sample_xlsx)
-    assert wb["Sheet1"].print_title_rows == "$1:$1"
-    assert wb["Sheet1"].print_title_cols == "$A:$A"
-    wb.close()
+    wb2 = openpyxl.Workbook()
+    wb2.active.title = "Sheet1"
+    wb2["Sheet1"]["A1"] = "from_f2"
+    wb2.save(f2)
+    wb2.close()
 
+    result = merge_workbooks([f1, f2], out, conflict_strategy="overwrite")
+    assert result["total_sheets"] == 1
 
-def test_set_print_titles_no_args(sample_xlsx: str) -> None:
-    import pytest
-
-    with pytest.raises(ValueError, match="At least one"):
-        set_print_titles(sample_xlsx, "Sheet1")
+    wb_out = openpyxl.load_workbook(out)
+    assert wb_out["Sheet1"]["A1"].value == "from_f2"
+    wb_out.close()

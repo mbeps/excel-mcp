@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from mcp_server.tools.cleaning import combine_columns, data_cleaner, detect_outliers, split_column
+from mcp_server.tools.cleaning import data_cleaner, parse_date_column, split_column
 
 
 @pytest.fixture()
@@ -108,20 +108,6 @@ def split_xlsx(tmp_path: Path) -> str:
     return path
 
 
-@pytest.fixture()
-def numeric_xlsx(tmp_path: Path) -> str:
-    """Workbook with numeric data including one extreme outlier."""
-    path = str(tmp_path / "numeric.xlsx")
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Sheet1"
-    ws.append(["Value", "Category"])
-    for v in [10, 12, 11, 13, 9, 11, 100]:
-        ws.append([v, "A"])
-    wb.save(path)
-    return path
-
-
 # ---------------------------------------------------------------------------
 # split_column tests
 # ---------------------------------------------------------------------------
@@ -134,7 +120,7 @@ def test_split_column_basic(split_xlsx: str) -> None:
 
 
 def test_split_column_custom_names(split_xlsx: str) -> None:
-    result = split_column(split_xlsx, column="FullName", delimiter=",", new_column_names=["First", "Last"])
+    result = split_column(split_xlsx, column="FullName", delimiter=",", new_columns=["First", "Last"])
     assert result["new_columns"] == ["First", "Last"]
 
 
@@ -152,76 +138,145 @@ def test_split_column_output_file(split_xlsx: str, tmp_path: Path) -> None:
     assert Path(out).exists()
 
 
-# ---------------------------------------------------------------------------
-# combine_columns tests
-# ---------------------------------------------------------------------------
+# ── split_column edge cases (bug fix: new_columns names) ─────────────────
 
 
-def test_combine_columns_basic(dirty_xlsx: str) -> None:
-    result = combine_columns(dirty_xlsx, columns=["A", "C"], new_column_name="NameCity", separator="-")
-    assert result["new_column"] == "NameCity"
-    assert result["rows_affected"] > 0
+def test_split_column_new_columns_custom_names_in_output(split_xlsx: str) -> None:
+    """split_column new_columns=['FirstName','LastName'] writes those column headers.
+
+    Bug: before the fix, new_columns was ignored and auto-names were used.
+    """
+    import openpyxl as ox
+
+    result = split_column(split_xlsx, column="FullName", delimiter=",", new_columns=["FirstName", "LastName"])
+    assert result["new_columns"] == ["FirstName", "LastName"]
+    # Verify the actual headers in the saved file
+    wb = ox.load_workbook(split_xlsx)
+    ws = wb.active
+    headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+    wb.close()
+    assert "FirstName" in headers
+    assert "LastName" in headers
 
 
-def test_combine_columns_by_name(dirty_xlsx: str, tmp_path: Path) -> None:
-    out = str(tmp_path / "combined.xlsx")
-    result = combine_columns(
-        dirty_xlsx,
-        columns=["Name", "City"],
-        new_column_name="Full",
-        separator=" | ",
-        drop_originals=True,
-        output_file=out,
-    )
-    assert result["rows_affected"] > 0
-    assert Path(out).exists()
+def test_split_column_fewer_names_padded_with_auto(tmp_path: Path) -> None:
+    """When new_columns has fewer names than split parts, pad with auto-generated names."""
+    path = str(tmp_path / "threecols.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Full"])
+    ws.append(["A,B,C"])
+    ws.append(["D,E,F"])
+    wb.save(path)
+    wb.close()
+
+    result = split_column(path, column="Full", delimiter=",", new_columns=["First"])
+    # 3 parts total: ["First", "Full_2", "Full_3"]
+    assert len(result["new_columns"]) == 3
+    assert result["new_columns"][0] == "First"
+    assert result["new_columns"][1] == "Full_2"
+    assert result["new_columns"][2] == "Full_3"
 
 
-def test_combine_columns_no_columns_raises(dirty_xlsx: str) -> None:
-    with pytest.raises(ValueError, match="non-empty"):
-        combine_columns(dirty_xlsx, columns=[], new_column_name="X")
+def test_split_column_no_delimiter_match_single_column(tmp_path: Path) -> None:
+    """When delimiter never appears, split produces a single new column."""
+    path = str(tmp_path / "nosplit.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Name"])
+    ws.append(["Alice"])
+    ws.append(["Bob"])
+    wb.save(path)
+    wb.close()
+
+    result = split_column(path, column="Name", delimiter=",")
+    assert len(result["new_columns"]) == 1
+    assert result["new_columns"][0] == "Name_1"
 
 
-# ---------------------------------------------------------------------------
-# detect_outliers tests
-# ---------------------------------------------------------------------------
+def test_split_column_more_new_columns_than_parts(split_xlsx: str) -> None:
+    """When new_columns has more entries than actual split parts, extras are ignored."""
+    result = split_column(split_xlsx, column="FullName", delimiter=",", new_columns=["First", "Last", "Extra"])
+    # split produces 2 parts: only ["First", "Last"] should appear
+    assert len(result["new_columns"]) == 2
+    assert result["new_columns"] == ["First", "Last"]
+    assert "Extra" not in result["new_columns"]
 
 
-def test_detect_outliers_iqr_flag(numeric_xlsx: str, tmp_path: Path) -> None:
-    out = str(tmp_path / "flagged.xlsx")
-    result = detect_outliers(numeric_xlsx, column="A", method="iqr", threshold=1.5, action="flag", output_file=out)
-    assert result["method"] == "iqr"
-    assert result["outliers_found"] >= 1
-    assert isinstance(result["outlier_rows"], list)
-    assert Path(out).exists()
+# ── parse_date_column ─────────────────────────────────────────────────────
 
 
-def test_detect_outliers_zscore_flag(numeric_xlsx: str, tmp_path: Path) -> None:
-    out = str(tmp_path / "zscore.xlsx")
-    result = detect_outliers(
-        numeric_xlsx, column="Value", method="zscore", threshold=2.0, action="flag", output_file=out
-    )
-    assert result["method"] == "zscore"
-    assert result["outliers_found"] >= 1
+def test_parse_date_column_multiple_formats(tmp_path: Path) -> None:
+    """parse_date_column parses ISO-format dates without errors.
+
+    Uses dayfirst=False to avoid ambiguity warnings from pandas 2.x.
+    """
+    path = str(tmp_path / "dates.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Date"])
+    ws.append(["2024-01-15"])
+    ws.append(["2024-02-20"])
+    ws.append(["2024-03-25"])
+    wb.save(path)
+    wb.close()
+
+    result = parse_date_column(path, "Sheet1", "Date", dayfirst=False)
+    assert result["parsed_count"] == 3
+    assert result["failed_count"] == 0
+    assert result["column"] == "Date"
 
 
-def test_detect_outliers_remove(numeric_xlsx: str, tmp_path: Path) -> None:
-    out = str(tmp_path / "removed.xlsx")
-    result = detect_outliers(numeric_xlsx, column="A", method="iqr", threshold=1.5, action="remove", output_file=out)
-    assert result["action"] == "remove"
-    assert result["outliers_found"] >= 1
-    assert Path(out).exists()
+def test_parse_date_column_invalid_dates(tmp_path: Path) -> None:
+    """parse_date_column records failed_count for unparseable strings."""
+    path = str(tmp_path / "baddates.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["EventDate"])
+    ws.append(["2024-06-01"])
+    ws.append(["not-a-date"])
+    ws.append(["also invalid"])
+    wb.save(path)
+    wb.close()
+
+    result = parse_date_column(path, "Sheet1", "EventDate")
+    assert result["parsed_count"] == 1
+    assert result["failed_count"] == 2
 
 
-def test_detect_outliers_invalid_method(numeric_xlsx: str) -> None:
-    with pytest.raises(ValueError, match="method"):
-        detect_outliers(numeric_xlsx, column="A", method="invalid")
+def test_parse_date_column_output_column(tmp_path: Path) -> None:
+    """parse_date_column with output_column writes to the specified column."""
+    path = str(tmp_path / "dateout.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["RawDate"])
+    ws.append(["2024-03-10"])
+    wb.save(path)
+    wb.close()
+
+    result = parse_date_column(path, "Sheet1", "RawDate", output_column="Parsed")
+    assert result["output_column"] == "Parsed"
 
 
-def test_detect_outliers_custom_flag_name(numeric_xlsx: str, tmp_path: Path) -> None:
-    out = str(tmp_path / "custom_flag.xlsx")
-    result = detect_outliers(
-        numeric_xlsx, column="Value", flag_column_name="is_outlier", action="flag", output_file=out
-    )
-    assert result["action"] == "flag"
-    assert result["outliers_found"] >= 1
+# ── data_cleaner pipeline ─────────────────────────────────────────────────
+
+
+def test_data_cleaner_multi_op_pipeline(dirty_xlsx: str) -> None:
+    """data_cleaner runs multiple operations in sequence correctly."""
+    result = data_cleaner(dirty_xlsx, operations=["trim_whitespace", "remove_empty_rows", "fix_numbers"])
+    assert result["changes"]["trim_whitespace"] > 0
+    assert result["changes"]["remove_empty_rows"] >= 1
+    assert result["changes"]["fix_numbers"] > 0
+    assert result["rows_after"] < result["rows_before"]
+
+
+def test_data_cleaner_deduplicate(dirty_xlsx: str) -> None:
+    """data_cleaner remove_duplicates operation on an already-normalised dataset."""
+    result = data_cleaner(dirty_xlsx, operations=["normalize_text", "remove_duplicates"])
+    assert result["changes"]["remove_duplicates"] >= 1
+    assert result["rows_after"] < result["rows_before"]

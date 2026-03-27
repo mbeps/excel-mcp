@@ -6,10 +6,8 @@ from openpyxl import Workbook
 
 from mcp_server.tools.pivot_etl import (
     add_computed_column,
-    append_datasets,
     create_pivot_table,
     deduplicate_data,
-    find_differences,
     merge_datasets,
     unpivot_data,
 )
@@ -92,45 +90,6 @@ def test_deduplicate_data(tmp_path: Path) -> None:
     assert "Removed 1" in result
 
 
-def test_append_datasets(tmp_path: Path) -> None:
-    path = str(tmp_path / "append.xlsx")
-    wb = Workbook()
-    ws1 = wb.active
-    ws1.title = "Sheet1"
-    ws1.append(["Name", "Value"])
-    ws1.append(["A", 1])
-    ws1.append(["B", 2])
-    ws2 = wb.create_sheet("Sheet2")
-    ws2.append(["Name", "Value"])
-    ws2.append(["C", 3])
-    ws2.append(["D", 4])
-    wb.save(path)
-
-    result = append_datasets(path, "Sheet1", "Sheet2", "Output")
-    assert result["rows"] == 4
-    assert result["output_sheet"] == "Output"
-
-
-def test_find_differences(tmp_path: Path) -> None:
-    path = str(tmp_path / "diff.xlsx")
-    wb = Workbook()
-    ws1 = wb.active
-    ws1.title = "SheetA"
-    ws1.append(["ID", "Name"])
-    ws1.append([1, "Alice"])
-    ws1.append([2, "Bob"])
-    ws1.append([3, "Charlie"])
-    ws2 = wb.create_sheet("SheetB")
-    ws2.append(["ID", "Name"])
-    ws2.append([1, "Alice"])
-    ws2.append([2, "Bob"])
-    wb.save(path)
-
-    result = find_differences(path, "SheetA", "SheetB", key_columns=["ID"], output_sheet="Diff")
-    assert result["rows_only_in_a"] == 1
-    assert result["output_sheet"] == "Diff"
-
-
 def test_create_pivot_table_margins(sample_xlsx: str, tmp_path: Path) -> None:
     out = str(tmp_path / "pivot_margins.xlsx")
     result = create_pivot_table(
@@ -144,3 +103,225 @@ def test_create_pivot_table_margins(sample_xlsx: str, tmp_path: Path) -> None:
     )
     cities = [r["City"] for r in result["data"]]
     assert "Total" in cities
+
+
+import pytest
+
+
+def test_add_computed_column_unsafe(sample_xlsx: str) -> None:
+    # Test blocklist validation
+    with pytest.raises(ValueError, match="Invalid expression syntax"):
+        add_computed_column(sample_xlsx, "Sheet1", "Fail", "import os")
+
+    with pytest.raises(ValueError, match="Only column references and basic arithmetic are allowed"):
+        add_computed_column(sample_xlsx, "Sheet1", "Fail", "print(1)")
+
+
+def test_merge_datasets_missing_key(sample_xlsx: str) -> None:
+    # Create the second sheet so we don't fail on "Worksheet not found"
+    from openpyxl import load_workbook
+
+    wb = load_workbook(sample_xlsx)
+    if "Sheet2" not in wb.sheetnames:
+        wb.create_sheet("Sheet2")
+        ws2 = wb["Sheet2"]
+        ws2.append(["ID", "Info"])
+        wb.save(sample_xlsx)
+
+    with pytest.raises(ValueError, match="not found in sheet"):
+        merge_datasets(sample_xlsx, "Sheet1", "Sheet2", join_key="MissingID")
+
+
+def test_deduplicate_subset(tmp_path: Path) -> None:
+    path = str(tmp_path / "dupe_subset.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Name", "Type", "Val"])
+    ws.append(["A", "Small", 1])
+    ws.append(["A", "Large", 1])  # Same Name and Val, different Type
+    wb.save(path)
+
+    # Dedup by subset
+    result = deduplicate_data(path, "Sheet1", columns=["Name", "Val"])
+    assert "Removed 1" in result
+
+
+# ============================================================
+# Additional comprehensive tests
+# ============================================================
+
+
+def _make_revenue_cost_workbook(tmp_path: Path) -> str:
+    """Workbook with Revenue and Cost columns for arithmetic expression tests."""
+    path = str(tmp_path / "rev_cost.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Product", "Revenue", "Cost"])
+    ws.append(["Widget", 1000, 600])
+    ws.append(["Gadget", 2000, 1200])
+    ws.append(["Doohickey", 1500, 900])
+    wb.save(path)
+    return path
+
+
+def test_create_pivot_table_multi_value_cols(sample_xlsx: str, tmp_path: Path) -> None:
+    """Pivot table with two value columns (Age and Salary) both appear in output."""
+    out = str(tmp_path / "pivot_multi.xlsx")
+    result = create_pivot_table(
+        sample_xlsx,
+        "Sheet1",
+        index_cols=["City"],
+        value_cols=["Age", "Salary"],
+        aggfunc="mean",
+        output_file=out,
+    )
+    assert "data" in result
+    assert Path(out).exists()
+    first_record = result["data"][0]
+    assert "Age" in first_record
+    assert "Salary" in first_record
+
+
+def test_create_pivot_table_mean_aggregation(sample_xlsx: str) -> None:
+    """Pivot with mean aggregation returns correct per-city Salary averages."""
+    result = create_pivot_table(
+        sample_xlsx,
+        "Sheet1",
+        index_cols=["City"],
+        value_cols=["Salary"],
+        aggfunc="mean",
+    )
+    data = {r["City"]: r["Salary"] for r in result["data"]}
+    assert data["New York"] == pytest.approx(80000.0)  # (70000+90000)/2
+    assert data["Chicago"] == pytest.approx(58500.0)  # (55000+62000)/2
+
+
+def test_unpivot_data_structure(tmp_path: Path) -> None:
+    """unpivot_data produces correct row count and record keys for wide→long conversion."""
+    path = str(tmp_path / "wide.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Region", "Q1", "Q2", "Q3"])
+    ws.append(["East", 100, 120, 140])
+    ws.append(["West", 200, 210, 220])
+    wb.save(path)
+
+    result = unpivot_data(path, "Sheet1", id_vars=["Region"], value_vars=["Q1", "Q2", "Q3"])
+    assert result["row_count"] == 6  # 2 regions × 3 quarters
+    for record in result["data"]:
+        assert "Region" in record
+        assert "Variable" in record
+        assert "Value" in record
+
+
+def test_merge_datasets_inner_join(tmp_path: Path) -> None:
+    """Inner join only returns rows whose key appears in both sheets."""
+    path = str(tmp_path / "inner.xlsx")
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Left"
+    ws1.append(["ID", "Name"])
+    ws1.append([1, "Alice"])
+    ws1.append([2, "Bob"])
+    ws1.append([3, "Charlie"])  # no match in Right
+    ws2 = wb.create_sheet("Right")
+    ws2.append(["ID", "Score"])
+    ws2.append([1, 100])
+    ws2.append([2, 200])
+    # ID=3 absent from Right
+    wb.save(path)
+
+    result = merge_datasets(path, "Left", "Right", join_key="ID", how="inner")
+    assert result["row_count"] == 2  # only IDs 1 and 2
+
+
+def test_merge_datasets_outer_join(tmp_path: Path) -> None:
+    """Outer join includes all rows from both sheets, filling NaN for missing sides."""
+    path = str(tmp_path / "outer.xlsx")
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Left"
+    ws1.append(["ID", "Name"])
+    ws1.append([1, "Alice"])
+    ws1.append([2, "Bob"])
+    ws2 = wb.create_sheet("Right")
+    ws2.append(["ID", "Score"])
+    ws2.append([1, 100])
+    ws2.append([3, 300])  # ID=3 not in Left
+    wb.save(path)
+
+    result = merge_datasets(path, "Left", "Right", join_key="ID", how="outer")
+    assert result["row_count"] == 3  # IDs 1, 2, 3
+
+
+def test_add_computed_column_complex(tmp_path: Path) -> None:
+    """Sequential computed columns: Profit then Margin (multi-operand expression)."""
+    from mcp_server.tools.cell_ops import read_cell as rc
+
+    path = _make_revenue_cost_workbook(tmp_path)
+
+    add_computed_column(path, "Sheet1", "Profit", "Revenue - Cost")
+    # After first add: Product(A), Revenue(B), Cost(C), Profit(D)
+    assert rc(path, "Sheet1", "D1")["value"] == "Profit"
+    assert rc(path, "Sheet1", "D2")["value"] == pytest.approx(400.0)  # 1000-600
+
+    add_computed_column(path, "Sheet1", "Margin", "(Revenue - Cost) / Revenue * 100")
+    # After second add: …, Profit(D), Margin(E)
+    assert rc(path, "Sheet1", "E1")["value"] == "Margin"
+    assert rc(path, "Sheet1", "E2")["value"] == pytest.approx(40.0)  # (1000-600)/1000*100
+
+
+def test_add_computed_column_division(tmp_path: Path) -> None:
+    """Add a column using division between two existing columns."""
+    from mcp_server.tools.cell_ops import read_cell as rc
+
+    path = _make_revenue_cost_workbook(tmp_path)
+    add_computed_column(path, "Sheet1", "CostRatio", "Cost / Revenue")
+    # Product(A), Revenue(B), Cost(C), CostRatio(D)
+    assert rc(path, "Sheet1", "D1")["value"] == "CostRatio"
+    assert rc(path, "Sheet1", "D2")["value"] == pytest.approx(0.6)  # 600/1000
+
+
+def test_deduplicate_data_keep_last(tmp_path: Path) -> None:
+    """keep='last' retains the last duplicate occurrence and drops the first."""
+    from openpyxl import load_workbook as lw
+
+    path = str(tmp_path / "keep_last.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Name", "Value"])
+    ws.append(["A", 1])  # first occurrence — should be dropped
+    ws.append(["A", 99])  # second occurrence — should be kept
+    ws.append(["B", 2])
+    wb.save(path)
+
+    result = deduplicate_data(path, "Sheet1", columns=["Name"], keep="last")
+    assert "Removed 1" in result  # one duplicate removed
+
+    wb2 = lw(path)
+    ws2 = wb2.active
+    values = [[ws2.cell(r, c).value for c in range(1, 3)] for r in range(2, ws2.max_row + 1)]
+    all_vals = [v for row in values for v in row]
+    assert 99 in all_vals  # last A(99) retained
+    assert 1 not in all_vals  # first A(1) dropped
+    wb2.close()
+
+
+def test_deduplicate_data_no_duplicates(tmp_path: Path) -> None:
+    """When all rows are unique, deduplicate_data removes 0 rows."""
+    path = str(tmp_path / "no_dupes.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Name", "Value"])
+    ws.append(["A", 1])
+    ws.append(["B", 2])
+    ws.append(["C", 3])
+    wb.save(path)
+
+    result = deduplicate_data(path, "Sheet1")
+    assert "Removed 0" in result

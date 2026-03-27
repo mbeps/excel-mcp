@@ -17,17 +17,35 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 
-def read_cell(file_path: str, sheet_name: str, cell_ref: str) -> dict:
-    """Read a single cell and return its value and data type."""
-    wb = load_workbook_safe(file_path, read_only=True)
+def read_cell(
+    file_path: str,
+    sheet_name: str,
+    cell_ref: str,
+    include_formula: bool = False,
+    include_metadata: bool = False,
+) -> dict:
+    """Read a single cell. Set include_formula=True to get the stored formula string.
+    Set include_metadata=True to also return is_merged, has_comment, has_hyperlink, number_format."""
+    wb = load_workbook_safe(file_path, read_only=not include_metadata)
     try:
         ws = get_sheet(wb, sheet_name)
         cell = ws[cell_ref]
-        return {
+        result = {
             "cell_ref": cell_ref,
             "value": cell.value,
             "data_type": cell.data_type,
         }
+        if include_formula and isinstance(cell.value, str) and cell.value.startswith("="):
+            result["formula"] = cell.value
+        elif include_formula:
+            result["formula"] = None
+        if include_metadata:
+            is_merged = any(cell.coordinate in mr for mr in ws.merged_cells.ranges)
+            result["is_merged"] = is_merged
+            result["has_comment"] = cell.comment is not None
+            result["has_hyperlink"] = cell.hyperlink is not None
+            result["number_format"] = cell.number_format
+        return result
     finally:
         wb.close()
 
@@ -198,63 +216,6 @@ def clear_range(file_path: str, sheet_name: str, start_cell: str, end_cell: str)
         wb.close()
 
 
-def read_cell_detailed(
-    file_path: str,
-    sheet_name: str,
-    cell_ref: str,
-    data_only: bool = False,
-) -> dict:
-    """Read a cell with full detail including type, formula, comments, and merge status."""
-    wb = load_workbook_safe(file_path, data_only=data_only)
-    try:
-        ws = get_sheet(wb, sheet_name)
-        cell = ws[cell_ref]
-        value = cell.value
-        raw_type = cell.data_type
-
-        type_map = {
-            "s": "string",
-            "n": "number",
-            "b": "boolean",
-            "d": "datetime",
-            "f": "formula",
-            "e": "error",
-        }
-        data_type = type_map.get(raw_type, "empty") if value is not None else "empty"
-
-        formula = None
-        if data_only:
-            wb_formula = load_workbook_safe(file_path, data_only=False)
-            try:
-                ws_f = get_sheet(wb_formula, sheet_name)
-                f_cell = ws_f[cell_ref]
-                if f_cell.data_type == "f":
-                    formula = str(f_cell.value)
-            finally:
-                wb_formula.close()
-        elif raw_type == "f":
-            formula = str(value)
-
-        is_merged = False
-        for merged_range in ws.merged_cells.ranges:
-            if cell.coordinate in merged_range:
-                is_merged = True
-                break
-
-        return {
-            "cell_ref": cell_ref,
-            "value": value,
-            "data_type": data_type,
-            "formula": formula,
-            "has_comment": cell.comment is not None,
-            "has_hyperlink": cell.hyperlink is not None,
-            "number_format": cell.number_format,
-            "is_merged": is_merged,
-        }
-    finally:
-        wb.close()
-
-
 def read_file_chunked(
     file_path: str,
     sheet_name: str,
@@ -352,130 +313,108 @@ def copy_range(
         wb.close()
 
 
-def delete_range(
+def fill_series(
     file_path: str,
     sheet_name: str,
-    range_str: str,
-    shift_direction: str = "up",
-) -> str:
-    """Delete range contents and shift remaining cells up or left."""
-    if shift_direction not in ("up", "left"):
-        return f"Invalid shift_direction '{shift_direction}'. Use 'up' or 'left'."
+    start_cell: str,
+    series_type: str,
+    count: int,
+    step: float | str = 1,
+    direction: str = "down",
+    start_value: float | int | None = None,
+) -> dict:
+    """Fill a series of values starting from start_cell.
+
+    series_type: 'number' (1,2,3...), 'date' (requires step as offset like '1D','1M','1Y'),
+                 'text_increment' (A1, A2, A3...), 'custom' (fill count cells with the step value)
+    direction: 'down' or 'right'
+    """
+    import re as _re
+
+    from openpyxl.utils import column_index_from_string, get_column_letter
+    from openpyxl.utils.cell import coordinate_from_string
+
+    if direction not in ("down", "right"):
+        raise ValueError("direction must be 'down' or 'right'")
+
+    col_letter, row_num = coordinate_from_string(start_cell.upper())
+    col_idx = column_index_from_string(col_letter)
 
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
+        start_val = ws.cell(row=row_num, column=col_idx).value
+        if start_value is not None:
+            start_val = start_value
 
-        if ":" in range_str:
-            start_ref, end_ref = range_str.split(":")
+        values_written: list = []
+
+        if series_type == "number":
+            step_val = float(step)
+            if start_val is None:
+                start_val = 0
+            current = float(start_val)
+            for i in range(count):
+                raw = current + step_val * i
+                write_val: float | int = int(raw) if raw == int(raw) else raw
+                if direction == "down":
+                    ws.cell(row=row_num + i, column=col_idx, value=write_val)
+                else:
+                    ws.cell(row=row_num, column=col_idx + i, value=write_val)
+                values_written.append(write_val)
+
+        elif series_type == "date":
+            import pandas as pd
+
+            if start_val is None:
+                raise ValueError("start_cell must contain a date value for series_type='date'")
+            dates = pd.date_range(start=start_val, periods=count, freq=str(step))
+            for i, dt in enumerate(dates):
+                val = dt.to_pydatetime()
+                if direction == "down":
+                    ws.cell(row=row_num + i, column=col_idx, value=val)
+                else:
+                    ws.cell(row=row_num, column=col_idx + i, value=val)
+                values_written.append(str(dt.date()))
+
+        elif series_type == "text_increment":
+            if start_val is None:
+                raise ValueError("start_cell must contain a text value for series_type='text_increment'")
+            text_val = str(start_val)
+            m = _re.match(r"^(.*?)(\d+)$", text_val)
+            if not m:
+                raise ValueError(f"Cannot extract trailing number from '{text_val}' for text_increment series")
+            prefix = m.group(1)
+            num = int(m.group(2))
+            width = len(m.group(2))
+            for i in range(count):
+                val_str = f"{prefix}{str(num + i).zfill(width)}"
+                if direction == "down":
+                    ws.cell(row=row_num + i, column=col_idx, value=val_str)
+                else:
+                    ws.cell(row=row_num, column=col_idx + i, value=val_str)
+                values_written.append(val_str)
+
+        elif series_type == "custom":
+            for i in range(count):
+                if direction == "down":
+                    ws.cell(row=row_num + i, column=col_idx, value=step)
+                else:
+                    ws.cell(row=row_num, column=col_idx + i, value=step)
+                values_written.append(step)
+
         else:
-            start_ref = end_ref = range_str
-
-        start = ws[start_ref]
-        end = ws[end_ref]
-        min_row, max_row = start.row, end.row
-        min_col, max_col = start.column, end.column
-        num_rows = max_row - min_row + 1
-        num_cols = max_col - min_col + 1
-
-        if shift_direction == "up":
-            ws.delete_rows(min_row, num_rows)
-        else:
-            ws.delete_cols(min_col, num_cols)
-
-        save_workbook_safe(wb, file_path)
-        logger.info(
-            "Deleted range %s in %s, shifted %s",
-            range_str,
-            sheet_name,
-            shift_direction,
-        )
-        return f"Deleted range {range_str} in '{sheet_name}' and shifted cells {shift_direction}."
-    finally:
-        wb.close()
-
-
-def get_file_info(file_path: str) -> dict:
-    """Analyze a file and return metadata to help decide how to read it."""
-    import os
-
-    path = validate_file_path(file_path)
-    size_bytes = os.path.getsize(path)
-
-    if size_bytes < 1024:
-        size_display = f"{size_bytes} bytes"
-    elif size_bytes < 1024 * 1024:
-        size_display = f"{size_bytes / 1024:.1f} KB"
-    else:
-        size_display = f"{size_bytes / (1024 * 1024):.1f} MB"
-
-    wb = load_workbook_safe(file_path, read_only=True)
-    try:
-        sheets_info = []
-        total_cells = 0
-        for name in wb.sheetnames:
-            ws = wb[name]
-            max_row = ws.max_row or 0
-            max_col = ws.max_column or 0
-            cell_count = max_row * max_col
-            total_cells += cell_count
-            sheets_info.append(
-                {
-                    "name": name,
-                    "max_row": max_row,
-                    "max_column": max_col,
-                    "cell_count": cell_count,
-                }
+            raise ValueError(
+                f"Invalid series_type '{series_type}'. Must be 'number', 'date', 'text_increment', or 'custom'"
             )
 
-        estimated_memory_mb = round(total_cells * 50 / (1024 * 1024), 2)
-        if total_cells <= 10000:
-            recommended_chunk = 1000
-        elif total_cells <= 100000:
-            recommended_chunk = 500
+        if direction == "down":
+            end_cell = f"{col_letter}{row_num + count - 1}"
         else:
-            recommended_chunk = 200
+            end_cell = f"{get_column_letter(col_idx + count - 1)}{row_num}"
 
-        return {
-            "file_path": str(path),
-            "size_bytes": size_bytes,
-            "size_display": size_display,
-            "sheet_count": len(wb.sheetnames),
-            "sheets": sheets_info,
-            "total_cells": total_cells,
-            "estimated_memory_mb": estimated_memory_mb,
-            "recommended_chunk_size": recommended_chunk,
-        }
-    finally:
-        wb.close()
-
-
-def read_ranges_batch(
-    file_path: str,
-    sheet_name: str,
-    ranges: list[str],
-    include_empty: bool = True,
-) -> dict:
-    """Read multiple non-contiguous ranges in a single workbook load."""
-    wb = load_workbook_safe(file_path, read_only=True, data_only=True)
-    try:
-        ws = get_sheet(wb, sheet_name)
-        results: dict[str, list[list]] = {}
-        for range_str in ranges:
-            raw = ws[range_str]
-            # Single cell returns a Cell object; wrap it
-            if not isinstance(raw, tuple):
-                value = raw.value if raw.value is not None else ""
-                results[range_str] = [[value]]
-            else:
-                rows: list[list] = []
-                for row in raw:
-                    if isinstance(row, tuple):
-                        rows.append([c.value if c.value is not None else "" for c in row])
-                    else:
-                        rows.append([row.value if row.value is not None else ""])
-                results[range_str] = rows
-        logger.info("Read %d ranges from %s!%s", len(ranges), sheet_name, file_path)
-        return {"results": results}
+        save_workbook_safe(wb, file_path)
+        logger.info("Filled %s series from %s to %s in %s!%s", series_type, start_cell, end_cell, sheet_name, file_path)
+        return {"start_cell": start_cell, "end_cell": end_cell, "count": count, "values_written": values_written}
     finally:
         wb.close()

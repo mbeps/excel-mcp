@@ -18,6 +18,7 @@ logger: Logger = configure_logging(__name__)
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".xlsm"}
 MAX_ROWS_DEFAULT = 10000
+MAX_ROWS_WRITE = 50000
 
 
 def validate_file_path(file_path: str, must_exist: bool = True) -> Path:
@@ -34,11 +35,17 @@ def validate_file_path(file_path: str, must_exist: bool = True) -> Path:
     return path
 
 
-def load_workbook_safe(file_path: str, read_only: bool = False, data_only: bool = False) -> Workbook:
+def load_workbook_safe(
+    file_path: str,
+    read_only: bool = False,
+    data_only: bool = False,
+    keep_vba: bool | None = None,
+) -> Workbook:
     """Load an Excel workbook with validation and error handling."""
     path = validate_file_path(file_path)
+    effective_keep_vba = keep_vba if keep_vba is not None else (path.suffix.lower() == ".xlsm")
     try:
-        return openpyxl.load_workbook(str(path), read_only=read_only, data_only=data_only)
+        return openpyxl.load_workbook(str(path), read_only=read_only, data_only=data_only, keep_vba=effective_keep_vba)
     except Exception as e:
         raise ValueError(f"Failed to open workbook '{file_path}': {e}") from e
 
@@ -77,6 +84,11 @@ def read_sheet_df(file_path: str, sheet_name: str, header_row: int = 1) -> pd.Da
     """
     path = validate_file_path(file_path)
     header = header_row - 1 if header_row >= 1 else None
+    if path.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
+        try:
+            return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="calamine")
+        except Exception:
+            pass
     return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="openpyxl")
 
 

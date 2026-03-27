@@ -92,35 +92,3 @@ def list_hyperlinks(file_path: str, sheet_name: str) -> list[dict]:
         return results
     finally:
         wb.close()
-
-
-def add_internal_hyperlink(
-    file_path: str,
-    sheet_name: str,
-    cell: str,
-    target_sheet: str,
-    target_cell: str = "A1",
-    display_text: str | None = None,
-) -> str:
-    """Add a hyperlink that navigates to another sheet/cell within the same workbook."""
-    wb = load_workbook_safe(file_path)
-    try:
-        if target_sheet not in wb.sheetnames:
-            raise ValueError(f"Sheet '{target_sheet}' not found in workbook")
-        ws = get_sheet(wb, sheet_name)
-        c = ws[cell]
-        c.hyperlink = f"#{target_sheet}!{target_cell}"
-        if display_text is not None:
-            c.value = display_text
-        save_workbook_safe(wb, file_path)
-        logger.info(
-            "Added internal link from %s!%s to %s!%s in %s",
-            sheet_name,
-            cell,
-            target_sheet,
-            target_cell,
-            file_path,
-        )
-        return f"Added internal link from {cell} to {target_sheet}!{target_cell}"
-    finally:
-        wb.close()

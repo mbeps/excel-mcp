@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from logging import Logger
 
-from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule, FormulaRule, IconSetRule, Rule
+from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule, FormulaRule, IconSetRule
 from openpyxl.styles import Font, PatternFill
-from openpyxl.styles.differential import DifferentialStyle
 
 from mcp_server.utils.excel_helpers import (
     get_sheet,
@@ -17,7 +16,7 @@ from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
 
-VALID_FORMAT_TYPES = {"color_scale", "data_bar", "icon_set"}
+VALID_FORMAT_TYPES = {"color_scale", "2_color_scale", "data_bar", "icon_set"}
 
 
 def apply_conditional_formatting(
@@ -30,6 +29,7 @@ def apply_conditional_formatting(
     end_color: str = "00FF00",
     bar_color: str = "FF638EC6",
     icon_style: str = "3Arrows",
+    stop_if_true: bool = False,
 ) -> str:
     """Apply conditional formatting rule to a range."""
     if format_type not in VALID_FORMAT_TYPES:
@@ -51,6 +51,15 @@ def apply_conditional_formatting(
                 end_value=90,
                 end_color=end_color,
             )
+        elif format_type == "2_color_scale":
+            rule = ColorScaleRule(
+                start_type="percentile",
+                start_value=10,
+                start_color=start_color,
+                end_type="percentile",
+                end_value=90,
+                end_color=end_color,
+            )
         elif format_type == "data_bar":
             rule = DataBarRule(
                 start_type="percentile",
@@ -66,6 +75,7 @@ def apply_conditional_formatting(
                 values=[33, 67],
             )
 
+        rule.stopIfTrue = stop_if_true
         ws.conditional_formatting.add(cell_range, rule)
         save_workbook_safe(wb, file_path)
         logger.info("Applied %s conditional formatting to %s in %s", format_type, cell_range, file_path)
@@ -82,6 +92,7 @@ def add_highlight_rule(
     formula: str,
     font_color: str = "9C0006",
     bg_color: str = "FFC7CE",
+    stop_if_true: bool = False,
 ) -> str:
     """Add a cell highlight conditional format rule."""
     wb = load_workbook_safe(file_path)
@@ -91,6 +102,7 @@ def add_highlight_rule(
         rule = CellIsRule(
             operator=operator,
             formula=[formula],
+            stopIfTrue=stop_if_true,
             font=Font(color=font_color),
             fill=PatternFill(bgColor=bg_color),
         )
@@ -153,121 +165,5 @@ def add_formula_rule(
         save_workbook_safe(wb, file_path)
         logger.info("Added formula rule to %s in %s", cell_range, file_path)
         return f"Added formula-based conditional formatting to '{cell_range}' on sheet '{sheet_name}'."
-    finally:
-        wb.close()
-
-
-def add_top_bottom_rule(
-    file_path: str,
-    sheet_name: str,
-    cell_range: str,
-    rank: int = 10,
-    bottom: bool = False,
-    percent: bool = False,
-    font_color: str = "9C0006",
-    bg_color: str = "FFC7CE",
-) -> str:
-    """Add a top/bottom N conditional formatting rule."""
-    wb = load_workbook_safe(file_path)
-    try:
-        ws = get_sheet(wb, sheet_name)
-
-        dxf = DifferentialStyle(
-            font=Font(color=font_color),
-            fill=PatternFill(bgColor=bg_color),
-        )
-        rule = Rule(
-            type="top10",
-            rank=rank,
-            bottom=bottom,
-            percent=percent,
-            dxf=dxf,
-        )
-        ws.conditional_formatting.add(cell_range, rule)
-        save_workbook_safe(wb, file_path)
-        direction = "bottom" if bottom else "top"
-        pct = "%" if percent else ""
-        logger.info("Added %s %d%s rule to %s in %s", direction, rank, pct, cell_range, file_path)
-        return f"Added {direction} {rank}{pct} conditional formatting to '{cell_range}' on sheet '{sheet_name}'."
-    finally:
-        wb.close()
-
-
-def add_above_average_rule(
-    file_path: str,
-    sheet_name: str,
-    cell_range: str,
-    above: bool = True,
-    font_color: str = "9C0006",
-    bg_color: str = "FFC7CE",
-) -> str:
-    """Add an above/below average conditional formatting rule."""
-    wb = load_workbook_safe(file_path)
-    try:
-        ws = get_sheet(wb, sheet_name)
-
-        dxf = DifferentialStyle(
-            font=Font(color=font_color),
-            fill=PatternFill(bgColor=bg_color),
-        )
-        rule = Rule(
-            type="aboveAverage",
-            aboveAverage=above,
-            dxf=dxf,
-        )
-        ws.conditional_formatting.add(cell_range, rule)
-        save_workbook_safe(wb, file_path)
-        direction = "above" if above else "below"
-        logger.info("Added %s average rule to %s in %s", direction, cell_range, file_path)
-        return f"Added {direction}-average conditional formatting to '{cell_range}' on sheet '{sheet_name}'."
-    finally:
-        wb.close()
-
-
-def add_duplicate_rule(
-    file_path: str,
-    sheet_name: str,
-    cell_range: str,
-    font_color: str = "9C0006",
-    bg_color: str = "FFC7CE",
-) -> str:
-    """Add duplicate values highlighting conditional formatting rule."""
-    wb = load_workbook_safe(file_path)
-    try:
-        ws = get_sheet(wb, sheet_name)
-
-        dxf = DifferentialStyle(
-            font=Font(color=font_color),
-            fill=PatternFill(bgColor=bg_color),
-        )
-        rule = Rule(
-            type="duplicateValues",
-            dxf=dxf,
-        )
-        ws.conditional_formatting.add(cell_range, rule)
-        save_workbook_safe(wb, file_path)
-        logger.info("Added duplicate values rule to %s in %s", cell_range, file_path)
-        return f"Added duplicate-values conditional formatting to '{cell_range}' on sheet '{sheet_name}'."
-    finally:
-        wb.close()
-
-
-def list_conditional_formats(file_path: str, sheet_name: str) -> list[dict]:
-    """List all conditional formatting rules on a sheet."""
-    wb = load_workbook_safe(file_path, read_only=False)
-    try:
-        ws = get_sheet(wb, sheet_name)
-        result: list[dict] = []
-        for cf in ws.conditional_formatting:
-            for rule in cf.rules:
-                entry: dict = {
-                    "range": str(cf.sqref),
-                    "type": rule.type,
-                    "priority": rule.priority,
-                }
-                if hasattr(rule, "formula") and rule.formula:
-                    entry["formula"] = list(rule.formula)
-                result.append(entry)
-        return result
     finally:
         wb.close()
