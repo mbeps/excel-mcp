@@ -6,6 +6,8 @@ from logging import Logger
 
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
+from mcp_server.models.common import CellScalar
+from mcp_server.models.tables import TableInfo
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -43,7 +45,7 @@ def create_table(
     return f"Created table '{table_name}' at '{data_range}' on sheet '{sheet_name}'."
 
 
-def list_tables(file_path: str, sheet_name: str) -> list[dict]:
+def list_tables(file_path: str, sheet_name: str) -> list[TableInfo]:
     """List all tables in a sheet."""
     wb = load_workbook_safe(file_path)
     try:
@@ -99,7 +101,11 @@ def set_table_totals_row(
     return f"Totals row {'enabled' if show_totals else 'disabled'} for table '{table_name}'."
 
 
-def get_table_data(file_path: str, sheet_name: str, table_name: str) -> dict:
+def get_table_data(
+    file_path: str,
+    sheet_name: str,
+    table_name: str,
+) -> dict[str, str | int | list[CellScalar] | list[list[CellScalar]] | None]:
     """Read table data as structured output with headers and rows."""
     wb = load_workbook_safe(file_path)
     try:

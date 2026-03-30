@@ -6,6 +6,8 @@ import copy
 import math
 from logging import Logger
 
+from mcp_server.models.cell_ops import CellStyleInfo
+from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -23,7 +25,7 @@ def read_cell(
     cell_ref: str,
     include_formula: bool = False,
     include_metadata: bool = False,
-) -> dict:
+) -> dict[str, CellScalar | str | bool | None]:
     """Read a single cell. Set include_formula=True to get the stored formula string.
     Set include_metadata=True to also return is_merged, has_comment, has_hyperlink, number_format."""
     wb = load_workbook_safe(file_path, read_only=not include_metadata)
@@ -77,7 +79,7 @@ def read_range(
     show_style: bool = False,
     output_format: str = "json",
     max_cells: int | None = None,
-) -> dict:
+) -> dict[str, list[list[CellScalar]] | list[list[CellStyleInfo]] | str | int | bool]:
     """Read a rectangular range and return rows as a list of lists.
 
     Args:
@@ -106,11 +108,11 @@ def read_range(
             read_end_cell = f"{get_column_letter(end_c)}{new_end_r}"
             truncated = True
 
-        rows: list[list] = []
-        styles: list[list[dict]] = []
+        rows: list[list[CellScalar]] = []
+        styles: list[list[CellStyleInfo]] = []
         for row in ws[f"{start_cell}:{read_end_cell}"]:
-            row_values = []
-            row_styles = []
+            row_values: list[CellScalar] = []
+            row_styles: list[CellStyleInfo] = []
             for cell in row:
                 if show_formula and isinstance(cell.value, str) and cell.value.startswith("="):
                     row_values.append(cell.value)
@@ -178,7 +180,7 @@ def read_range(
         wb.close()
 
 
-def write_range(file_path: str, sheet_name: str, start_cell: str, data: list[list]) -> str:
+def write_range(file_path: str, sheet_name: str, start_cell: str, data: list[list[CellScalar]]) -> str:
     """Write a 2D array starting from start_cell."""
     wb = load_workbook_safe(file_path)
     try:
@@ -221,7 +223,7 @@ def read_file_chunked(
     sheet_name: str,
     start_row: int = 0,
     chunk_size: int = 1000,
-) -> dict:
+) -> dict[str, list[dict[str, CellScalar]] | int | bool | None]:
     """Read a sheet in chunks using pandas for performance."""
     import pandas as pd
 
@@ -322,7 +324,7 @@ def fill_series(
     step: float | str = 1,
     direction: str = "down",
     start_value: float | int | None = None,
-) -> dict:
+) -> dict[str, str | int | list[CellScalar]]:
     """Fill a series of values starting from start_cell.
 
     series_type: 'number' (1,2,3...), 'date' (requires step as offset like '1D','1M','1Y'),
@@ -347,7 +349,7 @@ def fill_series(
         if start_value is not None:
             start_val = start_value
 
-        values_written: list = []
+        values_written: list[CellScalar] = []
 
         if series_type == "number":
             step_val = float(step)

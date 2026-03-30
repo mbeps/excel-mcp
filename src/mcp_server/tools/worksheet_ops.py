@@ -162,7 +162,7 @@ def merge_workbooks(
     source_files: list[str],
     output_file: str,
     conflict_strategy: str = "rename",
-) -> dict:
+) -> dict[str, object]:
     """Merge all sheets from multiple workbooks into a single output workbook.
 
     conflict_strategy: 'rename' (append _2, _3, ...) or 'overwrite'.
@@ -179,9 +179,13 @@ def merge_workbooks(
 
     if out_path.suffix.lower() not in ALLOWED_EXTENSIONS:
         raise ValueError(f"output_file must have an allowed extension: {ALLOWED_EXTENSIONS}")
-    out_wb = openpyxl.Workbook()
-    out_wb.remove(out_wb.active)
-    sheet_names_used: list[str] = []
+    if out_path.exists():
+        out_wb = openpyxl.load_workbook(output_file)
+        sheet_names_used: list[str] = list(out_wb.sheetnames)
+    else:
+        out_wb = openpyxl.Workbook()
+        out_wb.remove(out_wb.active)
+        sheet_names_used = []
     merged_files = 0
     for src_file in source_files:
         validate_file_path(src_file, must_exist=True)

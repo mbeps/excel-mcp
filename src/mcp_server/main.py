@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from logging import Logger
-from typing import Any, Literal
+from typing import Literal, cast
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -31,6 +32,28 @@ import mcp_server.tools.statistical as _statistical
 import mcp_server.tools.tables as _tables
 import mcp_server.tools.workbook as _workbook
 import mcp_server.tools.worksheet_ops as _ws_ops
+from mcp_server.models.analysis import ColumnStats
+from mcp_server.models.charts import ChartInfo
+from mcp_server.models.comments import CommentInfo
+from mcp_server.models.common import (
+    BorderStyle,
+    HorizontalAlignment,
+    ScenarioCellValue,
+    ValidationOperator,
+    VerticalAlignment,
+)
+from mcp_server.models.hyperlinks import HyperlinkInfo, HyperlinkReadResult
+from mcp_server.models.named_ranges import FormulaErrorInfo, FormulaInfo
+from mcp_server.models.pivot_etl import ChunkReadResult
+from mcp_server.models.scenarios import ScenarioInfo
+from mcp_server.models.solver import SolverResult
+from mcp_server.models.tables import TableInfo
+from mcp_server.models.workbook import (
+    SheetSummary,
+    WorkbookCreatedResult,
+    WorkbookMetadata,
+    WriteMultiSheetResult,
+)
 from mcp_server.utils.logger import configure_logging
 
 mcp: FastMCP = FastMCP("excel-mcp-server")
@@ -61,30 +84,32 @@ def resource_sheet_preview(file_path: str, sheet_name: str) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-def get_workbook_metadata(file_path: str) -> dict:
+def get_workbook_metadata(file_path: str) -> WorkbookMetadata:
     """Get workbook metadata including sheet names, dimensions, active sheet, and named ranges."""
-    return _workbook.get_workbook_metadata(file_path)
+    return _workbook.get_workbook_metadata(file_path)  # type: ignore[return-value]
 
 
 @mcp.tool()
-def create_workbook(file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None) -> dict:
+def create_workbook(
+    file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None
+) -> WorkbookCreatedResult:
     """Create a new .xlsx workbook.
 
     Optionally specify initial sheet names via sheet_names (list) or sheet_name (single).
     """
-    return _workbook.create_workbook(file_path, sheet_names, sheet_name)
+    return _workbook.create_workbook(file_path, sheet_names, sheet_name)  # type: ignore[return-value]
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-def get_sheet_summary(file_path: str, sheet_name: str) -> dict:
+def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
     """Get sheet summary: name, row/col counts, headers, and used range."""
-    return _workbook.get_sheet_summary(file_path, sheet_name)
+    return _workbook.get_sheet_summary(file_path, sheet_name)  # type: ignore[return-value]
 
 
 @mcp.tool()
-def write_multi_sheet(file_path: str, sheets: list[dict]) -> dict:
+def write_multi_sheet(file_path: str, sheets: list[dict[str, object]]) -> WriteMultiSheetResult:
     """Create a new workbook with multiple named sheets, headers, data, and column widths in one call."""
-    return _workbook.write_multi_sheet(file_path, sheets)
+    return _workbook.write_multi_sheet(file_path, sheets)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -106,11 +131,11 @@ def sheet_management(
     action="copy": Copy a sheet. Requires: new_name for the copy.
     """
     if action == "rename":
-        return _workbook.rename_sheet(file_path, sheet_name, new_name)
+        return _workbook.rename_sheet(file_path, sheet_name, new_name)  # type: ignore[arg-type]
     if action == "delete":
         return _workbook.delete_sheet(file_path, sheet_name)
     if action == "copy":
-        return _workbook.copy_sheet(file_path, sheet_name, new_name)
+        return _workbook.copy_sheet(file_path, sheet_name, new_name)  # type: ignore[arg-type]
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -135,7 +160,7 @@ def read_cells(
     max_cells: int | None = None,
     start_row: int = 0,
     chunk_size: int = 1000,
-) -> dict:
+) -> dict | ChunkReadResult:
     """Read cell data from a worksheet.
 
     mode="single": Read one cell. Requires: cell_ref. Optional: include_formula, include_metadata.
@@ -144,13 +169,13 @@ def read_cells(
     mode="chunked": Read large sheets in chunks. Optional: start_row, chunk_size.
     """
     if mode == "single":
-        return _cell_ops.read_cell(file_path, sheet_name, cell_ref, include_formula, include_metadata)
+        return _cell_ops.read_cell(file_path, sheet_name, cell_ref, include_formula, include_metadata)  # type: ignore[arg-type]
     if mode == "range":
         return _cell_ops.read_range(
             file_path,
             sheet_name,
-            start_cell,
-            end_cell,
+            start_cell,  # type: ignore[arg-type]
+            end_cell,  # type: ignore[arg-type]
             show_formula,
             show_style,
             output_format,
@@ -174,7 +199,7 @@ def write_cells(
     cell_ref: str | None = None,
     value: str | int | float | bool | None = None,
     start_cell: str | None = None,
-    data: list[list] | None = None,
+    data: list[list[str | int | float | bool | datetime | date | None]] | None = None,
     series_type: str = "number",
     count: int | None = None,
     step: float | str = 1,
@@ -188,7 +213,7 @@ def write_cells(
     mode="series": Fill series. Requires: start_cell, count. Optional: series_type, step, direction, start_value.
     """
     if mode == "single":
-        return _cell_ops.write_cell(file_path, sheet_name, cell_ref, value)
+        return _cell_ops.write_cell(file_path, sheet_name, cell_ref, value)  # type: ignore[arg-type]
     if mode == "range":
         if start_cell is None:
             raise ValueError("start_cell is required for mode='range'.")
@@ -247,10 +272,10 @@ def format_cells(
     font_color: str | None = None,
     bg_color: str | None = None,
     number_format: str | None = None,
-    horizontal_alignment: str | None = None,
-    vertical_alignment: str | None = None,
+    horizontal_alignment: HorizontalAlignment | None = None,
+    vertical_alignment: VerticalAlignment | None = None,
     wrap_text: bool = False,
-    border_style: str | None = None,
+    border_style: BorderStyle | None = None,
     border_color: str | None = None,
     font_name: str | None = None,
     underline: str | None = None,
@@ -258,10 +283,10 @@ def format_cells(
     text_rotation: int | None = None,
     indent: int | None = None,
     shrink_to_fit: bool = False,
-    top_border_style: str | None = None,
-    bottom_border_style: str | None = None,
-    left_border_style: str | None = None,
-    right_border_style: str | None = None,
+    top_border_style: BorderStyle | None = None,
+    bottom_border_style: BorderStyle | None = None,
+    left_border_style: BorderStyle | None = None,
+    right_border_style: BorderStyle | None = None,
 ) -> str:
     """Apply formatting (font, fill, alignment, borders, number format) to a cell range."""
     return _formatting.format_cells(
@@ -320,9 +345,9 @@ def formula_write(
     action="batch": Set multiple formulas. Requires: formulas (dict of cell_ref -> formula).
     """
     if action == "set":
-        return _formulas.set_formula(file_path, sheet_name, cell_ref, formula, is_array, target_range)
+        return _formulas.set_formula(file_path, sheet_name, cell_ref, formula, is_array, target_range)  # type: ignore[arg-type]
     if action == "batch":
-        return _formulas.set_formulas_batch(file_path, sheet_name, formulas)
+        return _formulas.set_formulas_batch(file_path, sheet_name, formulas)  # type: ignore[arg-type]
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -338,7 +363,7 @@ def formula_audit(
     sheet_name: str,
     cell_ref: str | None = None,
     cell_range: str | None = None,
-) -> dict | list[dict] | list[str]:
+) -> dict | list[FormulaErrorInfo] | list[str] | list[FormulaInfo]:
     """Audit and inspect formulas. All actions are read-only.
 
     action="value": Get cached display value. Requires: cell_ref.
@@ -348,12 +373,18 @@ def formula_audit(
     action="list": List all formulas in the sheet.
     """
     if action == "value":
+        if not cell_ref:
+            raise ValueError("cell_ref is required for action='value'.")
         return _formulas.get_formula_value(file_path, sheet_name, cell_ref)
     if action == "errors":
         return _formulas.get_formula_errors(file_path, sheet_name, cell_range)
     if action == "precedents":
+        if not cell_ref:
+            raise ValueError("cell_ref is required for action='precedents'.")
         return _formulas.get_formula_precedents(file_path, sheet_name, cell_ref)
     if action == "dependents":
+        if not cell_ref:
+            raise ValueError("cell_ref is required for action='dependents'.")
         return _formulas.get_formula_dependents(file_path, sheet_name, cell_ref)
     if action == "list":
         return _formulas.list_formulas(file_path, sheet_name)
@@ -384,7 +415,7 @@ def csv_ops(
     action="to_csv": Export sheet to CSV. Requires: file_path, sheet_name, output_path. Optional: delimiter, encoding.
     """
     if action == "preview":
-        return _csv_ops.read_csv_preview(file_path, rows, delimiter, encoding)
+        return _csv_ops.read_csv_preview(file_path, rows, delimiter, encoding)  # type: ignore[arg-type]
     if action == "to_xlsx":
         effective_csv = csv_path or file_path
         effective_xlsx = xlsx_path or output_path
@@ -394,7 +425,7 @@ def csv_ops(
             raise ValueError("xlsx_path (or output_path) is required for action='to_xlsx'.")
         return _csv_ops.csv_to_xlsx(effective_csv, effective_xlsx, sheet_name, delimiter, encoding)
     if action == "to_csv":
-        return _csv_ops.xlsx_to_csv(file_path, sheet_name, output_path, delimiter, encoding)
+        return _csv_ops.xlsx_to_csv(file_path, sheet_name, output_path, delimiter, encoding)  # type: ignore[arg-type]
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -432,8 +463,8 @@ def conditional_format(
         return _cond_fmt.apply_conditional_formatting(
             file_path,
             sheet_name,
-            cell_range,
-            format_type,
+            cell_range,  # type: ignore[arg-type]
+            format_type,  # type: ignore[arg-type]
             start_color,
             mid_color,
             end_color,
@@ -445,15 +476,15 @@ def conditional_format(
         return _cond_fmt.add_highlight_rule(
             file_path,
             sheet_name,
-            cell_range,
-            operator,
-            formula,
+            cell_range,  # type: ignore[arg-type]
+            operator,  # type: ignore[arg-type]
+            formula,  # type: ignore[arg-type]
             font_color,
             bg_color,
             stop_if_true,
         )
     if action == "formula_rule":
-        return _cond_fmt.add_formula_rule(file_path, sheet_name, cell_range, formula, font_color, bg_color)
+        return _cond_fmt.add_formula_rule(file_path, sheet_name, cell_range, formula, font_color, bg_color)  # type: ignore[arg-type]
     if action == "remove":
         return _cond_fmt.remove_conditional_formatting(file_path, sheet_name, cell_range)
     raise ValueError(f"Unknown action: {action}")
@@ -475,7 +506,7 @@ def table(
     new_range: str | None = None,
     show_totals: bool | None = None,
     column_totals: dict[str, str] | None = None,
-) -> str | list[dict] | dict:
+) -> str | list[TableInfo] | dict:
     """Excel table (ListObject) operations.
 
     action="create": Create a table. Requires: data_range, table_name. Optional: style_name.
@@ -493,11 +524,11 @@ def table(
     if action == "list":
         return _tables.list_tables(file_path, sheet_name)
     if action == "resize":
-        return _tables.resize_table(file_path, sheet_name, table_name, new_range)
+        return _tables.resize_table(file_path, sheet_name, table_name, new_range)  # type: ignore[arg-type]
     if action == "totals":
-        return _tables.set_table_totals_row(file_path, sheet_name, table_name, show_totals, column_totals)
+        return _tables.set_table_totals_row(file_path, sheet_name, table_name, show_totals, column_totals)  # type: ignore[arg-type]
     if action == "data":
-        return _tables.get_table_data(file_path, sheet_name, table_name)
+        return _tables.get_table_data(file_path, sheet_name, table_name)  # type: ignore[arg-type]
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -514,7 +545,7 @@ def data_validation(
     cell_range: str,
     options: list[str] | None = None,
     source_range: str | None = None,
-    operator: str | None = None,
+    operator: ValidationOperator | None = None,
     value1: float | None = None,
     value2: float | None = None,
     date1: str = "",
@@ -538,7 +569,7 @@ def data_validation(
             file_path,
             sheet_name,
             cell_range,
-            options,
+            options,  # type: ignore[arg-type]
             allow_blank,
             source_range,
             error_style,
@@ -552,8 +583,8 @@ def data_validation(
             file_path,
             sheet_name,
             cell_range,
-            operator,
-            value1,
+            operator,  # type: ignore[arg-type]
+            value1,  # type: ignore[arg-type]
             value2,
             allow_blank,
             error_style,
@@ -567,7 +598,7 @@ def data_validation(
             file_path,
             sheet_name,
             cell_range,
-            operator,
+            operator,  # type: ignore[arg-type]
             date1,
             date2,
             allow_blank,
@@ -618,7 +649,7 @@ def protection(
     if action == "protect_sheet":
         return _protection.protect_sheet(
             file_path,
-            sheet_name,
+            sheet_name,  # type: ignore[arg-type]
             password,
             allow_formatting_cells,
             allow_formatting_columns,
@@ -631,11 +662,11 @@ def protection(
             allow_filter,
         )
     if action == "unprotect_sheet":
-        return _protection.unprotect_sheet(file_path, sheet_name, password)
+        return _protection.unprotect_sheet(file_path, sheet_name, password)  # type: ignore[arg-type]
     if action == "protect_cells":
         if not locked_range:
             raise ValueError("locked_range is required for action='protect_cells'.")
-        return _protection.protect_cells(file_path, sheet_name, locked_range, unlocked_ranges)
+        return _protection.protect_cells(file_path, sheet_name, locked_range, unlocked_ranges)  # type: ignore[arg-type]
     if action == "protect_workbook":
         return _doc_props.protect_workbook(file_path, password, lock_structure, lock_windows)
     if action == "unprotect_workbook":
@@ -681,7 +712,7 @@ def chart(
     line_columns: list[int] | None = None,
     anchor_cell: str = "F1",
     x_axis_column: int = 0,
-) -> str | list[dict]:
+) -> str | list[ChartInfo]:
     """Chart operations.
 
     action="create": Create chart. Requires: data_range. Optional: chart_type, target_cell, title, axes, style, size.
@@ -696,10 +727,10 @@ def chart(
         return _charts.create_chart(
             file_path,
             sheet_name,
-            data_range,
+            data_range,  # type: ignore[arg-type]
             chart_type,
             target_cell,
-            title or "",
+            name or title or "",
             x_axis_title,
             y_axis_title,
             style,
@@ -709,9 +740,9 @@ def chart(
     if action == "delete":
         return _charts.delete_chart(file_path, sheet_name, chart_index or 0)
     if action == "list":
-        return _charts.list_charts(file_path, sheet_name)
+        return cast(list[ChartInfo], _charts.list_charts(file_path, sheet_name))
     if action == "add_series":
-        return _charts.add_chart_series(file_path, sheet_name, chart_index, data_range, title_from_data)
+        return _charts.add_chart_series(file_path, sheet_name, chart_index, data_range, title_from_data)  # type: ignore[arg-type]
     if action == "set_axes":
         return _charts.set_chart_axes(
             file_path,
@@ -795,7 +826,7 @@ def named_range(
     destination: str | None = None,
     scope: str = "workbook",
     new_destination: str | None = None,
-) -> list[dict] | str:
+) -> list[dict[str, str]] | str:
     """Manage named ranges.
 
     action="list": List all named ranges. Read-only. Requires: file_path only.
@@ -804,7 +835,7 @@ def named_range(
     action="update": Update destination. Requires: name, new_destination.
     """
     if action == "list":
-        return _named_ranges.list_named_ranges(file_path)
+        return cast(list[dict[str, str]], _named_ranges.list_named_ranges(file_path))
     if action == "create":
         if not name:
             raise ValueError("name is required for action='create'.")
@@ -812,7 +843,7 @@ def named_range(
             raise ValueError("destination is required for action='create'.")
         return _named_ranges.create_named_range(file_path, name, destination, scope)
     if action == "delete":
-        return _named_ranges.delete_named_range(file_path, name)
+        return _named_ranges.delete_named_range(file_path, name)  # type: ignore[arg-type]
     if action == "update":
         if not name:
             raise ValueError("name is required for action='update'.")
@@ -835,7 +866,7 @@ def comment(
     cell_ref: str | None = None,
     text: str | None = None,
     author: str = "Excel MCP",
-) -> str | dict | list[dict] | None:
+) -> str | CommentInfo | list[CommentInfo] | None:
     """Comment operations on cells.
 
     action="add": Add a comment. Requires: cell_ref, text. Optional: author.
@@ -844,11 +875,14 @@ def comment(
     action="list": List all comments in sheet. Read-only.
     """
     if action == "add":
-        return _comments.add_comment(file_path, sheet_name, cell_ref, text, author)
+        return _comments.add_comment(file_path, sheet_name, cell_ref, text, author)  # type: ignore[arg-type]
     if action == "read":
-        return _comments.read_comment(file_path, sheet_name, cell_ref)
+        res = _comments.read_comment(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
+        if res is None:
+            return None
+        return cast(CommentInfo, res)
     if action == "delete":
-        return _comments.delete_comment(file_path, sheet_name, cell_ref)
+        return _comments.delete_comment(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
     if action == "list":
         return _comments.list_comments(file_path, sheet_name)
     raise ValueError(f"Unknown action: {action}")
@@ -868,7 +902,7 @@ def hyperlink(
     url: str | None = None,
     display_text: str | None = None,
     tooltip: str | None = None,
-) -> str | dict | list[dict] | None:
+) -> str | HyperlinkReadResult | list[HyperlinkInfo] | None:
     """Hyperlink operations.
 
     action="add": Add hyperlink. Requires: cell_ref, url. Optional: display_text, tooltip.
@@ -877,11 +911,13 @@ def hyperlink(
     action="list": List all hyperlinks. Read-only.
     """
     if action == "add":
-        return _hyperlinks.add_hyperlink(file_path, sheet_name, cell_ref, url, display_text, tooltip)
+        return _hyperlinks.add_hyperlink(file_path, sheet_name, cell_ref, url, display_text, tooltip)  # type: ignore[arg-type]
     if action == "read":
+        if not cell_ref:
+            raise ValueError("cell_ref is required for action='read'.")
         return _hyperlinks.read_hyperlink(file_path, sheet_name, cell_ref)
     if action == "delete":
-        return _hyperlinks.delete_hyperlink(file_path, sheet_name, cell_ref)
+        return _hyperlinks.delete_hyperlink(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
     if action == "list":
         return _hyperlinks.list_hyperlinks(file_path, sheet_name)
     raise ValueError(f"Unknown action: {action}")
@@ -897,9 +933,9 @@ def scenario(
     action: Literal["add", "list", "apply"],
     file_path: str,
     name: str | None = None,
-    cell_values: dict[str, dict[str, Any]] | None = None,
+    cell_values: dict[str, dict[str, ScenarioCellValue]] | None = None,
     description: str = "",
-) -> str | list[dict] | dict:
+) -> str | list[ScenarioInfo] | dict:
     """Scenario management for what-if analysis.
 
     action="add": Save a scenario. Requires: name, cell_values ({sheet: {cell: value}}). Optional: description.
@@ -907,11 +943,11 @@ def scenario(
     action="apply": DESTRUCTIVE. Apply scenario values to sheet. Requires: name.
     """
     if action == "add":
-        return _scenarios.add_scenario(file_path, name, cell_values, description)
+        return _scenarios.add_scenario(file_path, name, cell_values, description)  # type: ignore[arg-type]
     if action == "list":
         return _scenarios.list_scenarios(file_path)
     if action == "apply":
-        return _scenarios.apply_scenario(file_path, name)
+        return cast(dict, _scenarios.apply_scenario(file_path, name))  # type: ignore[arg-type]
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -937,18 +973,19 @@ def multi_file(
     output_file: str | None = None,
     compare_values: bool = True,
     compare_formulas: bool = False,
+    sheet_name_b: str | None = None,
 ) -> dict:
     """Cross-file operations.
 
     action="aggregate": Aggregate a column across files. Requires: file_paths, column. Optional: operation.
     action="filter": Filter rows across files. Requires: file_paths, column, operator, value.
     action="validate": Cross-file consistency check. Requires: file_paths, key_column.
-    action="compare": Compare two workbooks. Requires: file_a, file_b. Optional: sheet_name.
+    action="compare": Compare two workbooks. Requires: file_a, file_b. Optional: sheet_name, sheet_name_b.
     """
     if action == "aggregate":
         return _multi_file.bulk_aggregate_multi_files(
-            file_paths,
-            column,
+            file_paths,  # type: ignore[arg-type]
+            column,  # type: ignore[arg-type]
             operation,
             sheet_name,
             header_row,
@@ -956,22 +993,22 @@ def multi_file(
         )
     if action == "filter":
         return _multi_file.bulk_filter_multi_files(
-            file_paths,
-            column,
-            operator,
-            value,
+            file_paths,  # type: ignore[arg-type]
+            column,  # type: ignore[arg-type]
+            operator,  # type: ignore[arg-type]
+            value,  # type: ignore[arg-type]
             sheet_name,
             header_row,
             output_file,
         )
     if action == "validate":
-        return _multi_file.validate_data_consistency(file_paths, key_column, check_columns, sheet_name, header_row)
+        return _multi_file.validate_data_consistency(file_paths, key_column, check_columns, sheet_name, header_row)  # type: ignore[arg-type]
     if action == "compare":
         if not file_a:
             raise ValueError("file_a is required for action='compare'.")
         if not file_b:
             raise ValueError("file_b is required for action='compare'.")
-        return _multi_file.compare_workbooks(file_a, file_b, sheet_name, output_file)
+        return _multi_file.compare_workbooks(file_a, file_b, sheet_name, output_file, sheet_name_b)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1012,11 +1049,11 @@ def worksheet_ops(
     action="merge_workbooks": Merge multiple workbooks. Requires: source_files, output_file.
     """
     if action == "freeze":
-        return _ws_ops.freeze_panes(file_path, sheet_name, cell_ref)
+        return _ws_ops.freeze_panes(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
     if action == "auto_filter":
         if not remove and cell_range is None:
             raise ValueError("cell_range is required for action='auto_filter' when remove=False.")
-        return _ws_ops.set_auto_filter(file_path, sheet_name, cell_range, remove)
+        return _ws_ops.set_auto_filter(file_path, sheet_name, cell_range, remove)  # type: ignore[arg-type]
     if action == "copy_range_across":
         if not source_sheet:
             raise ValueError("source_sheet is required for action='copy_range_across'.")
@@ -1025,7 +1062,7 @@ def worksheet_ops(
         if not target_sheet:
             raise ValueError("target_sheet is required for action='copy_range_across'.")
         return _ws_ops.copy_range_across_sheets(
-            file_path,
+            file_path,  # type: ignore[arg-type]
             source_sheet,
             source_range,
             target_sheet,
@@ -1069,9 +1106,9 @@ def sort_data(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> dict:
+def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> ColumnStats:
     """Compute descriptive statistics (mean, median, std, min, max, sum) for a numeric column."""
-    return _analysis.column_statistics(file_path, sheet_name, column, has_header)
+    return cast(ColumnStats, _analysis.column_statistics(file_path, sheet_name, column, has_header))
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1185,12 +1222,27 @@ def merge_datasets(
     file_path: str,
     sheet1: str,
     sheet2: str,
-    join_key: str | list[str],
+    join_key: str | list[str] | None = None,
     how: str = "left",
     output_sheet: str | None = None,
+    left_on: str | list[str] | None = None,
+    right_on: str | list[str] | None = None,
 ) -> dict:
-    """Merge two sheets like a SQL join (left, right, inner, outer)."""
-    return _pivot_etl.merge_datasets(file_path, sheet1, sheet2, join_key, how, output_sheet)
+    """Merge two sheets like a SQL join (left, right, inner, outer).
+
+    Use ``join_key`` when both sheets share the same column name(s).
+    Use ``left_on`` / ``right_on`` to join on differently-named columns.
+    """
+    return _pivot_etl.merge_datasets(
+        file_path,
+        sheet1,
+        sheet2,
+        join_key,
+        how,
+        output_sheet,
+        left_on=left_on,
+        right_on=right_on,
+    )
 
 
 @mcp.tool()
@@ -1361,17 +1413,19 @@ def time_value_calc(
     operation="nper": Number of periods. Requires: rate, pmt, pv. Optional: fv, when.
     operation="rate": Interest rate. Requires: nper, pmt, pv. Optional: fv, when, guess.
     operation="depreciation": Asset depreciation. Requires: cost, salvage, life. Optional: method, period.
+      method values: "sln" / "straight_line", "syd" / "sum_of_years" / "sum_of_years_digits",
+                     "ddb" / "double_declining" / "double_declining_balance". Default: "sln".
     """
     if operation == "fv":
-        return _financial.calculate_fv(rate, nper, pmt, pv, when)
+        return _financial.calculate_fv(rate, nper, pmt, pv, when)  # type: ignore[arg-type]
     if operation == "pv":
-        return _financial.calculate_pv(rate, nper, pmt, fv, when)
+        return _financial.calculate_pv(rate, nper, pmt, fv, when)  # type: ignore[arg-type]
     if operation == "nper":
-        return _financial.calculate_nper(rate, pmt, pv, fv, when)
+        return _financial.calculate_nper(rate, pmt, pv, fv, when)  # type: ignore[arg-type]
     if operation == "rate":
-        return _financial.calculate_rate(nper, pmt, pv, fv, when, guess)
+        return _financial.calculate_rate(nper, pmt, pv, fv, when, guess)  # type: ignore[arg-type]
     if operation == "depreciation":
-        return _financial.calculate_depreciation(cost, salvage, life, method, period)
+        return _financial.calculate_depreciation(cost, salvage, life, method, period)  # type: ignore[arg-type]
     raise ValueError(f"Unknown operation: {operation}")
 
 
@@ -1466,15 +1520,20 @@ def run_regression(
     y_column: str,
     x_columns: list[str],
     header_row: int = 1,
+    output_sheet: str = "Regression Output",
     output_file: str | None = None,
 ) -> dict:
-    """Run OLS linear regression and return coefficients, R-squared, and residuals."""
+    """Run OLS linear regression and return coefficients, R-squared, and residuals.
+
+    If output_file is provided, results are written to that file instead of file_path.
+    """
     return _statistical.run_regression(
         file_path,
         sheet_name,
         y_column,
         x_columns,
-        output_sheet=output_file or "Regression Output",
+        output_sheet=output_sheet,
+        output_file=output_file,
         header_row=header_row,
     )
 
@@ -1510,24 +1569,25 @@ def run_solver(
     file_path: str,
     sheet_name: str,
     objective_expression: str,
-    variable_cells: dict[str, tuple[float, float]],
+    variable_cells: dict[str, list[float]],
     constraints: list[dict] | None = None,
     maximize: bool = False,
     tolerance: float = 1e-6,
     max_iterations: int = 1000,
-) -> dict:
+) -> SolverResult:
     """Multi-variable constrained optimization using scipy.
 
     objective_expression: arithmetic expression using cell refs (e.g. "B2 * B3 - B4").
-    variable_cells: {cell_ref: (lower_bound, upper_bound)} dict.
+    variable_cells: {cell_ref: [lower_bound, upper_bound]} dict.
     constraints: list of {"expression": str, "type": "ineq"|"eq"} dicts.
     maximize: True to maximise instead of minimise.
     """
+    normalised_cells: dict[str, tuple[float, float]] = {k: (v[0], v[1]) for k, v in variable_cells.items()}
     return _solver.run_solver(
         file_path,
         sheet_name,
         objective_expression,
-        variable_cells,
+        normalised_cells,
         constraints,
         maximize,
         tolerance,

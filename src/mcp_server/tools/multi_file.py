@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from logging import Logger
+from typing import cast
 
 import pandas as pd
 
+from mcp_server.models.multi_file import (
+    MultiFileFilterPerFileResult,
+    MultiFilePerFileResult,
+    WorkbookDiff,
+)
 from mcp_server.utils.excel_helpers import (
     load_workbook_safe,
     read_sheet_df,
@@ -31,7 +37,7 @@ def bulk_aggregate_multi_files(
     sheet_name: str = "Sheet1",
     header_row: int = 1,
     output_file: str | None = None,
-) -> dict:
+) -> dict[str, str | float | int | list[MultiFilePerFileResult]]:
     """Aggregate the same column across multiple files."""
     if operation not in AGGREGATE_OPS:
         raise ValueError(f"Unsupported operation '{operation}'. Allowed: {AGGREGATE_OPS}")
@@ -94,7 +100,7 @@ def bulk_aggregate_multi_files(
         _write_df_to_new_file(summary_df, output_file, sheet_name="Summary")
         logger.info("Aggregate summary written to %s", output_file)
 
-    return result
+    return cast(dict[str, str | float | int | list[MultiFilePerFileResult]], result)
 
 
 def bulk_filter_multi_files(
@@ -105,7 +111,7 @@ def bulk_filter_multi_files(
     sheet_name: str = "Sheet1",
     header_row: int = 1,
     output_file: str | None = None,
-) -> dict:
+) -> dict[str, str | float | int | list[MultiFileFilterPerFileResult]]:
     """Filter rows across multiple files based on a condition."""
     if operator not in FILTER_OPERATORS:
         raise ValueError(f"Unsupported operator '{operator}'. Allowed: {FILTER_OPERATORS}")
@@ -170,7 +176,7 @@ def validate_data_consistency(
     check_columns: list[str] | None = None,
     sheet_name: str = "Sheet1",
     header_row: int = 1,
-) -> dict:
+) -> dict[str, bool | int | dict[str, list[str]] | list[dict[str, str | dict[str, str]]]]:
     """Cross-file referential integrity check on a key column."""
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
@@ -253,22 +259,38 @@ def compare_workbooks(
     file_path_b: str,
     sheet_name: str | None = None,
     output_file: str | None = None,
-) -> dict:
-    """Compare two workbooks cell-by-cell. If sheet_name given, compare only that sheet."""
+    sheet_name_b: str | None = None,
+) -> dict[str, list[WorkbookDiff] | int | list[str] | bool]:
+    """Compare two workbooks cell-by-cell.
+
+    If both sheet_name and sheet_name_b are given, compare that single pair
+    (sheet_name from file A vs sheet_name_b from file B).
+    If only sheet_name is given, compare that sheet in both workbooks (must exist in both).
+    If neither is given, auto-detect common sheet names.
+    """
     wb_a = load_workbook_safe(file_path_a, data_only=True)
     wb_b = load_workbook_safe(file_path_b, data_only=True)
     try:
-        if sheet_name:
+        if sheet_name and sheet_name_b:
+            if sheet_name not in wb_a.sheetnames:
+                raise ValueError(f"Sheet '{sheet_name}' not found in workbook A.")
+            if sheet_name_b not in wb_b.sheetnames:
+                raise ValueError(f"Sheet '{sheet_name_b}' not found in workbook B.")
+            sheet_pairs = [(sheet_name, sheet_name_b)]
+        elif sheet_name:
             if sheet_name not in wb_a.sheetnames or sheet_name not in wb_b.sheetnames:
                 raise ValueError(f"Sheet '{sheet_name}' not found in both workbooks.")
-            sheets_to_compare = [sheet_name]
+            sheet_pairs = [(sheet_name, sheet_name)]
         else:
-            sheets_to_compare = [s for s in wb_a.sheetnames if s in wb_b.sheetnames]
+            sheet_pairs = [(s, s) for s in wb_a.sheetnames if s in wb_b.sheetnames]
 
         differences: list[dict] = []
-        for sn in sheets_to_compare:
-            ws_a = wb_a[sn]
-            ws_b = wb_b[sn]
+        sheets_compared: list[str] = []
+        for sn_a, sn_b in sheet_pairs:
+            ws_a = wb_a[sn_a]
+            ws_b = wb_b[sn_b]
+            label = sn_a if sn_a == sn_b else f"{sn_a} vs {sn_b}"
+            sheets_compared.append(label)
             max_row = max(ws_a.max_row or 0, ws_b.max_row or 0)
             max_col = max(ws_a.max_column or 0, ws_b.max_column or 0)
             for row in range(1, max_row + 1):
@@ -281,7 +303,7 @@ def compare_workbooks(
                         cell_ref = f"{get_column_letter(col)}{row}"
                         differences.append(
                             {
-                                "sheet": sn,
+                                "sheet": label,
                                 "cell": cell_ref,
                                 "value_a": val_a,
                                 "value_b": val_b,
@@ -291,7 +313,7 @@ def compare_workbooks(
         result: dict = {
             "differences": differences,
             "total_differences": len(differences),
-            "sheets_compared": sheets_to_compare,
+            "sheets_compared": sheets_compared,
             "identical": len(differences) == 0,
         }
 
@@ -300,7 +322,7 @@ def compare_workbooks(
             _write_df_to_new_file(diff_df, output_file, sheet_name="Differences")
             logger.info("Comparison differences written to %s", output_file)
 
-        logger.info("Compared %d sheets; %d differences found", len(sheets_to_compare), len(differences))
+        logger.info("Compared %d sheets; %d differences found", len(sheets_compared), len(differences))
         return result
     finally:
         wb_a.close()

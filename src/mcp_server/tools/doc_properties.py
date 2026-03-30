@@ -57,7 +57,7 @@ def unprotect_workbook(file_path: str) -> str:
         wb.close()
 
 
-def get_document_properties(file_path: str) -> dict:
+def get_document_properties(file_path: str) -> dict[str, str | None]:
     """Read workbook document properties."""
     wb = load_workbook_safe(file_path, read_only=True)
     try:

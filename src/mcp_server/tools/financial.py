@@ -544,8 +544,25 @@ def calculate_rate(
     """
     when_int = 0 if when == "end" else 1
     result = float(npf.rate(nper, pmt, pv, fv, when=when_int, guess=guess))
-    logger.info("calculate_rate: nper=%d pmt=%.2f pv=%.2f fv=%.2f -> rate=%.6f", nper, pmt, pv, fv, result)
-    return {"nper": nper, "pmt": pmt, "pv": pv, "fv": fv, "when": when, "rate": round(result, 6)}
+    if math.isnan(result):
+        raise ValueError(
+            "Rate calculation did not converge. Try a different 'guess' value "
+            "(e.g., guess=0.05 for low rates or guess=0.2 for high rates)."
+        )
+    # round() can produce IEEE-754 -0.0 when result is a tiny negative value
+    # (e.g., -4e-9 rounds to -0.0 at 6 d.p.).  Adding 0.0 canonicalizes to 0.0.
+    rate_rounded = round(result, 6) + 0.0
+    logger.info("calculate_rate: nper=%d pmt=%.2f pv=%.2f fv=%.2f -> rate=%.6f", nper, pmt, pv, fv, rate_rounded)
+    return {"nper": nper, "pmt": pmt, "pv": pv, "fv": fv, "when": when, "rate": rate_rounded}
+
+
+_DEPRECIATION_METHOD_ALIASES: dict[str, str] = {
+    "straight_line": "sln",
+    "sum_of_years": "syd",
+    "sum_of_years_digits": "syd",
+    "double_declining": "ddb",
+    "double_declining_balance": "ddb",
+}
 
 
 def calculate_depreciation(
@@ -560,10 +577,11 @@ def calculate_depreciation(
     cost:    initial asset cost
     salvage: residual value at end of life
     life:    useful life in periods
-    method:  'sln' (straight-line), 'syd' (sum-of-years-digits), 'ddb' (double-declining-balance)
+    method:  'sln' / 'straight_line', 'syd' / 'sum_of_years' / 'sum_of_years_digits',
+             'ddb' / 'double_declining' / 'double_declining_balance'
     period:  required for 'syd' and 'ddb' (1-based period number)
     """
-    method = method.lower()
+    method = _DEPRECIATION_METHOD_ALIASES.get(method.lower(), method.lower())
     if method == "sln":
         result = (cost - salvage) / life
         logger.info("depreciation SLN: %.2f", result)
@@ -667,7 +685,7 @@ def create_sensitivity_table(
         for ri, result_row in enumerate(table):
             label: float | str = var2_values[ri] if (var2_values and var2_name) else ""
             ws.cell(row=start_row + 1 + ri, column=start_col, value=label)
-            for ci, val in enumerate(result_row):
+            for ci, val in enumerate(result_row):  # type: ignore[assignment]
                 ws.cell(row=start_row + 1 + ri, column=start_col + 1 + ci, value=val)
         save_workbook_safe(wb, file_path)
     finally:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from logging import Logger
 
+from mcp_server.models.hyperlinks import HyperlinkInfo, HyperlinkReadResult
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -39,7 +40,7 @@ def add_hyperlink(
         wb.close()
 
 
-def read_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> dict | None:
+def read_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> HyperlinkReadResult | None:
     """Read hyperlink from a cell. Returns dict with target/location/tooltip/display_text or None."""
     wb = load_workbook_safe(file_path)
     try:
@@ -71,12 +72,12 @@ def delete_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> str:
         wb.close()
 
 
-def list_hyperlinks(file_path: str, sheet_name: str) -> list[dict]:
+def list_hyperlinks(file_path: str, sheet_name: str) -> list[HyperlinkInfo]:
     """List all hyperlinks in a sheet."""
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        results = []
+        results: list[HyperlinkInfo] = []
         for row in ws.iter_rows():
             for cell in row:
                 if cell.hyperlink is not None:

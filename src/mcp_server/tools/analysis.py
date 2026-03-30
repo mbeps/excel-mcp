@@ -9,6 +9,7 @@ import openpyxl
 import pandas as pd
 from scipy import stats
 
+from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -36,7 +37,7 @@ def filter_data_advanced(
     logic: str = "AND",
     output_sheet: str | None = None,
     header_row: int = 1,
-) -> dict:
+) -> dict[str, int | list[list[CellScalar]]]:
     """Multi-condition AND/OR filtering."""
     if logic not in ("AND", "OR"):
         raise ValueError(f"Logic must be 'AND' or 'OR', got '{logic}'")
@@ -148,7 +149,7 @@ def sort_data(
     return f"Sorted {len(df)} rows in '{sheet_name}'."
 
 
-def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> dict:
+def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> dict[str, object]:
     """Compute descriptive statistics for a numeric column."""
     df = _read_sheet_df(file_path, sheet_name, has_header)
     if column not in df.columns:
@@ -192,7 +193,7 @@ def aggregate_data(
     operation: str = "sum",
     has_header: bool = True,
     aggfunc: str | dict | None = None,
-) -> dict:
+) -> dict[str, list[dict[str, CellScalar]] | str | list[str]]:
     """Group by one or more columns and apply an aggregation operation."""
     group_cols = [group_by] if isinstance(group_by, str) else list(group_by)
     df = _read_sheet_df(file_path, sheet_name, has_header)
@@ -225,7 +226,9 @@ def aggregate_data(
     }
 
 
-def find_duplicates(file_path: str, sheet_name: str, columns: list[str], has_header: bool = True) -> dict:
+def find_duplicates(
+    file_path: str, sheet_name: str, columns: list[str], has_header: bool = True
+) -> dict[str, list[list[CellScalar]] | int | list[str]]:
     """Find duplicate rows based on specified columns."""
     df = _read_sheet_df(file_path, sheet_name, has_header)
     for c in columns:
@@ -253,7 +256,7 @@ def vlookup_helper(
     fuzzy_threshold: float = 0.8,
     output_file: str | None = None,
     header_row: int = 1,
-) -> dict:
+) -> dict[str, int | list[dict[str, object]] | str | None]:
     """Cross-file VLOOKUP-like join with optional fuzzy string matching."""
     from openpyxl.utils import column_index_from_string
 

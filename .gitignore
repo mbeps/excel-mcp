@@ -30,3 +30,4 @@ Thumbs.db
 .github/copilot-instructions.md
 **.xlsx
 .github/prompts/**
+.github/agents/**

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from logging import Logger
+from typing import cast
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -20,7 +21,7 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 
-def get_workbook_metadata(file_path: str) -> dict:
+def get_workbook_metadata(file_path: str) -> dict[str, str | None | list[dict[str, str | int | None]]]:
     """Return workbook metadata: sheets, active sheet, and named ranges."""
     wb = load_workbook_safe(file_path, read_only=True)
     try:
@@ -39,6 +40,7 @@ def get_workbook_metadata(file_path: str) -> dict:
         named_ranges = [{"name": nr.name, "destination": str(nr.attr_text)} for nr in wb.defined_names.values()]
 
         return {
+            "file_path": file_path,
             "sheets": sheets,
             "active_sheet": wb.active.title if wb.active else None,
             "named_ranges": named_ranges,
@@ -47,7 +49,9 @@ def get_workbook_metadata(file_path: str) -> dict:
         wb.close()
 
 
-def create_workbook(file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None) -> dict:
+def create_workbook(
+    file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None
+) -> dict[str, str | list[str]]:
     """Create a new .xlsx workbook with optional sheet names."""
     validate_file_path(file_path, must_exist=False)
     wb = Workbook()
@@ -66,7 +70,7 @@ def create_workbook(file_path: str, sheet_names: list[str] | None = None, sheet_
     return {"file_path": file_path, "sheets": wb.sheetnames}
 
 
-def get_sheet_summary(file_path: str, sheet_name: str) -> dict:
+def get_sheet_summary(file_path: str, sheet_name: str) -> dict[str, str | int | list[str]]:
     """Return summary of a sheet: name, dimensions, headers, used range."""
     wb = load_workbook_safe(file_path, read_only=True)
     try:
@@ -138,8 +142,8 @@ def copy_sheet(file_path: str, source_sheet: str, new_name: str) -> str:
 
 def write_multi_sheet(
     file_path: str,
-    sheets: list[dict],
-) -> dict:
+    sheets: list[dict[str, object]],
+) -> dict[str, str | list[dict[str, str | int | list[str]]]]:
     """Create a new workbook with multiple named sheets, data, and headers in one call."""
     validate_file_path(file_path, must_exist=False)
     wb = Workbook()
@@ -151,9 +155,9 @@ def write_multi_sheet(
     summary: list[dict] = []
     for sheet_def in sheets:
         name = sheet_def["name"]
-        headers = sheet_def.get("headers")
-        data = sheet_def.get("data") or sheet_def.get("values")
-        column_widths = sheet_def.get("column_widths")
+        headers = cast(list[str], sheet_def.get("headers"))
+        data = cast(list[list[object]] | None, sheet_def.get("data") or sheet_def.get("values"))
+        column_widths = cast(dict[str, float] | None, sheet_def.get("column_widths"))
 
         ws = wb.create_sheet(title=name)
         current_row = 1

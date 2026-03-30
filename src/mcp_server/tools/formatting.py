@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import Any, cast
 
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from mcp_server.models.formatting import BorderStyle
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -31,7 +31,7 @@ def format_cells(
     horizontal_alignment: str | None = None,
     vertical_alignment: str | None = None,
     wrap_text: bool = False,
-    border_style: str | None = None,
+    border_style: BorderStyle | None = None,
     border_color: str | None = None,
     font_name: str | None = None,
     underline: str | None = None,
@@ -39,10 +39,10 @@ def format_cells(
     text_rotation: int | None = None,
     indent: int | None = None,
     shrink_to_fit: bool = False,
-    top_border_style: str | None = None,
-    bottom_border_style: str | None = None,
-    left_border_style: str | None = None,
-    right_border_style: str | None = None,
+    top_border_style: BorderStyle | None = None,
+    bottom_border_style: BorderStyle | None = None,
+    left_border_style: BorderStyle | None = None,
+    right_border_style: BorderStyle | None = None,
     preserve_existing: bool = False,
 ) -> str:
     """Apply formatting to a cell range (e.g. 'A1:C10' or 'A1')."""
@@ -72,15 +72,13 @@ def format_cells(
         has_per_side = any([top_border_style, bottom_border_style, left_border_style, right_border_style])
         if has_per_side:
             border = Border(
-                left=Side(style=cast(Any, left_border_style), color=border_color) if left_border_style else Side(),
-                right=Side(style=cast(Any, right_border_style), color=border_color) if right_border_style else Side(),
-                top=Side(style=cast(Any, top_border_style), color=border_color) if top_border_style else Side(),
-                bottom=(
-                    Side(style=cast(Any, bottom_border_style), color=border_color) if bottom_border_style else Side()
-                ),
+                left=(Side(style=left_border_style, color=border_color) if left_border_style else Side()),
+                right=(Side(style=right_border_style, color=border_color) if right_border_style else Side()),
+                top=(Side(style=top_border_style, color=border_color) if top_border_style else Side()),
+                bottom=(Side(style=bottom_border_style, color=border_color) if bottom_border_style else Side()),
             )
         elif border_style:
-            side = Side(style=cast(Any, border_style), color=border_color)
+            side = Side(style=border_style, color=border_color)
             border = Border(left=side, right=side, top=side, bottom=side)
 
         range_data = ws[cell_range]

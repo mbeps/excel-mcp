@@ -6,6 +6,7 @@ from logging import Logger
 
 from openpyxl.worksheet.formula import ArrayFormula
 
+from mcp_server.models.named_ranges import FormulaErrorInfo, FormulaInfo
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -69,13 +70,13 @@ def get_formula_value(
     file_path: str,
     sheet_name: str,
     cell_ref: str,
-) -> dict:
+) -> dict[str, object]:
     """Read the cached calculated value of a formula cell (loads with data_only=True)."""
     wb = load_workbook_safe(file_path, data_only=True)
     try:
         ws = get_sheet(wb, sheet_name)
         val = ws[cell_ref].value
-        result: dict = {"cell": cell_ref, "value": val, "type": type(val).__name__}
+        result: dict[str, object] = {"cell": cell_ref, "value": val, "type": type(val).__name__}
         if val is None:
             # Check whether the cell actually contains a formula (without data_only)
             wb2 = load_workbook_safe(file_path)
@@ -99,7 +100,7 @@ def get_formula_errors(
     file_path: str,
     sheet_name: str,
     cell_range: str | None = None,
-) -> dict:
+) -> dict[str, list[FormulaErrorInfo] | int]:
     """Find all cells with Excel error values (#REF!, #VALUE!, #DIV/0!, etc.)."""
     EXCEL_ERRORS = {"#REF!", "#VALUE!", "#DIV/0!", "#N/A", "#NAME?", "#NUM!", "#NULL!", "#SPILL!"}
 
@@ -110,15 +111,15 @@ def get_formula_errors(
         if cell_range:
             raw = ws[cell_range]
             if not isinstance(raw, tuple):
-                rows_iter: tuple = ((raw,),)  # type: ignore[assignment]
+                rows_iter: tuple = ((raw,),)
             elif raw and not isinstance(raw[0], tuple):
-                rows_iter = (raw,)  # type: ignore[assignment]
+                rows_iter = (raw,)
             else:
-                rows_iter = raw  # type: ignore[assignment]
+                rows_iter = raw
         else:
             rows_iter = tuple(ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column))
 
-        errors: list[dict] = []
+        errors: list[FormulaErrorInfo] = []
         for row in rows_iter:
             for cell in row:
                 if isinstance(cell.value, str) and cell.value in EXCEL_ERRORS:
@@ -133,7 +134,7 @@ def get_formula_precedents(
     file_path: str,
     sheet_name: str,
     cell_ref: str,
-) -> dict:
+) -> dict[str, object]:
     """Parse a cell's formula to extract cell references it depends on (precedents)."""
     import re
 
@@ -160,7 +161,7 @@ def get_formula_dependents(
     file_path: str,
     sheet_name: str,
     cell_ref: str,
-) -> dict:
+) -> dict[str, object]:
     """Find all cells that reference the given cell in their formula (dependents)."""
     import re
 
@@ -184,7 +185,7 @@ def get_formula_dependents(
         wb.close()
 
 
-def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
+def list_formulas(file_path: str, sheet_name: str) -> list[FormulaInfo]:
     """List all cells containing formulas in a sheet.
 
     Returns list of {cell_ref: str, formula: str}.
@@ -192,7 +193,7 @@ def list_formulas(file_path: str, sheet_name: str) -> list[dict]:
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        results = []
+        results: list[FormulaInfo] = []
         for row in ws.iter_rows():
             for cell in row:
                 if isinstance(cell.value, str) and cell.value.startswith("="):

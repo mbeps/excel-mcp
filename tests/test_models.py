@@ -2,26 +2,27 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
+
 from mcp_server.models import (
+    AggregateResult,
+    CellValue,
+    ChartConfig,
+    ChunkReadResult,
+    ColumnStats,
+    ConditionalFormatRule,
+    CsvPreview,
+    DataProfile,
+    DuplicateResult,
+    FilterResult,
+    FormatOptions,
+    PivotResult,
+    RangeData,
     SheetInfo,
     SheetSummary,
-    WorkbookCreatedResult,
-    CellValue,
-    RangeData,
-    FilterResult,
-    ColumnStats,
-    AggregateResult,
-    DuplicateResult,
-    CsvPreview,
-    WorkbookMetadata,
-    DataProfile,
-    PivotResult,
-    ValidationResult,
-    ChunkReadResult,
-    FormatOptions,
-    ConditionalFormatRule,
-    ChartConfig,
     SortCriteria,
+    ValidationResult,
+    WorkbookCreatedResult,
+    WorkbookMetadata,
 )
 
 

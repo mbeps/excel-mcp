@@ -7,6 +7,7 @@ import math
 import re
 from logging import Logger
 
+from mcp_server.models.solver import SolverResult
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
 from mcp_server.utils.logger import configure_logging
 
@@ -175,11 +176,11 @@ def run_solver(
     sheet_name: str,
     objective_expression: str,
     variable_cells: dict[str, tuple[float, float]],
-    constraints: list[dict] | None = None,
+    constraints: list[dict[str, str]] | None = None,
     maximize: bool = False,
     tolerance: float = 1e-6,
     max_iterations: int = 1000,
-) -> dict:
+) -> SolverResult:
     """Multi-variable constrained optimization using scipy SLSQP.
 
     objective_expression: arithmetic expression using cell refs as variable names

@@ -6,7 +6,9 @@ import ast
 from logging import Logger
 
 import pandas as pd
+from openpyxl import Workbook
 
+from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -86,7 +88,7 @@ def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> 
     return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
 
-def _write_df_to_sheet(wb, sheet_name: str, df: pd.DataFrame) -> None:
+def _write_df_to_sheet(wb: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
     if sheet_name in wb.sheetnames:
         del wb[sheet_name]
     ws = wb.create_sheet(title=sheet_name)
@@ -111,7 +113,7 @@ def create_pivot_table(
     output_file: str | None = None,
     include_margins: bool = False,
     column_field: str | None = None,
-) -> dict:
+) -> dict[str, list[dict[str, CellScalar]] | list[str] | str | dict | None]:
     """Create a static pivot table using pandas and write to a sheet or file."""
     df = _read_sheet_df(file_path, sheet_name)
 
@@ -158,7 +160,7 @@ def unpivot_data(
     value_vars: list[str],
     var_name: str = "Variable",
     value_name: str = "Value",
-) -> dict:
+) -> dict[str, list[dict[str, CellScalar]] | int]:
     """Unpivot (melt) data from wide to long format."""
     df = _read_sheet_df(file_path, sheet_name)
 
@@ -177,30 +179,51 @@ def merge_datasets(
     file_path: str,
     sheet1: str,
     sheet2: str,
-    join_key: str | list[str],
+    join_key: str | list[str] | None = None,
     how: str = "left",
     output_sheet: str | None = None,
     suffixes: tuple[str, str] = ("_x", "_y"),
-) -> dict:
+    left_on: str | list[str] | None = None,
+    right_on: str | list[str] | None = None,
+) -> dict[str, list[dict[str, CellScalar]] | int]:
     """Merge two sheets like a SQL join."""
     valid_how = {"left", "right", "inner", "outer"}
     if how not in valid_how:
         raise ValueError(f"Unsupported join type '{how}'. Allowed: {valid_how}")
 
+    if left_on is not None and right_on is None:
+        raise ValueError("'right_on' is required when 'left_on' is provided.")
+    if right_on is not None and left_on is None:
+        raise ValueError("'left_on' is required when 'right_on' is provided.")
+    if join_key is None and left_on is None:
+        raise ValueError("Either 'join_key' or both 'left_on'/'right_on' must be provided.")
+
     df1 = _read_sheet_df(file_path, sheet1)
     df2 = _read_sheet_df(file_path, sheet2)
 
-    keys = [join_key] if isinstance(join_key, str) else join_key
-    for k in keys:
-        if k not in df1.columns:
-            raise ValueError(f"Key '{k}' not found in sheet '{sheet1}'. Available: {list(df1.columns)}")
-        if k not in df2.columns:
-            raise ValueError(f"Key '{k}' not found in sheet '{sheet2}'. Available: {list(df2.columns)}")
-
-    if df1[keys].duplicated().any() or df2[keys].duplicated().any():
-        logger.warning("Merge keys are not unique in one or both datasets. Result may contain unexpected rows.")
-
-    merged = pd.merge(df1, df2, on=keys, how=how, suffixes=suffixes)
+    if left_on is not None and right_on is not None:
+        lkeys = [left_on] if isinstance(left_on, str) else left_on
+        rkeys = [right_on] if isinstance(right_on, str) else right_on
+        for k in lkeys:
+            if k not in df1.columns:
+                raise ValueError(f"Key '{k}' not found in sheet '{sheet1}'. Available: {list(df1.columns)}")
+        for k in rkeys:
+            if k not in df2.columns:
+                raise ValueError(f"Key '{k}' not found in sheet '{sheet2}'. Available: {list(df2.columns)}")
+        if df1[lkeys].duplicated().any() or df2[rkeys].duplicated().any():
+            logger.warning("Merge keys are not unique in one or both datasets. Result may contain unexpected rows.")
+        merged = pd.merge(df1, df2, left_on=lkeys, right_on=rkeys, how=how, suffixes=suffixes)
+    else:
+        # join_key is guaranteed non-None here (checked above)
+        keys: list[str] = [join_key] if isinstance(join_key, str) else list(join_key or [])
+        for k in keys:
+            if k not in df1.columns:
+                raise ValueError(f"Key '{k}' not found in sheet '{sheet1}'. Available: {list(df1.columns)}")
+            if k not in df2.columns:
+                raise ValueError(f"Key '{k}' not found in sheet '{sheet2}'. Available: {list(df2.columns)}")
+        if df1[keys].duplicated().any() or df2[keys].duplicated().any():
+            logger.warning("Merge keys are not unique in one or both datasets. Result may contain unexpected rows.")
+        merged = pd.merge(df1, df2, on=keys, how=how, suffixes=suffixes)
 
     if output_sheet:
         wb = load_workbook_safe(file_path)

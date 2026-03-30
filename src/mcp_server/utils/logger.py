@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import sys
 
@@ -20,9 +22,7 @@ def configure_logging(name: str = "mcp_server") -> logging.Logger:
 
     if not logger.handlers:
         handler: logging.StreamHandler = logging.StreamHandler(sys.stderr)
-        formatter: logging.Formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        formatter: logging.Formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 

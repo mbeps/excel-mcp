@@ -6,13 +6,16 @@ from logging import Logger
 
 import pandas as pd
 
+from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import validate_file_path
 from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
 
 
-def read_csv_preview(file_path: str, rows: int = 10, delimiter: str = ",", encoding: str = "utf-8") -> dict:
+def read_csv_preview(
+    file_path: str, rows: int = 10, delimiter: str = ",", encoding: str = "utf-8"
+) -> dict[str, list[list[CellScalar]] | int | list[str]]:
     """Preview the first N rows of a CSV file."""
     path = validate_file_path(file_path)
     try:

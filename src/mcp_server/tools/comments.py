@@ -6,6 +6,7 @@ from logging import Logger
 
 from openpyxl.comments import Comment
 
+from mcp_server.models.comments import CommentInfo
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -35,12 +36,12 @@ def add_comment(
         wb.close()
 
 
-def list_comments(file_path: str, sheet_name: str) -> list[dict]:
+def list_comments(file_path: str, sheet_name: str) -> list[CommentInfo]:
     """List all comments in a sheet."""
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        results = []
+        results: list[CommentInfo] = []
         for row in ws.iter_rows(
             min_row=ws.min_row,
             max_row=ws.max_row,
@@ -61,7 +62,7 @@ def list_comments(file_path: str, sheet_name: str) -> list[dict]:
         wb.close()
 
 
-def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> dict | None:
+def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> dict[str, str] | None:
     """Read comment from a cell. Returns dict with text/author or None."""
     wb = load_workbook_safe(file_path)
     try:
@@ -69,7 +70,7 @@ def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> dict | None:
         comment = ws[cell_ref].comment
         if comment is None:
             return None
-        return {"text": comment.text, "author": comment.author}
+        return {"cell_ref": cell_ref, "text": comment.text, "author": comment.author}
     finally:
         wb.close()
 

@@ -211,7 +211,9 @@ _OPERATION_MAP = {
 }
 
 
-def _collect_sample_changes(original: pd.DataFrame, cleaned: pd.DataFrame, max_samples: int = 10) -> list[dict]:
+def _collect_sample_changes(
+    original: pd.DataFrame, cleaned: pd.DataFrame, max_samples: int = 10
+) -> list[dict[str, str | int]]:
     """Collect sample before/after changes for preview mode."""
     samples: list[dict] = []
     shared_cols = [c for c in original.columns if c in cleaned.columns]
@@ -248,7 +250,7 @@ def data_cleaner(
     output_file: str | None = None,
     header_row: int = 1,
     fill_missing_strategy: str = "value",
-) -> dict:
+) -> dict[str, object]:
     """Run a configurable data cleaning pipeline on a sheet."""
     validate_file_path(file_path)
 
@@ -279,7 +281,7 @@ def data_cleaner(
 
     rows_after = len(df)
 
-    result: dict = {
+    result: dict[str, object] = {
         "operations_applied": ops,
         "changes": changes,
         "rows_before": rows_before,
@@ -342,7 +344,8 @@ def _resolve_col(df: pd.DataFrame, col: str) -> str:
         return col
     if re.match(r"^[A-Za-z]+$", col):
         resolved = _col_letters_to_names(df, [col])
-        return resolved[0]
+        if resolved:
+            return resolved[0]
     raise ValueError(f"Column '{col}' not found. Available columns: {list(df.columns)}")
 
 
@@ -375,16 +378,16 @@ def _write_df_to_workbook(
                 ws = wb.create_sheet(title=sheet_name)
         else:
             ws = wb.active
-            ws.title = sheet_name  # type: ignore[union-attr]
+            ws.title = sheet_name
 
         for c_idx, col_name in enumerate(df.columns, start=1):
-            ws.cell(row=1, column=c_idx, value=col_name)  # type: ignore[union-attr]
+            ws.cell(row=1, column=c_idx, value=col_name)
 
         for r_idx, row_data in enumerate(df.values.tolist(), start=2):
             for c_idx, val in enumerate(row_data, start=1):
                 if hasattr(val, "item"):
                     val = val.item()
-                ws.cell(row=r_idx, column=c_idx, value=val)  # type: ignore[union-attr]
+                ws.cell(row=r_idx, column=c_idx, value=val)
 
         save_workbook_safe(wb, save_path)
     finally:
@@ -407,7 +410,7 @@ def split_column(
     drop_original: bool = True,
     output_file: str | None = None,
     header_row: int = 1,
-) -> dict:
+) -> dict[str, str | int | list[str]]:
     """Split a text column into multiple columns by delimiter.
 
     Returns: {new_columns: list[str], rows_affected: int, output_file: str}
@@ -454,7 +457,7 @@ def parse_date_column(
     output_format: str = "%Y-%m-%d",
     dayfirst: bool = True,
     header_row: int = 1,
-) -> dict:
+) -> dict[str, str | int]:
     """Parse and normalize mixed date formats in a column to a standard format."""
     df = read_sheet_df(file_path, sheet_name, header_row)
     if column not in df.columns:

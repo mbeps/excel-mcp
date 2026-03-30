@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import Any, cast
 
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from mcp_server.models.common import ValidationOperator
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -58,7 +58,7 @@ def add_numeric_validation(
     file_path: str,
     sheet_name: str,
     cell_range: str,
-    operator: str,
+    operator: ValidationOperator,
     value1: float,
     value2: float | None = None,
     allow_blank: bool = True,
@@ -79,7 +79,7 @@ def add_numeric_validation(
         val_type = "decimal" if isinstance(value1, float) and not value1.is_integer() else "whole"
         dv = DataValidation(
             type=val_type,
-            operator=cast(Any, operator),
+            operator=operator,
             formula1=str(value1),
             formula2=str(value2) if value2 is not None else None,
             allow_blank=allow_blank,
@@ -104,7 +104,7 @@ def add_date_validation(
     file_path: str,
     sheet_name: str,
     cell_range: str,
-    operator: str = "greaterThan",
+    operator: ValidationOperator = "greaterThan",
     date1: str = "",
     date2: str | None = None,
     allow_blank: bool = True,
@@ -124,7 +124,7 @@ def add_date_validation(
 
         dv = DataValidation(
             type="date",
-            operator=cast(Any, operator),
+            operator=operator,
             formula1=date1,
             formula2=date2,
             allow_blank=allow_blank,

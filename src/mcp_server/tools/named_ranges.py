@@ -6,6 +6,7 @@ from logging import Logger
 
 from openpyxl.workbook.defined_name import DefinedName
 
+from mcp_server.models.named_ranges import NamedRangeInfo
 from mcp_server.utils.excel_helpers import (
     load_workbook_safe,
     save_workbook_safe,
@@ -15,11 +16,11 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 
-def list_named_ranges(file_path: str) -> list[dict]:
+def list_named_ranges(file_path: str) -> list[NamedRangeInfo]:
     """List all named ranges in a workbook with name, destination, and scope."""
     wb = load_workbook_safe(file_path, read_only=True)
     try:
-        results = []
+        results: list[NamedRangeInfo] = []
         # Global named ranges
         for name, defn in wb.defined_names.items():
             dest = getattr(defn, "attr_text", str(defn.value))

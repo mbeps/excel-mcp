@@ -142,7 +142,7 @@ def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0) -> str:
         wb.close()
 
 
-def _safe_chart_title(title) -> str:
+def _safe_chart_title(title) -> str:  # type: ignore[no-untyped-def]
     """Extract chart title as a plain string, handling openpyxl Title/Text objects."""
     if title is None:
         return "(untitled)"

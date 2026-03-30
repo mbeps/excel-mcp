@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from logging import Logger
+from typing import cast
 
 import numpy as np
 import pandas as pd
+from openpyxl import Workbook
 
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, read_sheet_df, save_workbook_safe
 from mcp_server.utils.logger import configure_logging
@@ -19,8 +21,9 @@ def run_regression(
     y_column: str,
     x_columns: list[str],
     output_sheet: str = "Regression Output",
+    output_file: str | None = None,
     header_row: int = 1,
-) -> dict:
+) -> dict[str, object]:
     """Run OLS linear regression and write results to a new sheet.
 
     Returns coefficients, R-squared, and observation count.
@@ -63,12 +66,17 @@ def run_regression(
         "output_sheet": output_sheet,
     }
 
-    wb = load_workbook_safe(file_path)
-    try:
+    target_file = output_file or file_path
+    if output_file:
+        wb: Workbook = Workbook()
+        ws = wb.active
+        ws.title = output_sheet
+    else:
+        wb = load_workbook_safe(file_path)
         if output_sheet in wb.sheetnames:
             del wb[output_sheet]
         ws = wb.create_sheet(title=output_sheet)
-
+    try:
         ws["A1"] = "Regression Results"
         ws["A3"] = "R-Squared"
         ws["B3"] = results["r_squared"]
@@ -81,13 +89,15 @@ def run_regression(
         ws["A8"] = "Variable"
         ws["B8"] = "Coefficient"
 
+        coeffs_dict = cast(dict[str, float], results["coefficients"])
+
         ws.cell(row=9, column=1, value="Intercept")
-        ws.cell(row=9, column=2, value=results["coefficients"]["intercept"])
+        ws.cell(row=9, column=2, value=coeffs_dict["intercept"])
         for i, col in enumerate(x_columns, start=1):
             ws.cell(row=9 + i, column=1, value=col)
-            ws.cell(row=9 + i, column=2, value=results["coefficients"][col])
+            ws.cell(row=9 + i, column=2, value=coeffs_dict[col])
 
-        save_workbook_safe(wb, file_path)
+        save_workbook_safe(wb, target_file)
     finally:
         wb.close()
 
@@ -102,7 +112,7 @@ def run_exponential_smoothing(
     alpha: float = 0.3,
     output_column: str | None = None,
     header_row: int = 1,
-) -> dict:
+) -> dict[str, object]:
     """Compute and write exponentially smoothed (EWM) series to the sheet.
 
     alpha: smoothing factor (0 < alpha <= 1)

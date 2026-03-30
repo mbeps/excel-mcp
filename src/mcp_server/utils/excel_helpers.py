@@ -12,6 +12,7 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from mcp_server.models.workbook import ValidationRangeResult
 from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
@@ -68,12 +69,12 @@ def get_sheet(wb: Workbook, sheet_name: str) -> Worksheet:
 
 def col_letter_to_index(letter: str) -> int:
     """Convert column letter(s) to 1-based index. A=1, B=2, ..., Z=26, AA=27."""
-    return column_index_from_string(letter)
+    return int(column_index_from_string(letter))
 
 
 def index_to_col_letter(index: int) -> str:
     """Convert 1-based column index to letter(s). 1=A, 2=B, ..., 26=Z, 27=AA."""
-    return get_column_letter(index)
+    return str(get_column_letter(index))
 
 
 def read_sheet_df(file_path: str, sheet_name: str, header_row: int = 1) -> pd.DataFrame:
@@ -92,20 +93,20 @@ def read_sheet_df(file_path: str, sheet_name: str, header_row: int = 1) -> pd.Da
     return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="openpyxl")
 
 
-_CELL_REF_RE = re.compile(r"^([A-Z]{1,3})(\d+)$", re.IGNORECASE)
-MAX_COL_INDEX = 16384  # XFD
-MAX_ROW = 1048576
+_CELL_REF_RE: re.Pattern[str] = re.compile(r"^([A-Z]{1,3})(\d+)$", re.IGNORECASE)
+MAX_COL_INDEX: int = 16384  # XFD
+MAX_ROW: int = 1048576
 
 
-def _validate_single_cell(ref: str) -> dict:
+def _validate_single_cell(ref: str) -> ValidationRangeResult:
     """Validate a single cell reference like 'A1' or 'XFD1048576'."""
     m = _CELL_REF_RE.match(ref)
     if not m:
         return {"valid": False, "message": f"Invalid cell reference format: '{ref}'"}
-    col_letters = m.group(1).upper()
-    row_num = int(m.group(2))
+    col_letters: str = m.group(1).upper()
+    row_num: int = int(m.group(2))
     try:
-        col_idx = column_index_from_string(col_letters)
+        col_idx: int = column_index_from_string(col_letters)
     except ValueError:
         return {"valid": False, "message": f"Invalid column letters: '{col_letters}'"}
     if col_idx > MAX_COL_INDEX:
@@ -115,7 +116,7 @@ def _validate_single_cell(ref: str) -> dict:
     return {"valid": True, "column": col_letters, "row": row_num, "col_index": col_idx}
 
 
-def validate_excel_range(range_str: str) -> dict:
+def validate_excel_range(range_str: str) -> ValidationRangeResult:
     """Validate A1-style range notation.
 
     Accepts single cell refs ('A1') and ranges ('A1:C10').
@@ -125,13 +126,16 @@ def validate_excel_range(range_str: str) -> dict:
     if not range_str:
         return {"valid": False, "message": "Range string is empty"}
 
-    parts = range_str.split(":")
+    parts: list[str] = range_str.split(":")
     if len(parts) > 2:
         return {"valid": False, "message": f"Invalid range format: '{range_str}'"}
 
     start = _validate_single_cell(parts[0])
     if not start["valid"]:
-        return start
+        return {
+            "valid": False,
+            "message": str(start.get("message", "Unknown error")),
+        }
 
     if len(parts) == 1:
         return {
@@ -144,7 +148,10 @@ def validate_excel_range(range_str: str) -> dict:
 
     end = _validate_single_cell(parts[1])
     if not end["valid"]:
-        return end
+        return {
+            "valid": False,
+            "message": str(end.get("message", "Unknown error")),
+        }
 
     return {
         "valid": True,
