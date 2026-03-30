@@ -25,26 +25,26 @@ class TestGetWorkbookMetadataFilePath:
 
     def test_file_path_present(self, sample_xlsx: str) -> None:
         meta = get_workbook_metadata(sample_xlsx)
-        assert "file_path" in meta
-        assert meta["file_path"] == sample_xlsx
+        assert meta.file_path is not None
+        assert meta.file_path == sample_xlsx
 
     def test_active_sheet_type(self, sample_xlsx: str) -> None:
         meta = get_workbook_metadata(sample_xlsx)
-        assert "active_sheet" in meta
-        assert isinstance(meta["active_sheet"], str) or meta["active_sheet"] is None
+        assert meta.active_sheet is not None
+        assert isinstance(meta.active_sheet, str) or meta.active_sheet is None
 
     def test_basic_fields_present(self, sample_xlsx: str) -> None:
         meta = get_workbook_metadata(sample_xlsx)
-        assert "sheets" in meta
-        assert "named_ranges" in meta
-        assert isinstance(meta["sheets"], list)
-        assert isinstance(meta["named_ranges"], list)
+        assert meta.sheets is not None
+        assert meta.named_ranges is not None
+        assert isinstance(meta.sheets, list)
+        assert isinstance(meta.named_ranges, list)
 
     def test_empty_workbook(self, empty_xlsx: str) -> None:
         meta = get_workbook_metadata(empty_xlsx)
-        assert meta["file_path"] == empty_xlsx
-        assert len(meta["sheets"]) == 1
-        assert meta["sheets"][0]["name"] == "Sheet1"
+        assert meta.file_path == empty_xlsx
+        assert len(meta.sheets) == 1
+        assert meta.sheets[0].name == "Sheet1"
 
     def test_multi_sheet_workbook(self, tmp_path) -> None:
         path = str(tmp_path / "multi.xlsx")
@@ -56,8 +56,8 @@ class TestGetWorkbookMetadataFilePath:
         wb.close()
 
         meta = get_workbook_metadata(path)
-        assert meta["file_path"] == path
-        names = [s["name"] for s in meta["sheets"]]
+        assert meta.file_path == path
+        names = [s.name for s in meta.sheets]
         assert "Alpha" in names
         assert "Beta" in names
         assert "Gamma" in names

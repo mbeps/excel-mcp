@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from logging import Logger
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from mcp_server.models.common import ScenarioCellValue
 from mcp_server.models.scenarios import ScenarioChangeInfo, ScenarioInfo
@@ -36,7 +36,7 @@ def _load_scenarios(wb: Workbook) -> dict[str, ScenarioInfo]:
     if not raw:
         return {}
     try:
-        return json.loads(str(raw))  # type: ignore[no-any-return]
+        return cast(dict[str, ScenarioInfo], json.loads(str(raw)))
     except (json.JSONDecodeError, TypeError):
         return {}
 

@@ -18,6 +18,7 @@ from openpyxl.chart import (
 )
 from openpyxl.utils import range_boundaries
 
+from mcp_server.models.charts import ChartInfo
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
 from mcp_server.utils.logger import configure_logging
 
@@ -142,7 +143,7 @@ def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0) -> str:
         wb.close()
 
 
-def _safe_chart_title(title) -> str:  # type: ignore[no-untyped-def]
+def _safe_chart_title(title: object) -> str:
     """Extract chart title as a plain string, handling openpyxl Title/Text objects."""
     if title is None:
         return "(untitled)"
@@ -178,23 +179,23 @@ def _safe_chart_title(title) -> str:  # type: ignore[no-untyped-def]
     return str(title)
 
 
-def list_charts(file_path: str, sheet_name: str) -> list[dict]:
+def list_charts(file_path: str, sheet_name: str) -> list[ChartInfo]:
     """List all charts on a sheet with title, type, and position."""
     wb = load_workbook_safe(file_path, read_only=False)
     try:
         ws = get_sheet(wb, sheet_name)
-        result = []
+        result: list[ChartInfo] = []
         for chart in ws._charts:
             result.append(
-                {
-                    "title": _safe_chart_title(chart.title),
-                    "type": type(chart).__name__,
-                    "position": (
+                ChartInfo(
+                    title=_safe_chart_title(chart.title),
+                    type=type(chart).__name__,
+                    position=(
                         getattr(chart, "anchor", None) and str(chart.anchor._from)
                         if hasattr(chart, "anchor")
                         else "unknown"
                     ),
-                }
+                )
             )
         return result
     finally:

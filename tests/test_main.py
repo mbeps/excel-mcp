@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from mcp_server.models.workbook import SheetInfo, WorkbookMetadata
 from mcp_server.main import (
     mcp,
     resource_list_sheets,
@@ -20,7 +21,12 @@ from mcp_server.main import (
 
 @patch("mcp_server.tools.workbook.get_workbook_metadata")
 def test_resource_list_sheets(mock_wb_meta):
-    mock_wb_meta.return_value = {"sheets": [{"name": "Sheet1"}]}
+    mock_wb_meta.return_value = WorkbookMetadata(
+        file_path="/path/to/test.xlsx",
+        sheets=[SheetInfo(name="Sheet1", min_row=1, max_row=10, min_col=1, max_col=5)],
+        active_sheet="Sheet1",
+        named_ranges=[],
+    )
     result = resource_list_sheets("/path/to/test.xlsx")
     data = json.loads(result)
     assert data[0]["name"] == "Sheet1"

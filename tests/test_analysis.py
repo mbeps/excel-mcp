@@ -18,10 +18,10 @@ def test_sort_data(sample_xlsx: str) -> None:
 
 def test_column_statistics(sample_xlsx: str) -> None:
     stats = column_statistics(sample_xlsx, "Sheet1", "Salary")
-    assert stats["count"] == 5
-    assert stats["min_val"] == 55000.0
-    assert stats["max_val"] == 90000.0
-    assert stats["sum_val"] == 357000.0
+    assert stats.count == 5
+    assert stats.min_val == 55000.0
+    assert stats.max_val == 90000.0
+    assert stats.sum_val == 357000.0
 
 
 def test_aggregate_data(sample_xlsx: str) -> None:
@@ -41,8 +41,8 @@ def test_find_duplicates(sample_xlsx: str) -> None:
 def test_column_statistics_skewness_kurtosis(sample_xlsx: str) -> None:
     """Test that column_statistics includes skewness and kurtosis."""
     result = column_statistics(sample_xlsx, "Sheet1", "Salary")
-    assert "skewness" in result
-    assert "kurtosis" in result
+    assert result.skewness is not None
+    assert result.kurtosis is not None
 
 
 def test_vlookup_helper(tmp_path) -> None:
@@ -192,16 +192,16 @@ def test_column_statistics_mean_median_std(sample_xlsx: str) -> None:
     """Verify computed mean, median, and std for the Salary column."""
     # Salaries: 70000, 55000, 90000, 62000, 80000
     stats = column_statistics(sample_xlsx, "Sheet1", "Salary")
-    assert stats["mean"] == pytest.approx(71400.0)
-    assert stats["median"] == pytest.approx(70000.0)
-    assert stats["std"] > 0
+    assert stats.mean == pytest.approx(71400.0)
+    assert stats.median == pytest.approx(70000.0)
+    assert stats.std > 0
 
 
 def test_column_statistics_text_column(sample_xlsx: str) -> None:
     """Non-numeric column returns a descriptive message, not statistics."""
     result = column_statistics(sample_xlsx, "Sheet1", "Name")
-    assert "message" in result
-    assert "Cannot compute statistics" in result["message"]
+    assert result.message is not None
+    assert "Cannot compute statistics" in result.message
 
 
 def test_aggregate_data_mean(sample_xlsx: str) -> None:

@@ -20,7 +20,7 @@ def test_csv_to_xlsx(sample_csv: str, tmp_path: Path) -> None:
     from mcp_server.tools.workbook import get_workbook_metadata
 
     meta = get_workbook_metadata(xlsx_path)
-    assert meta["sheets"][0]["name"] == "Imported"
+    assert meta.sheets[0].name == "Imported"
 
 
 def test_xlsx_to_csv(sample_xlsx: str, tmp_path: Path) -> None:
@@ -47,7 +47,7 @@ def test_csv_to_xlsx_with_encoding(sample_csv: str, tmp_path: Path) -> None:
     from mcp_server.tools.workbook import get_workbook_metadata
 
     meta = get_workbook_metadata(xlsx_path)
-    assert meta["sheets"][0]["name"] == "Data"
+    assert meta.sheets[0].name == "Data"
 
 
 def test_xlsx_to_csv_with_encoding(sample_xlsx: str, tmp_path: Path) -> None:

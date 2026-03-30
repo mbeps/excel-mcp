@@ -25,6 +25,9 @@ class ColumnStats(BaseModel):
     max_val: float | None = Field(None, description="Maximum value, or None if unavailable.")
     std: float | None = Field(None, description="Standard deviation, or None if unavailable.")
     sum_val: float | None = Field(None, description="Sum of values, or None if unavailable.")
+    skewness: float | None = Field(None, description="Skewness of the distribution, or None if insufficient data.")
+    kurtosis: float | None = Field(None, description="Kurtosis of the distribution, or None if insufficient data.")
+    message: str | None = Field(None, description="Informational message, e.g. when column is non-numeric.")
 
 
 class AggregateResult(BaseModel):

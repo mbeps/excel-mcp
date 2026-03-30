@@ -656,8 +656,8 @@ def create_sensitivity_table(
     _validate_expression_vars(expression, all_vars)
 
     # Compute results
+    table: list[list[float | str]] = []
     if var2_name and var2_values:
-        table: list[list[float | str]] = []
         for v2 in var2_values:
             row: list[float | str] = []
             for v1 in var1_values:
@@ -665,10 +665,10 @@ def create_sensitivity_table(
                 row.append(round(val, 4))
             table.append(row)
     else:
-        table = []
         for v1 in var1_values:
             val = _eval_expression_vars(expression, {var1_name: v1})
-            table.append([round(val, 4)])
+            single_row: list[float | str] = [round(val, 4)]
+            table.append(single_row)
 
     # Write to workbook
     col_str, start_row = coordinate_from_string(output_cell)
@@ -685,8 +685,8 @@ def create_sensitivity_table(
         for ri, result_row in enumerate(table):
             label: float | str = var2_values[ri] if (var2_values and var2_name) else ""
             ws.cell(row=start_row + 1 + ri, column=start_col, value=label)
-            for ci, val in enumerate(result_row):  # type: ignore[assignment]
-                ws.cell(row=start_row + 1 + ri, column=start_col + 1 + ci, value=val)
+            for ci, cell_val in enumerate(result_row):
+                ws.cell(row=start_row + 1 + ri, column=start_col + 1 + ci, value=cell_val)
         save_workbook_safe(wb, file_path)
     finally:
         wb.close()

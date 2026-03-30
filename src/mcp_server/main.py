@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from logging import Logger
-from typing import Literal, cast
+from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -43,12 +43,15 @@ from mcp_server.models.common import (
     VerticalAlignment,
 )
 from mcp_server.models.hyperlinks import HyperlinkInfo, HyperlinkReadResult
-from mcp_server.models.named_ranges import FormulaErrorInfo, FormulaInfo
+from mcp_server.models.named_ranges import FormulaErrorInfo, FormulaInfo, NamedRangeInfo
 from mcp_server.models.pivot_etl import ChunkReadResult
 from mcp_server.models.scenarios import ScenarioInfo
 from mcp_server.models.solver import SolverResult
+from mcp_server.models.statistics import RegressionResult
+from mcp_server.tools.scenarios import ScenarioApplyResult
 from mcp_server.models.tables import TableInfo
 from mcp_server.models.workbook import (
+    SheetDefinition,
     SheetSummary,
     WorkbookCreatedResult,
     WorkbookMetadata,
@@ -68,7 +71,8 @@ logger: Logger = configure_logging("mcp_server.main")
 @mcp.resource("excel://workbook/{file_path}/sheets")
 def resource_list_sheets(file_path: str) -> str:
     """List all sheets in a workbook as JSON."""
-    return json.dumps(_workbook.get_workbook_metadata(file_path)["sheets"], indent=2)
+    metadata = _workbook.get_workbook_metadata(file_path)
+    return json.dumps([s.model_dump() for s in metadata.sheets], indent=2)
 
 
 @mcp.resource("excel://workbook/{file_path}/sheet/{sheet_name}/preview")
@@ -86,7 +90,7 @@ def resource_sheet_preview(file_path: str, sheet_name: str) -> str:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def get_workbook_metadata(file_path: str) -> WorkbookMetadata:
     """Get workbook metadata including sheet names, dimensions, active sheet, and named ranges."""
-    return _workbook.get_workbook_metadata(file_path)  # type: ignore[return-value]
+    return _workbook.get_workbook_metadata(file_path)
 
 
 @mcp.tool()
@@ -97,19 +101,19 @@ def create_workbook(
 
     Optionally specify initial sheet names via sheet_names (list) or sheet_name (single).
     """
-    return _workbook.create_workbook(file_path, sheet_names, sheet_name)  # type: ignore[return-value]
+    return _workbook.create_workbook(file_path, sheet_names, sheet_name)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
     """Get sheet summary: name, row/col counts, headers, and used range."""
-    return _workbook.get_sheet_summary(file_path, sheet_name)  # type: ignore[return-value]
+    return _workbook.get_sheet_summary(file_path, sheet_name)
 
 
 @mcp.tool()
-def write_multi_sheet(file_path: str, sheets: list[dict[str, object]]) -> WriteMultiSheetResult:
+def write_multi_sheet(file_path: str, sheets: list[SheetDefinition]) -> WriteMultiSheetResult:
     """Create a new workbook with multiple named sheets, headers, data, and column widths in one call."""
-    return _workbook.write_multi_sheet(file_path, sheets)  # type: ignore[return-value]
+    return _workbook.write_multi_sheet(file_path, sheets)
 
 
 # ---------------------------------------------------------------------------
@@ -131,11 +135,15 @@ def sheet_management(
     action="copy": Copy a sheet. Requires: new_name for the copy.
     """
     if action == "rename":
-        return _workbook.rename_sheet(file_path, sheet_name, new_name)  # type: ignore[arg-type]
+        if not new_name:
+            raise ValueError("new_name is required for action='rename'.")
+        return _workbook.rename_sheet(file_path, sheet_name, new_name)
     if action == "delete":
         return _workbook.delete_sheet(file_path, sheet_name)
     if action == "copy":
-        return _workbook.copy_sheet(file_path, sheet_name, new_name)  # type: ignore[arg-type]
+        if not new_name:
+            raise ValueError("new_name is required for action='copy'.")
+        return _workbook.copy_sheet(file_path, sheet_name, new_name)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -169,13 +177,19 @@ def read_cells(
     mode="chunked": Read large sheets in chunks. Optional: start_row, chunk_size.
     """
     if mode == "single":
-        return _cell_ops.read_cell(file_path, sheet_name, cell_ref, include_formula, include_metadata)  # type: ignore[arg-type]
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for mode='single'.")
+        return _cell_ops.read_cell(file_path, sheet_name, cell_ref, include_formula, include_metadata)
     if mode == "range":
+        if start_cell is None:
+            raise ValueError("start_cell is required for mode='range'.")
+        if end_cell is None:
+            raise ValueError("end_cell is required for mode='range'.")
         return _cell_ops.read_range(
             file_path,
             sheet_name,
-            start_cell,  # type: ignore[arg-type]
-            end_cell,  # type: ignore[arg-type]
+            start_cell,
+            end_cell,
             show_formula,
             show_style,
             output_format,
@@ -213,7 +227,9 @@ def write_cells(
     mode="series": Fill series. Requires: start_cell, count. Optional: series_type, step, direction, start_value.
     """
     if mode == "single":
-        return _cell_ops.write_cell(file_path, sheet_name, cell_ref, value)  # type: ignore[arg-type]
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for mode='single'.")
+        return _cell_ops.write_cell(file_path, sheet_name, cell_ref, value)
     if mode == "range":
         if start_cell is None:
             raise ValueError("start_cell is required for mode='range'.")
@@ -345,9 +361,15 @@ def formula_write(
     action="batch": Set multiple formulas. Requires: formulas (dict of cell_ref -> formula).
     """
     if action == "set":
-        return _formulas.set_formula(file_path, sheet_name, cell_ref, formula, is_array, target_range)  # type: ignore[arg-type]
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='set'.")
+        if formula is None:
+            raise ValueError("formula is required for action='set'.")
+        return _formulas.set_formula(file_path, sheet_name, cell_ref, formula, is_array, target_range)
     if action == "batch":
-        return _formulas.set_formulas_batch(file_path, sheet_name, formulas)  # type: ignore[arg-type]
+        if formulas is None:
+            raise ValueError("formulas is required for action='batch'.")
+        return _formulas.set_formulas_batch(file_path, sheet_name, formulas)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -415,7 +437,9 @@ def csv_ops(
     action="to_csv": Export sheet to CSV. Requires: file_path, sheet_name, output_path. Optional: delimiter, encoding.
     """
     if action == "preview":
-        return _csv_ops.read_csv_preview(file_path, rows, delimiter, encoding)  # type: ignore[arg-type]
+        if file_path is None:
+            raise ValueError("file_path is required for action='preview'.")
+        return _csv_ops.read_csv_preview(file_path, rows, delimiter, encoding)
     if action == "to_xlsx":
         effective_csv = csv_path or file_path
         effective_xlsx = xlsx_path or output_path
@@ -425,7 +449,11 @@ def csv_ops(
             raise ValueError("xlsx_path (or output_path) is required for action='to_xlsx'.")
         return _csv_ops.csv_to_xlsx(effective_csv, effective_xlsx, sheet_name, delimiter, encoding)
     if action == "to_csv":
-        return _csv_ops.xlsx_to_csv(file_path, sheet_name, output_path, delimiter, encoding)  # type: ignore[arg-type]
+        if file_path is None:
+            raise ValueError("file_path is required for action='to_csv'.")
+        if output_path is None:
+            raise ValueError("output_path is required for action='to_csv'.")
+        return _csv_ops.xlsx_to_csv(file_path, sheet_name, output_path, delimiter, encoding)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -460,11 +488,15 @@ def conditional_format(
     action="remove": DESTRUCTIVE. Remove rules. Optional: cell_range (omit to clear all).
     """
     if action == "apply":
+        if cell_range is None:
+            raise ValueError("cell_range is required for action='apply'.")
+        if format_type is None:
+            raise ValueError("format_type is required for action='apply'.")
         return _cond_fmt.apply_conditional_formatting(
             file_path,
             sheet_name,
-            cell_range,  # type: ignore[arg-type]
-            format_type,  # type: ignore[arg-type]
+            cell_range,
+            format_type,
             start_color,
             mid_color,
             end_color,
@@ -473,18 +505,28 @@ def conditional_format(
             stop_if_true,
         )
     if action == "highlight":
+        if cell_range is None:
+            raise ValueError("cell_range is required for action='highlight'.")
+        if operator is None:
+            raise ValueError("operator is required for action='highlight'.")
+        if formula is None:
+            raise ValueError("formula is required for action='highlight'.")
         return _cond_fmt.add_highlight_rule(
             file_path,
             sheet_name,
-            cell_range,  # type: ignore[arg-type]
-            operator,  # type: ignore[arg-type]
-            formula,  # type: ignore[arg-type]
+            cell_range,
+            operator,
+            formula,
             font_color,
             bg_color,
             stop_if_true,
         )
     if action == "formula_rule":
-        return _cond_fmt.add_formula_rule(file_path, sheet_name, cell_range, formula, font_color, bg_color)  # type: ignore[arg-type]
+        if cell_range is None:
+            raise ValueError("cell_range is required for action='formula_rule'.")
+        if formula is None:
+            raise ValueError("formula is required for action='formula_rule'.")
+        return _cond_fmt.add_formula_rule(file_path, sheet_name, cell_range, formula, font_color, bg_color)
     if action == "remove":
         return _cond_fmt.remove_conditional_formatting(file_path, sheet_name, cell_range)
     raise ValueError(f"Unknown action: {action}")
@@ -524,11 +566,21 @@ def table(
     if action == "list":
         return _tables.list_tables(file_path, sheet_name)
     if action == "resize":
-        return _tables.resize_table(file_path, sheet_name, table_name, new_range)  # type: ignore[arg-type]
+        if table_name is None:
+            raise ValueError("table_name is required for action='resize'.")
+        if new_range is None:
+            raise ValueError("new_range is required for action='resize'.")
+        return _tables.resize_table(file_path, sheet_name, table_name, new_range)
     if action == "totals":
-        return _tables.set_table_totals_row(file_path, sheet_name, table_name, show_totals, column_totals)  # type: ignore[arg-type]
+        if table_name is None:
+            raise ValueError("table_name is required for action='totals'.")
+        if show_totals is None:
+            raise ValueError("show_totals is required for action='totals'.")
+        return _tables.set_table_totals_row(file_path, sheet_name, table_name, show_totals, column_totals)
     if action == "data":
-        return _tables.get_table_data(file_path, sheet_name, table_name)  # type: ignore[arg-type]
+        if table_name is None:
+            raise ValueError("table_name is required for action='data'.")
+        return _tables.get_table_data(file_path, sheet_name, table_name)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -565,11 +617,13 @@ def data_validation(
     action="remove": DESTRUCTIVE. Remove validations from range.
     """
     if action == "dropdown":
+        if options is None and source_range is None:
+            raise ValueError("options or source_range is required for action='dropdown'.")
         return _data_val.add_dropdown_validation(
             file_path,
             sheet_name,
             cell_range,
-            options,  # type: ignore[arg-type]
+            options if options is not None else [],
             allow_blank,
             source_range,
             error_style,
@@ -579,12 +633,16 @@ def data_validation(
             prompt_message,
         )
     if action == "numeric":
+        if operator is None:
+            raise ValueError("operator is required for action='numeric'.")
+        if value1 is None:
+            raise ValueError("value1 is required for action='numeric'.")
         return _data_val.add_numeric_validation(
             file_path,
             sheet_name,
             cell_range,
-            operator,  # type: ignore[arg-type]
-            value1,  # type: ignore[arg-type]
+            operator,
+            value1,
             value2,
             allow_blank,
             error_style,
@@ -598,7 +656,7 @@ def data_validation(
             file_path,
             sheet_name,
             cell_range,
-            operator,  # type: ignore[arg-type]
+            operator if operator is not None else "greaterThan",
             date1,
             date2,
             allow_blank,
@@ -647,9 +705,11 @@ def protection(
     action="unprotect_workbook": DESTRUCTIVE. Remove workbook protection.
     """
     if action == "protect_sheet":
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='protect_sheet'.")
         return _protection.protect_sheet(
             file_path,
-            sheet_name,  # type: ignore[arg-type]
+            sheet_name,
             password,
             allow_formatting_cells,
             allow_formatting_columns,
@@ -662,11 +722,15 @@ def protection(
             allow_filter,
         )
     if action == "unprotect_sheet":
-        return _protection.unprotect_sheet(file_path, sheet_name, password)  # type: ignore[arg-type]
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='unprotect_sheet'.")
+        return _protection.unprotect_sheet(file_path, sheet_name, password)
     if action == "protect_cells":
         if not locked_range:
             raise ValueError("locked_range is required for action='protect_cells'.")
-        return _protection.protect_cells(file_path, sheet_name, locked_range, unlocked_ranges)  # type: ignore[arg-type]
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='protect_cells'.")
+        return _protection.protect_cells(file_path, sheet_name, locked_range, unlocked_ranges)
     if action == "protect_workbook":
         return _doc_props.protect_workbook(file_path, password, lock_structure, lock_windows)
     if action == "unprotect_workbook":
@@ -724,10 +788,12 @@ def chart(
     action="combo": Create combo chart. Requires: data_range, bar_columns, line_columns.
     """
     if action == "create":
+        if data_range is None:
+            raise ValueError("data_range is required for action='create'.")
         return _charts.create_chart(
             file_path,
             sheet_name,
-            data_range,  # type: ignore[arg-type]
+            data_range,
             chart_type,
             target_cell,
             name or title or "",
@@ -740,9 +806,13 @@ def chart(
     if action == "delete":
         return _charts.delete_chart(file_path, sheet_name, chart_index or 0)
     if action == "list":
-        return cast(list[ChartInfo], _charts.list_charts(file_path, sheet_name))
+        return _charts.list_charts(file_path, sheet_name)
     if action == "add_series":
-        return _charts.add_chart_series(file_path, sheet_name, chart_index, data_range, title_from_data)  # type: ignore[arg-type]
+        if chart_index is None:
+            raise ValueError("chart_index is required for action='add_series'.")
+        if data_range is None:
+            raise ValueError("data_range is required for action='add_series'.")
+        return _charts.add_chart_series(file_path, sheet_name, chart_index, data_range, title_from_data)
     if action == "set_axes":
         return _charts.set_chart_axes(
             file_path,
@@ -826,7 +896,7 @@ def named_range(
     destination: str | None = None,
     scope: str = "workbook",
     new_destination: str | None = None,
-) -> list[dict[str, str]] | str:
+) -> list[NamedRangeInfo] | str:
     """Manage named ranges.
 
     action="list": List all named ranges. Read-only. Requires: file_path only.
@@ -835,7 +905,7 @@ def named_range(
     action="update": Update destination. Requires: name, new_destination.
     """
     if action == "list":
-        return cast(list[dict[str, str]], _named_ranges.list_named_ranges(file_path))
+        return _named_ranges.list_named_ranges(file_path)
     if action == "create":
         if not name:
             raise ValueError("name is required for action='create'.")
@@ -843,7 +913,9 @@ def named_range(
             raise ValueError("destination is required for action='create'.")
         return _named_ranges.create_named_range(file_path, name, destination, scope)
     if action == "delete":
-        return _named_ranges.delete_named_range(file_path, name)  # type: ignore[arg-type]
+        if not name:
+            raise ValueError("name is required for action='delete'.")
+        return _named_ranges.delete_named_range(file_path, name)
     if action == "update":
         if not name:
             raise ValueError("name is required for action='update'.")
@@ -875,14 +947,19 @@ def comment(
     action="list": List all comments in sheet. Read-only.
     """
     if action == "add":
-        return _comments.add_comment(file_path, sheet_name, cell_ref, text, author)  # type: ignore[arg-type]
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='add'.")
+        if text is None:
+            raise ValueError("text is required for action='add'.")
+        return _comments.add_comment(file_path, sheet_name, cell_ref, text, author)
     if action == "read":
-        res = _comments.read_comment(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
-        if res is None:
-            return None
-        return cast(CommentInfo, res)
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='read'.")
+        return _comments.read_comment(file_path, sheet_name, cell_ref)
     if action == "delete":
-        return _comments.delete_comment(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='delete'.")
+        return _comments.delete_comment(file_path, sheet_name, cell_ref)
     if action == "list":
         return _comments.list_comments(file_path, sheet_name)
     raise ValueError(f"Unknown action: {action}")
@@ -911,13 +988,19 @@ def hyperlink(
     action="list": List all hyperlinks. Read-only.
     """
     if action == "add":
-        return _hyperlinks.add_hyperlink(file_path, sheet_name, cell_ref, url, display_text, tooltip)  # type: ignore[arg-type]
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='add'.")
+        if url is None:
+            raise ValueError("url is required for action='add'.")
+        return _hyperlinks.add_hyperlink(file_path, sheet_name, cell_ref, url, display_text, tooltip)
     if action == "read":
         if not cell_ref:
             raise ValueError("cell_ref is required for action='read'.")
         return _hyperlinks.read_hyperlink(file_path, sheet_name, cell_ref)
     if action == "delete":
-        return _hyperlinks.delete_hyperlink(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='delete'.")
+        return _hyperlinks.delete_hyperlink(file_path, sheet_name, cell_ref)
     if action == "list":
         return _hyperlinks.list_hyperlinks(file_path, sheet_name)
     raise ValueError(f"Unknown action: {action}")
@@ -935,7 +1018,7 @@ def scenario(
     name: str | None = None,
     cell_values: dict[str, dict[str, ScenarioCellValue]] | None = None,
     description: str = "",
-) -> str | list[ScenarioInfo] | dict:
+) -> str | list[ScenarioInfo] | ScenarioApplyResult:
     """Scenario management for what-if analysis.
 
     action="add": Save a scenario. Requires: name, cell_values ({sheet: {cell: value}}). Optional: description.
@@ -943,11 +1026,17 @@ def scenario(
     action="apply": DESTRUCTIVE. Apply scenario values to sheet. Requires: name.
     """
     if action == "add":
-        return _scenarios.add_scenario(file_path, name, cell_values, description)  # type: ignore[arg-type]
+        if not name:
+            raise ValueError("name is required for action='add'.")
+        if cell_values is None:
+            raise ValueError("cell_values is required for action='add'.")
+        return _scenarios.add_scenario(file_path, name, cell_values, description)
     if action == "list":
         return _scenarios.list_scenarios(file_path)
     if action == "apply":
-        return cast(dict, _scenarios.apply_scenario(file_path, name))  # type: ignore[arg-type]
+        if not name:
+            raise ValueError("name is required for action='apply'.")
+        return _scenarios.apply_scenario(file_path, name)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -983,26 +1072,42 @@ def multi_file(
     action="compare": Compare two workbooks. Requires: file_a, file_b. Optional: sheet_name, sheet_name_b.
     """
     if action == "aggregate":
+        if file_paths is None:
+            raise ValueError("file_paths is required for action='aggregate'.")
+        if column is None:
+            raise ValueError("column is required for action='aggregate'.")
         return _multi_file.bulk_aggregate_multi_files(
-            file_paths,  # type: ignore[arg-type]
-            column,  # type: ignore[arg-type]
+            file_paths,
+            column,
             operation,
             sheet_name,
             header_row,
             output_file,
         )
     if action == "filter":
+        if file_paths is None:
+            raise ValueError("file_paths is required for action='filter'.")
+        if column is None:
+            raise ValueError("column is required for action='filter'.")
+        if operator is None:
+            raise ValueError("operator is required for action='filter'.")
+        if value is None:
+            raise ValueError("value is required for action='filter'.")
         return _multi_file.bulk_filter_multi_files(
-            file_paths,  # type: ignore[arg-type]
-            column,  # type: ignore[arg-type]
-            operator,  # type: ignore[arg-type]
-            value,  # type: ignore[arg-type]
+            file_paths,
+            column,
+            operator,
+            value,
             sheet_name,
             header_row,
             output_file,
         )
     if action == "validate":
-        return _multi_file.validate_data_consistency(file_paths, key_column, check_columns, sheet_name, header_row)  # type: ignore[arg-type]
+        if file_paths is None:
+            raise ValueError("file_paths is required for action='validate'.")
+        if key_column is None:
+            raise ValueError("key_column is required for action='validate'.")
+        return _multi_file.validate_data_consistency(file_paths, key_column, check_columns, sheet_name, header_row)
     if action == "compare":
         if not file_a:
             raise ValueError("file_a is required for action='compare'.")
@@ -1049,12 +1154,22 @@ def worksheet_ops(
     action="merge_workbooks": Merge multiple workbooks. Requires: source_files, output_file.
     """
     if action == "freeze":
-        return _ws_ops.freeze_panes(file_path, sheet_name, cell_ref)  # type: ignore[arg-type]
+        if file_path is None:
+            raise ValueError("file_path is required for action='freeze'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='freeze'.")
+        return _ws_ops.freeze_panes(file_path, sheet_name, cell_ref)
     if action == "auto_filter":
+        if file_path is None:
+            raise ValueError("file_path is required for action='auto_filter'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='auto_filter'.")
         if not remove and cell_range is None:
             raise ValueError("cell_range is required for action='auto_filter' when remove=False.")
-        return _ws_ops.set_auto_filter(file_path, sheet_name, cell_range, remove)  # type: ignore[arg-type]
+        return _ws_ops.set_auto_filter(file_path, sheet_name, cell_range, remove)
     if action == "copy_range_across":
+        if file_path is None:
+            raise ValueError("file_path is required for action='copy_range_across'.")
         if not source_sheet:
             raise ValueError("source_sheet is required for action='copy_range_across'.")
         if not source_range:
@@ -1062,7 +1177,7 @@ def worksheet_ops(
         if not target_sheet:
             raise ValueError("target_sheet is required for action='copy_range_across'.")
         return _ws_ops.copy_range_across_sheets(
-            file_path,  # type: ignore[arg-type]
+            file_path,
             source_sheet,
             source_range,
             target_sheet,
@@ -1108,7 +1223,7 @@ def sort_data(
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> ColumnStats:
     """Compute descriptive statistics (mean, median, std, min, max, sum) for a numeric column."""
-    return cast(ColumnStats, _analysis.column_statistics(file_path, sheet_name, column, has_header))
+    return _analysis.column_statistics(file_path, sheet_name, column, has_header)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1417,15 +1532,41 @@ def time_value_calc(
                      "ddb" / "double_declining" / "double_declining_balance". Default: "sln".
     """
     if operation == "fv":
-        return _financial.calculate_fv(rate, nper, pmt, pv, when)  # type: ignore[arg-type]
+        if rate is None:
+            raise ValueError("rate is required for operation='fv'.")
+        if nper is None:
+            raise ValueError("nper is required for operation='fv'.")
+        if pmt is None:
+            raise ValueError("pmt is required for operation='fv'.")
+        return _financial.calculate_fv(rate, nper, pmt, pv, when)
     if operation == "pv":
-        return _financial.calculate_pv(rate, nper, pmt, fv, when)  # type: ignore[arg-type]
+        if rate is None:
+            raise ValueError("rate is required for operation='pv'.")
+        if nper is None:
+            raise ValueError("nper is required for operation='pv'.")
+        if pmt is None:
+            raise ValueError("pmt is required for operation='pv'.")
+        return _financial.calculate_pv(rate, nper, pmt, fv, when)
     if operation == "nper":
-        return _financial.calculate_nper(rate, pmt, pv, fv, when)  # type: ignore[arg-type]
+        if rate is None:
+            raise ValueError("rate is required for operation='nper'.")
+        if pmt is None:
+            raise ValueError("pmt is required for operation='nper'.")
+        return _financial.calculate_nper(rate, pmt, pv, fv, when)
     if operation == "rate":
-        return _financial.calculate_rate(nper, pmt, pv, fv, when, guess)  # type: ignore[arg-type]
+        if nper is None:
+            raise ValueError("nper is required for operation='rate'.")
+        if pmt is None:
+            raise ValueError("pmt is required for operation='rate'.")
+        return _financial.calculate_rate(nper, pmt, pv, fv, when, guess)
     if operation == "depreciation":
-        return _financial.calculate_depreciation(cost, salvage, life, method, period)  # type: ignore[arg-type]
+        if cost is None:
+            raise ValueError("cost is required for operation='depreciation'.")
+        if salvage is None:
+            raise ValueError("salvage is required for operation='depreciation'.")
+        if life is None:
+            raise ValueError("life is required for operation='depreciation'.")
+        return _financial.calculate_depreciation(cost, salvage, life, method, period)
     raise ValueError(f"Unknown operation: {operation}")
 
 
@@ -1522,7 +1663,7 @@ def run_regression(
     header_row: int = 1,
     output_sheet: str = "Regression Output",
     output_file: str | None = None,
-) -> dict:
+) -> RegressionResult:
     """Run OLS linear regression and return coefficients, R-squared, and residuals.
 
     If output_file is provided, results are written to that file instead of file_path.

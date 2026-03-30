@@ -42,6 +42,7 @@ src = ["src", "tests"]
 select = ["E", "F", "I"]
 
 [tool.mypy]
+plugins = ["pydantic.mypy"]
 python_version = "3.12"
 strict = false
 warn_return_any = true

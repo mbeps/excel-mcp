@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import cast
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
+from mcp_server.models.workbook import (
+    SheetCreatedInfo,
+    SheetDefinition,
+    SheetInfo,
+    SheetSummary,
+    WorkbookCreatedResult,
+    WorkbookMetadata,
+    WriteMultiSheetResult,
+)
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -21,37 +29,37 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 
-def get_workbook_metadata(file_path: str) -> dict[str, str | None | list[dict[str, str | int | None]]]:
+def get_workbook_metadata(file_path: str) -> WorkbookMetadata:
     """Return workbook metadata: sheets, active sheet, and named ranges."""
     wb = load_workbook_safe(file_path, read_only=True)
     try:
-        sheets = []
+        sheets: list[SheetInfo] = []
         for ws in wb.worksheets:
             sheets.append(
-                {
-                    "name": ws.title,
-                    "min_row": ws.min_row,
-                    "max_row": ws.max_row,
-                    "min_col": ws.min_column,
-                    "max_col": ws.max_column,
-                }
+                SheetInfo(
+                    name=ws.title,
+                    min_row=ws.min_row,
+                    max_row=ws.max_row,
+                    min_col=ws.min_column,
+                    max_col=ws.max_column,
+                )
             )
 
         named_ranges = [{"name": nr.name, "destination": str(nr.attr_text)} for nr in wb.defined_names.values()]
 
-        return {
-            "file_path": file_path,
-            "sheets": sheets,
-            "active_sheet": wb.active.title if wb.active else None,
-            "named_ranges": named_ranges,
-        }
+        return WorkbookMetadata(
+            file_path=file_path,
+            sheets=sheets,
+            active_sheet=wb.active.title if wb.active else None,
+            named_ranges=named_ranges,
+        )
     finally:
         wb.close()
 
 
 def create_workbook(
     file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None
-) -> dict[str, str | list[str]]:
+) -> WorkbookCreatedResult:
     """Create a new .xlsx workbook with optional sheet names."""
     validate_file_path(file_path, must_exist=False)
     wb = Workbook()
@@ -67,10 +75,10 @@ def create_workbook(
 
     save_workbook_safe(wb, file_path)
     logger.info("Created workbook: %s", file_path)
-    return {"file_path": file_path, "sheets": wb.sheetnames}
+    return WorkbookCreatedResult(file_path=file_path, sheets=list(wb.sheetnames))
 
 
-def get_sheet_summary(file_path: str, sheet_name: str) -> dict[str, str | int | list[str]]:
+def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
     """Return summary of a sheet: name, dimensions, headers, used range."""
     wb = load_workbook_safe(file_path, read_only=True)
     try:
@@ -96,13 +104,13 @@ def get_sheet_summary(file_path: str, sheet_name: str) -> dict[str, str | int | 
 
         used_range = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
 
-        return {
-            "name": ws.title,
-            "row_count": row_count,
-            "col_count": col_count,
-            "headers": [str(h) if h is not None else "" for h in headers],
-            "used_range": used_range,
-        }
+        return SheetSummary(
+            name=ws.title,
+            row_count=row_count,
+            col_count=col_count,
+            headers=[str(h) if h is not None else "" for h in headers],
+            used_range=used_range,
+        )
     finally:
         wb.close()
 
@@ -142,8 +150,8 @@ def copy_sheet(file_path: str, source_sheet: str, new_name: str) -> str:
 
 def write_multi_sheet(
     file_path: str,
-    sheets: list[dict[str, object]],
-) -> dict[str, str | list[dict[str, str | int | list[str]]]]:
+    sheets: list[SheetDefinition],
+) -> WriteMultiSheetResult:
     """Create a new workbook with multiple named sheets, data, and headers in one call."""
     validate_file_path(file_path, must_exist=False)
     wb = Workbook()
@@ -152,12 +160,12 @@ def write_multi_sheet(
     if "Sheet" in wb.sheetnames:
         del wb["Sheet"]
 
-    summary: list[dict] = []
+    summary: list[SheetCreatedInfo] = []
     for sheet_def in sheets:
         name = sheet_def["name"]
-        headers = cast(list[str], sheet_def.get("headers"))
-        data = cast(list[list[object]] | None, sheet_def.get("data") or sheet_def.get("values"))
-        column_widths = cast(dict[str, float] | None, sheet_def.get("column_widths"))
+        headers: list[str] = sheet_def.get("headers") or []
+        data: list[list[object]] | None = sheet_def.get("data") or sheet_def.get("values")
+        column_widths: dict[str, float] | None = sheet_def.get("column_widths")
 
         ws = wb.create_sheet(title=name)
         current_row = 1
@@ -181,14 +189,14 @@ def write_multi_sheet(
                 ws.column_dimensions[col_letter.upper()].width = width
 
         summary.append(
-            {
-                "name": name,
-                "header_count": len(headers) if headers else 0,
-                "row_count": rows_written,
-                "column_widths_set": list(column_widths.keys()) if column_widths else [],
-            }
+            SheetCreatedInfo(
+                name=str(name),
+                header_count=len(headers),
+                row_count=rows_written,
+                column_widths_set=list(column_widths.keys()) if column_widths else [],
+            )
         )
 
     save_workbook_safe(wb, file_path)
     logger.info("Created multi-sheet workbook: %s with %d sheets", file_path, len(sheets))
-    return {"file_path": file_path, "sheets_created": summary}
+    return WriteMultiSheetResult(file_path=file_path, sheets_created=summary)

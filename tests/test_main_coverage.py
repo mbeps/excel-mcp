@@ -30,7 +30,7 @@ def test_main_tools(sample_xlsx):
 
     # Simple tool call
     meta = get_workbook_metadata(sample_xlsx)
-    assert meta["active_sheet"] == "Sheet1"
+    assert meta.active_sheet == "Sheet1"
 
     # Sheet management consolidated tool
     res = sheet_management("rename", sample_xlsx, "Sheet1", "RenamedSheet")

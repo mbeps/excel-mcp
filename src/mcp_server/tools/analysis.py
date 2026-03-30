@@ -9,6 +9,7 @@ import openpyxl
 import pandas as pd
 from scipy import stats
 
+from mcp_server.models.analysis import ColumnStats
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
     get_sheet,
@@ -149,7 +150,7 @@ def sort_data(
     return f"Sorted {len(df)} rows in '{sheet_name}'."
 
 
-def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> dict[str, object]:
+def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> ColumnStats:
     """Compute descriptive statistics for a numeric column."""
     df = _read_sheet_df(file_path, sheet_name, has_header)
     if column not in df.columns:
@@ -157,32 +158,32 @@ def column_statistics(file_path: str, sheet_name: str, column: str, has_header: 
 
     col = df[column]
     if not pd.api.types.is_numeric_dtype(col):
-        return {
-            "column": column,
-            "message": f"Column '{column}' is not numeric (dtype: {col.dtype}). Cannot compute statistics.",
-        }
+        return ColumnStats(
+            column=column,
+            count=int(col.count()),
+            message=f"Column '{column}' is not numeric (dtype: {col.dtype}). Cannot compute statistics.",
+        )
 
     desc = col.describe()
-    result = {
-        "column": column,
-        "count": int(desc["count"]),
-        "mean": float(desc["mean"]),
-        "median": float(col.median()),
-        "min_val": float(desc["min"]),
-        "max_val": float(desc["max"]),
-        "std": float(desc["std"]),
-        "sum_val": float(col.sum()),
-    }
-
     numeric_vals = col.dropna()
+    skewness: float | None = None
+    kurtosis: float | None = None
     if len(numeric_vals) >= 3:
-        result["skewness"] = float(stats.skew(numeric_vals, bias=False))
-        result["kurtosis"] = float(stats.kurtosis(numeric_vals, bias=False))
-    else:
-        result["skewness"] = None
-        result["kurtosis"] = None
+        skewness = float(stats.skew(numeric_vals, bias=False))
+        kurtosis = float(stats.kurtosis(numeric_vals, bias=False))
 
-    return result
+    return ColumnStats(
+        column=column,
+        count=int(desc["count"]),
+        mean=float(desc["mean"]),
+        median=float(col.median()),
+        min_val=float(desc["min"]),
+        max_val=float(desc["max"]),
+        std=float(desc["std"]),
+        sum_val=float(col.sum()),
+        skewness=skewness,
+        kurtosis=kurtosis,
+    )
 
 
 def aggregate_data(

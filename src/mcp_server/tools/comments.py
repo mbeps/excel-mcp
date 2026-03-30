@@ -62,15 +62,15 @@ def list_comments(file_path: str, sheet_name: str) -> list[CommentInfo]:
         wb.close()
 
 
-def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> dict[str, str] | None:
-    """Read comment from a cell. Returns dict with text/author or None."""
+def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> CommentInfo | None:
+    """Read comment from a cell. Returns CommentInfo with text/author or None."""
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
         comment = ws[cell_ref].comment
         if comment is None:
             return None
-        return {"cell_ref": cell_ref, "text": comment.text, "author": comment.author}
+        return CommentInfo(cell_ref=cell_ref, text=comment.text, author=comment.author)
     finally:
         wb.close()
 

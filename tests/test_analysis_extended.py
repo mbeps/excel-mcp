@@ -103,7 +103,7 @@ def test_sort_data_extended(sample_xlsx: str):
 def test_column_statistics_non_numeric(sample_xlsx: str):
     """Test column_statistics with a non-numeric column."""
     res = column_statistics(sample_xlsx, "Sheet1", "City")
-    assert "Cannot compute statistics" in res["message"]
+    assert "Cannot compute statistics" in res.message
 
 
 def test_aggregate_data_extended(sample_xlsx: str):

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import cast
 
 import pandas as pd
 
@@ -44,7 +43,7 @@ def bulk_aggregate_multi_files(
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
 
-    per_file: list[dict] = []
+    per_file: list[MultiFilePerFileResult] = []
     all_values: list[float] = []
 
     for fp in file_paths:
@@ -56,19 +55,19 @@ def bulk_aggregate_multi_files(
         values = col_data.tolist()
         all_values.extend(values)
 
-        file_result: dict = {"file": fp, "row_count": len(df)}
+        file_value: float
         if operation == "sum":
-            file_result["value"] = float(col_data.sum())
+            file_value = float(col_data.sum())
         elif operation == "mean":
-            file_result["value"] = float(col_data.mean()) if len(col_data) > 0 else 0.0
+            file_value = float(col_data.mean()) if len(col_data) > 0 else 0.0
         elif operation == "min":
-            file_result["value"] = float(col_data.min()) if len(col_data) > 0 else 0.0
+            file_value = float(col_data.min()) if len(col_data) > 0 else 0.0
         elif operation == "max":
-            file_result["value"] = float(col_data.max()) if len(col_data) > 0 else 0.0
-        elif operation == "count":
-            file_result["value"] = len(col_data)
+            file_value = float(col_data.max()) if len(col_data) > 0 else 0.0
+        else:  # count
+            file_value = float(len(col_data))
 
-        per_file.append(file_result)
+        per_file.append(MultiFilePerFileResult(file=fp, row_count=len(df), value=file_value))
 
     series = pd.Series(all_values)
     if operation == "sum":
@@ -82,7 +81,7 @@ def bulk_aggregate_multi_files(
     else:  # count
         aggregate = len(series)
 
-    result = {
+    result: dict[str, str | float | int | list[MultiFilePerFileResult]] = {
         "column": column,
         "operation": operation,
         "per_file": per_file,
@@ -100,7 +99,7 @@ def bulk_aggregate_multi_files(
         _write_df_to_new_file(summary_df, output_file, sheet_name="Summary")
         logger.info("Aggregate summary written to %s", output_file)
 
-    return cast(dict[str, str | float | int | list[MultiFilePerFileResult]], result)
+    return result
 
 
 def bulk_filter_multi_files(

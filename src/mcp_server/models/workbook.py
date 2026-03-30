@@ -57,6 +57,19 @@ class WriteMultiSheetResult(TypedDict):
     sheets_created: list[SheetCreatedInfo]
 
 
+class _SheetDefinitionBase(TypedDict):
+    name: str
+
+
+class SheetDefinition(_SheetDefinitionBase, total=False):
+    """Input definition for a single sheet in write_multi_sheet."""
+
+    headers: list[str]
+    data: list[list[object]]
+    values: list[list[object]]
+    column_widths: dict[str, float]
+
+
 class ValidationRangeResult(TypedDict, total=False):
     """Result dict from validate_excel_range / _validate_single_cell."""
 

@@ -38,6 +38,7 @@ from .statistics import ColumnStatResult, RegressionResult
 from .tables import TableInfo, ValidationRuleInfo
 from .workbook import (
     SheetCreatedInfo,
+    SheetDefinition,
     SheetInfo,
     SheetSummary,
     ValidationRangeResult,
@@ -52,6 +53,7 @@ __all__ = [
     "WorkbookCreatedResult",
     "WorkbookMetadata",
     "SheetCreatedInfo",
+    "SheetDefinition",
     "ValidationRangeResult",
     "CellValue",
     "RangeData",

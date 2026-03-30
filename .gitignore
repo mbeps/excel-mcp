@@ -31,3 +31,4 @@ Thumbs.db
 **.xlsx
 .github/prompts/**
 .github/agents/**
+.mypy_cache/**

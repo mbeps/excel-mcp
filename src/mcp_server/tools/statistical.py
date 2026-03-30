@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import cast
 
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 
+from mcp_server.models.statistics import RegressionResult
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, read_sheet_df, save_workbook_safe
 from mcp_server.utils.logger import configure_logging
 
@@ -23,7 +23,7 @@ def run_regression(
     output_sheet: str = "Regression Output",
     output_file: str | None = None,
     header_row: int = 1,
-) -> dict[str, object]:
+) -> RegressionResult:
     """Run OLS linear regression and write results to a new sheet.
 
     Returns coefficients, R-squared, and observation count.
@@ -54,12 +54,13 @@ def run_regression(
     ss_tot = float(np.sum((y_clean - np.mean(y_clean)) ** 2))
     r_squared = 1.0 - ss_res / ss_tot if ss_tot != 0 else 0.0
 
-    results = {
+    coefficients: dict[str, float] = {
+        "intercept": round(float(coeffs[0]), 6),
+        **{col: round(float(c), 6) for col, c in zip(x_columns, coeffs[1:])},
+    }
+    results: RegressionResult = {
         "r_squared": round(float(r_squared), 6),
-        "coefficients": {
-            "intercept": round(float(coeffs[0]), 6),
-            **{col: round(float(c), 6) for col, c in zip(x_columns, coeffs[1:])},
-        },
+        "coefficients": coefficients,
         "n_observations": int(len(y_clean)),
         "ss_residual": round(ss_res, 6),
         "ss_total": round(ss_tot, 6),
@@ -89,7 +90,7 @@ def run_regression(
         ws["A8"] = "Variable"
         ws["B8"] = "Coefficient"
 
-        coeffs_dict = cast(dict[str, float], results["coefficients"])
+        coeffs_dict = results["coefficients"]
 
         ws.cell(row=9, column=1, value="Intercept")
         ws.cell(row=9, column=2, value=coeffs_dict["intercept"])
