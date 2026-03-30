@@ -8,9 +8,11 @@ from openpyxl import Workbook
 from mcp_server.tools.cell_ops import (
     clear_range,
     fill_series,
+    merge_cells,
     read_cell,
     read_file_chunked,
     read_range,
+    unmerge_cells,
     write_cell,
     write_range,
 )
@@ -247,3 +249,28 @@ def test_write_range_2d_array(sample_xlsx: str) -> None:
     result = read_range(sample_xlsx, "Sheet1", "F1", "H3")
     assert result["rows"][0] == ["A", "B", "C"]
     assert result["rows"][2] == [4, 5, 6]
+
+
+def test_merge_cells(sample_xlsx: str) -> None:
+    from openpyxl import load_workbook
+
+    result = merge_cells(sample_xlsx, "Sheet1", "A1:D1")
+    assert result["status"] == "success"
+    wb = load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    merged = [str(m) for m in ws.merged_cells.ranges]
+    assert "A1:D1" in merged
+    wb.close()
+
+
+def test_unmerge_cells(sample_xlsx: str) -> None:
+    from openpyxl import load_workbook
+
+    merge_cells(sample_xlsx, "Sheet1", "A1:D1")
+    result = unmerge_cells(sample_xlsx, "Sheet1", "A1:D1")
+    assert result["status"] == "success"
+    wb = load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    merged = [str(m) for m in ws.merged_cells.ranges]
+    assert "A1:D1" not in merged
+    wb.close()

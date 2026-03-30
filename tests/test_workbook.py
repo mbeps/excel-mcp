@@ -4,6 +4,8 @@ from mcp_server.tools.workbook import (
     create_workbook,
     get_sheet_summary,
     get_workbook_metadata,
+    hide_sheet,
+    unhide_sheet,
     write_multi_sheet,
 )
 
@@ -169,3 +171,41 @@ def test_get_sheet_summary_row_col_count(tmp_path) -> None:
     assert summary.row_count == 11  # 1 header + 10 data rows
     assert summary.col_count == 3
     assert summary.headers == ["Col1", "Col2", "Col3"]
+
+
+def test_hide_sheet(sample_xlsx: str) -> None:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(sample_xlsx)
+    wb.create_sheet("Sheet2")
+    wb.save(sample_xlsx)
+    wb.close()
+
+    result = hide_sheet(sample_xlsx, "Sheet1")
+    assert result["status"] == "success"
+    wb = load_workbook(sample_xlsx)
+    assert wb["Sheet1"].sheet_state == "hidden"
+    wb.close()
+
+
+def test_unhide_sheet(sample_xlsx: str) -> None:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(sample_xlsx)
+    wb.create_sheet("Sheet2")
+    wb.save(sample_xlsx)
+    wb.close()
+
+    hide_sheet(sample_xlsx, "Sheet1")
+    result = unhide_sheet(sample_xlsx, "Sheet1")
+    assert result["status"] == "success"
+    wb = load_workbook(sample_xlsx)
+    assert wb["Sheet1"].sheet_state == "visible"
+    wb.close()
+
+
+def test_hide_last_visible_sheet_fails(sample_xlsx: str) -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        hide_sheet(sample_xlsx, "Sheet1")

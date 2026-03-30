@@ -229,3 +229,189 @@ def merge_workbooks(
         "output_file": output_file,
         "sheets": sheet_names_used,
     }
+
+
+def insert_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[str, str]:
+    """Insert one or more rows at the given row index, shifting existing rows down."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        ws.insert_rows(row, count)
+        save_workbook_safe(wb, file_path)
+        logger.info("Inserted %d row(s) at row %d in '%s' of %s", count, row, sheet, file_path)
+        return {"status": "success", "message": f"Inserted {count} row(s) at row {row}"}
+    finally:
+        wb.close()
+
+
+def delete_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[str, str]:
+    """Delete one or more rows starting at the given row index."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        ws.delete_rows(row, count)
+        save_workbook_safe(wb, file_path)
+        logger.info("Deleted %d row(s) starting at row %d in '%s' of %s", count, row, sheet, file_path)
+        return {"status": "success", "message": f"Deleted {count} row(s) starting at row {row}"}
+    finally:
+        wb.close()
+
+
+def insert_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[str, str]:
+    """Insert one or more columns at the given column index, shifting existing columns right."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        ws.insert_cols(col, count)
+        save_workbook_safe(wb, file_path)
+        logger.info("Inserted %d column(s) at column %d in '%s' of %s", count, col, sheet, file_path)
+        return {"status": "success", "message": f"Inserted {count} column(s) at column {col}"}
+    finally:
+        wb.close()
+
+
+def delete_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[str, str]:
+    """Delete one or more columns starting at the given column index."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        ws.delete_cols(col, count)
+        save_workbook_safe(wb, file_path)
+        logger.info("Deleted %d column(s) starting at column %d in '%s' of %s", count, col, sheet, file_path)
+        return {"status": "success", "message": f"Deleted {count} column(s) starting at column {col}"}
+    finally:
+        wb.close()
+
+
+def set_print_area(file_path: str, sheet: str, print_area: str) -> dict[str, str]:
+    """Set the print area for a worksheet (e.g. 'A1:H20')."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        ws.print_area = print_area
+        save_workbook_safe(wb, file_path)
+        logger.info("Set print area to %s in '%s' of %s", print_area, sheet, file_path)
+        return {"status": "success", "message": f"Print area set to {print_area}"}
+    finally:
+        wb.close()
+
+
+def set_page_setup(
+    file_path: str,
+    sheet: str,
+    orientation: str = "portrait",
+    paper_size: int = 1,
+    fit_to_width: int | None = None,
+    fit_to_height: int | None = None,
+) -> dict[str, object]:
+    """Configure page setup: orientation, paper size, and fit-to-page scaling."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        ws.page_setup.orientation = orientation
+        ws.page_setup.paperSize = paper_size
+        if fit_to_width is not None:
+            ws.page_setup.fitToWidth = fit_to_width
+        if fit_to_height is not None:
+            ws.page_setup.fitToHeight = fit_to_height
+        if fit_to_width is not None or fit_to_height is not None:
+            ws.sheet_properties.pageSetUpPr.fitToPage = True
+        save_workbook_safe(wb, file_path)
+        logger.info("Configured page setup in '%s' of %s", sheet, file_path)
+        return {
+            "status": "success",
+            "message": "Page setup configured",
+            "orientation": orientation,
+            "paper_size": paper_size,
+            "fit_to_width": fit_to_width,
+            "fit_to_height": fit_to_height,
+        }
+    finally:
+        wb.close()
+
+
+def group_rows(
+    file_path: str, sheet: str, start_row: int, end_row: int, outline_level: int = 1, hidden: bool = False
+) -> dict[str, str]:
+    """Group rows by setting their outline level and optional hidden state."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        for row in range(start_row, end_row + 1):
+            ws.row_dimensions[row].outline_level = outline_level
+            ws.row_dimensions[row].hidden = hidden
+        save_workbook_safe(wb, file_path)
+        logger.info("Grouped rows %d-%d at level %d in '%s' of %s", start_row, end_row, outline_level, sheet, file_path)
+        return {"status": "success", "message": f"Grouped rows {start_row}-{end_row} at level {outline_level}"}
+    finally:
+        wb.close()
+
+
+def group_cols(
+    file_path: str, sheet: str, start_col: int, end_col: int, outline_level: int = 1, hidden: bool = False
+) -> dict[str, str]:
+    """Group columns by setting their outline level and optional hidden state."""
+    from openpyxl.utils import get_column_letter
+
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        for col in range(start_col, end_col + 1):
+            letter = get_column_letter(col)
+            ws.column_dimensions[letter].outline_level = outline_level
+            ws.column_dimensions[letter].hidden = hidden
+        save_workbook_safe(wb, file_path)
+        logger.info(
+            "Grouped columns %d-%d at level %d in '%s' of %s",
+            start_col,
+            end_col,
+            outline_level,
+            sheet,
+            file_path,
+        )
+        return {"status": "success", "message": f"Grouped columns {start_col}-{end_col} at level {outline_level}"}
+    finally:
+        wb.close()
+
+
+def ungroup_rows(file_path: str, sheet: str, start_row: int, end_row: int) -> dict[str, str]:
+    """Ungroup rows by resetting their outline level to 0 and unhiding them."""
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        for row in range(start_row, end_row + 1):
+            ws.row_dimensions[row].outline_level = 0
+            ws.row_dimensions[row].hidden = False
+        save_workbook_safe(wb, file_path)
+        logger.info("Ungrouped rows %d-%d in '%s' of %s", start_row, end_row, sheet, file_path)
+        return {"status": "success", "message": f"Ungrouped rows {start_row}-{end_row}"}
+    finally:
+        wb.close()
+
+
+def ungroup_cols(file_path: str, sheet: str, start_col: int, end_col: int) -> dict[str, str]:
+    """Ungroup columns by resetting their outline level to 0 and unhiding them."""
+    from openpyxl.utils import get_column_letter
+
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet)
+        for col in range(start_col, end_col + 1):
+            letter = get_column_letter(col)
+            ws.column_dimensions[letter].outline_level = 0
+            ws.column_dimensions[letter].hidden = False
+        save_workbook_safe(wb, file_path)
+        logger.info("Ungrouped columns %d-%d in '%s' of %s", start_col, end_col, sheet, file_path)
+        return {"status": "success", "message": f"Ungrouped columns {start_col}-{end_col}"}
+    finally:
+        wb.close()

@@ -118,34 +118,43 @@ def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
 def rename_sheet(file_path: str, old_name: str, new_name: str) -> str:
     """Rename a worksheet."""
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, old_name)
-    ws.title = new_name
-    save_workbook_safe(wb, file_path)
-    logger.info("Renamed sheet '%s' to '%s' in %s", old_name, new_name, file_path)
-    return f"Sheet '{old_name}' renamed to '{new_name}'."
+    try:
+        ws = get_sheet(wb, old_name)
+        ws.title = new_name
+        save_workbook_safe(wb, file_path)
+        logger.info("Renamed sheet '%s' to '%s' in %s", old_name, new_name, file_path)
+        return f"Sheet '{old_name}' renamed to '{new_name}'."
+    finally:
+        wb.close()
 
 
 def delete_sheet(file_path: str, sheet_name: str) -> str:
     """Delete a worksheet. Raises ValueError if it's the only sheet."""
     wb = load_workbook_safe(file_path)
-    if len(wb.sheetnames) == 1:
-        raise ValueError("Cannot delete the only sheet in the workbook.")
-    ws = get_sheet(wb, sheet_name)
-    del wb[ws.title]
-    save_workbook_safe(wb, file_path)
-    logger.info("Deleted sheet '%s' from %s", sheet_name, file_path)
-    return f"Sheet '{sheet_name}' deleted."
+    try:
+        if len(wb.sheetnames) == 1:
+            raise ValueError("Cannot delete the only sheet in the workbook.")
+        ws = get_sheet(wb, sheet_name)
+        del wb[ws.title]
+        save_workbook_safe(wb, file_path)
+        logger.info("Deleted sheet '%s' from %s", sheet_name, file_path)
+        return f"Sheet '{sheet_name}' deleted."
+    finally:
+        wb.close()
 
 
 def copy_sheet(file_path: str, source_sheet: str, new_name: str) -> str:
     """Copy a sheet within the same workbook."""
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, source_sheet)
-    target = wb.copy_worksheet(ws)
-    target.title = new_name
-    save_workbook_safe(wb, file_path)
-    logger.info("Copied sheet '%s' as '%s' in %s", source_sheet, new_name, file_path)
-    return f"Sheet '{source_sheet}' copied as '{new_name}'."
+    try:
+        ws = get_sheet(wb, source_sheet)
+        target = wb.copy_worksheet(ws)
+        target.title = new_name
+        save_workbook_safe(wb, file_path)
+        logger.info("Copied sheet '%s' as '%s' in %s", source_sheet, new_name, file_path)
+        return f"Sheet '{source_sheet}' copied as '{new_name}'."
+    finally:
+        wb.close()
 
 
 def write_multi_sheet(
@@ -200,3 +209,32 @@ def write_multi_sheet(
     save_workbook_safe(wb, file_path)
     logger.info("Created multi-sheet workbook: %s with %d sheets", file_path, len(sheets))
     return WriteMultiSheetResult(file_path=file_path, sheets_created=summary)
+
+
+def hide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
+    """Hide a worksheet. Raises ValueError if it's the last visible sheet."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        visible_count = sum(1 for s in wb.worksheets if s.sheet_state == "visible")
+        if visible_count <= 1 and ws.sheet_state == "visible":
+            raise ValueError("Cannot hide the last visible sheet in the workbook.")
+        ws.sheet_state = "hidden"
+        save_workbook_safe(wb, file_path)
+        logger.info("Hid sheet '%s' in %s", sheet_name, file_path)
+        return {"status": "success", "message": f"Sheet '{sheet_name}' is now hidden"}
+    finally:
+        wb.close()
+
+
+def unhide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
+    """Unhide a hidden worksheet."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        ws.sheet_state = "visible"
+        save_workbook_safe(wb, file_path)
+        logger.info("Unhid sheet '%s' in %s", sheet_name, file_path)
+        return {"status": "success", "message": f"Sheet '{sheet_name}' is now visible"}
+    finally:
+        wb.close()

@@ -26,6 +26,21 @@ FILTER_OPERATORS = {"==", "!=", ">", "<", ">=", "<=", "contains", "startswith", 
 AGGREGATE_OPERATIONS = {"sum", "mean", "count", "min", "max", "median", "std"}
 
 
+def _resolve_col(df: pd.DataFrame, col: str) -> str:
+    """Resolve a column letter (e.g. 'A') or header name to a DataFrame column name."""
+    if col in df.columns:
+        return col
+    if col.isalpha() and len(col) <= 3:
+        value = 0
+        for ch in col.upper():
+            value = value * 26 + (ord(ch) - ord("A") + 1)
+        idx = value - 1
+        all_cols = list(df.columns)
+        if 0 <= idx < len(all_cols):
+            return all_cols[idx]
+    raise ValueError(f"Column '{col}' not found. Available: {list(df.columns)}")
+
+
 def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
 
     return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
@@ -153,6 +168,7 @@ def sort_data(
 def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> ColumnStats:
     """Compute descriptive statistics for a numeric column."""
     df = _read_sheet_df(file_path, sheet_name, has_header)
+    column = _resolve_col(df, column)
     if column not in df.columns:
         raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
 
@@ -245,6 +261,32 @@ def find_duplicates(
     }
 
 
+def _resolve_column_index(ws, header_row: int, col_ref: str) -> int:
+    """Resolve a column reference to a 1-based column index.
+
+    Accepts Excel column letters (e.g. "A", "BC") or header names (e.g. "Name", "Amount").
+    """
+    from openpyxl.utils import column_index_from_string
+
+    # Try as Excel column letter if purely alphabetic and 1-3 chars
+    if col_ref.isalpha() and len(col_ref) <= 3:
+        try:
+            return column_index_from_string(col_ref.upper())
+        except ValueError:
+            pass
+
+    # Fall back to header name scan
+    header_cells = list(ws.iter_rows(min_row=header_row, max_row=header_row))[0]
+    available: list[str] = []
+    for cell in header_cells:
+        if cell.value is not None:
+            header_name = str(cell.value)
+            available.append(header_name)
+            if header_name == col_ref:
+                return cell.column
+    raise ValueError(f"Column '{col_ref}' not found as a column letter or header name. Available headers: {available}")
+
+
 def vlookup_helper(
     lookup_file: str,
     data_file: str,
@@ -259,12 +301,11 @@ def vlookup_helper(
     header_row: int = 1,
 ) -> dict[str, int | list[dict[str, object]] | str | None]:
     """Cross-file VLOOKUP-like join with optional fuzzy string matching."""
-    from openpyxl.utils import column_index_from_string
 
     # Load lookup workbook
     lookup_wb = load_workbook_safe(lookup_file, read_only=True)
     lookup_ws = get_sheet(lookup_wb, lookup_sheet)
-    lookup_col_idx = column_index_from_string(lookup_column)
+    lookup_col_idx = _resolve_column_index(lookup_ws, header_row, lookup_column)
 
     # Extract lookup values (skip header row)
     lookup_values: list[tuple[int, str | int | float | None]] = []
@@ -280,8 +321,8 @@ def vlookup_helper(
     # Load data workbook
     data_wb = load_workbook_safe(data_file, read_only=True)
     data_ws = get_sheet(data_wb, data_sheet)
-    data_key_idx = column_index_from_string(data_key_column)
-    return_col_idxs = [column_index_from_string(c) for c in data_return_columns]
+    data_key_idx = _resolve_column_index(data_ws, header_row, data_key_column)
+    return_col_idxs = [_resolve_column_index(data_ws, header_row, c) for c in data_return_columns]
 
     # Extract header names from the data file
     header_cells = list(data_ws.iter_rows(min_row=header_row, max_row=header_row))[0]
@@ -388,4 +429,73 @@ def vlookup_helper(
         "total": len(results),
         "results": results,
         "output_file": output_file,
+    }
+
+
+def profile_data(
+    file_path: str,
+    sheet: str | None = None,
+    data_range: str | None = None,
+) -> dict:
+    """Generate a comprehensive profile of all columns in a sheet.
+
+    For each column computes dtype, count, null_count, unique_count, sample values,
+    and type-specific statistics (numeric: min/max/mean/median/std;
+    string/object: min_length/max_length/most_common top 3).
+    """
+    validate_file_path(file_path)
+    sheet_name = sheet or "Sheet1"
+    df = read_sheet_df(file_path, sheet_name, header_row=1)
+
+    if data_range:
+        from openpyxl.utils import range_boundaries
+
+        min_col, min_row, max_col, max_row = range_boundaries(data_range)
+        # Adjust to 0-based DataFrame indices (row 1 is header, data starts at row 2)
+        row_start = min_row - 2  # header is row 1
+        row_end = max_row - 1
+        col_start = min_col - 1
+        col_end = max_col
+        df = df.iloc[max(row_start, 0) : row_end, col_start:col_end]
+
+    columns_profile: list[dict] = []
+    for col_name in df.columns:
+        col = df[col_name]
+        info: dict = {
+            "name": str(col_name),
+            "dtype": str(col.dtype),
+            "count": int(col.count()),
+            "null_count": int(col.isna().sum()),
+            "unique_count": int(col.nunique()),
+        }
+
+        non_null = col.dropna()
+        info["sample_values"] = [str(v) for v in non_null.head(3).tolist()]
+
+        if pd.api.types.is_numeric_dtype(col):
+            info["min"] = float(non_null.min()) if len(non_null) else None
+            info["max"] = float(non_null.max()) if len(non_null) else None
+            info["mean"] = float(non_null.mean()) if len(non_null) else None
+            info["median"] = float(non_null.median()) if len(non_null) else None
+            info["std"] = float(non_null.std()) if len(non_null) > 1 else None
+        else:
+            str_vals = non_null.astype(str)
+            if len(str_vals):
+                lengths = str_vals.str.len()
+                info["min_length"] = int(lengths.min())
+                info["max_length"] = int(lengths.max())
+                top3 = non_null.value_counts().head(3)
+                info["most_common"] = [{"value": str(v), "count": int(c)} for v, c in top3.items()]
+            else:
+                info["min_length"] = None
+                info["max_length"] = None
+                info["most_common"] = []
+
+        columns_profile.append(info)
+
+    return {
+        "status": "success",
+        "row_count": len(df),
+        "column_count": len(df.columns),
+        "columns": columns_profile,
     }

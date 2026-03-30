@@ -16,7 +16,7 @@ from openpyxl.chart import (
     ScatterChart,
     StockChart,
 )
-from openpyxl.utils import range_boundaries
+from openpyxl.utils import get_column_letter, range_boundaries
 
 from mcp_server.models.charts import ChartInfo
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
@@ -186,15 +186,19 @@ def list_charts(file_path: str, sheet_name: str) -> list[ChartInfo]:
         ws = get_sheet(wb, sheet_name)
         result: list[ChartInfo] = []
         for chart in ws._charts:
+            position = "unknown"
+            if hasattr(chart, "anchor") and chart.anchor is not None:
+                anchor_from = getattr(chart.anchor, "_from", None)
+                if anchor_from is not None:
+                    col = getattr(anchor_from, "col", None)
+                    row = getattr(anchor_from, "row", None)
+                    if col is not None and row is not None:
+                        position = f"{get_column_letter(col + 1)}{row + 1}"
             result.append(
                 ChartInfo(
                     title=_safe_chart_title(chart.title),
                     type=type(chart).__name__,
-                    position=(
-                        getattr(chart, "anchor", None) and str(chart.anchor._from)
-                        if hasattr(chart, "anchor")
-                        else "unknown"
-                    ),
+                    position=position,
                 )
             )
         return result
@@ -363,6 +367,18 @@ def create_combo_chart(
     line_columns: 1-based column indices within the data range for line series.
     x_axis_column: 0-based column offset within the data range for categories.
     """
+    for idx in bar_columns:
+        if idx < 1:
+            raise ValueError(
+                f"bar_columns index {idx} is invalid. Indices are 1-based "
+                f"(relative to the data range). Use 1 for the first data column, 2 for the second, etc."
+            )
+    for idx in line_columns:
+        if idx < 1:
+            raise ValueError(
+                f"line_columns index {idx} is invalid. Indices are 1-based "
+                f"(relative to the data range). Use 1 for the first data column, 2 for the second, etc."
+            )
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)

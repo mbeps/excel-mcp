@@ -420,3 +420,31 @@ def fill_series(
         return {"start_cell": start_cell, "end_cell": end_cell, "count": count, "values_written": values_written}
     finally:
         wb.close()
+
+
+def merge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str, str]:
+    """Merge cells in the given range (e.g. 'A1:D1')."""
+    validate_file_path(file_path)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        ws.merge_cells(range_string)
+        save_workbook_safe(wb, file_path)
+        logger.info("Merged cells %s in %s!%s", range_string, sheet_name, file_path)
+        return {"status": "success", "message": f"Merged cells {range_string}"}
+    finally:
+        wb.close()
+
+
+def unmerge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str, str]:
+    """Unmerge previously merged cells in the given range (e.g. 'A1:D1')."""
+    validate_file_path(file_path)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        ws.unmerge_cells(range_string)
+        save_workbook_safe(wb, file_path)
+        logger.info("Unmerged cells %s in %s!%s", range_string, sheet_name, file_path)
+        return {"status": "success", "message": f"Unmerged cells {range_string}"}
+    finally:
+        wb.close()

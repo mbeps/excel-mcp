@@ -36,34 +36,40 @@ def set_formula(
         formula = f"={formula}"
 
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
-    if is_array:
-        range_ref = target_range or cell_ref
-        ws[cell_ref] = ArrayFormula(range_ref, formula)
-        save_workbook_safe(wb, file_path)
-        logger.info("Set array formula on %s!%s: %s", sheet_name, range_ref, formula)
-        return f"Array formula {formula} applied to {range_ref} in '{sheet_name}'."
-    else:
-        ws[cell_ref] = formula
-        save_workbook_safe(wb, file_path)
-        logger.info("Set formula on %s!%s: %s", sheet_name, cell_ref, formula)
-        return f"Formula {formula} set on {cell_ref} in '{sheet_name}'."
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if is_array:
+            range_ref = target_range or cell_ref
+            ws[cell_ref] = ArrayFormula(range_ref, formula)
+            save_workbook_safe(wb, file_path)
+            logger.info("Set array formula on %s!%s: %s", sheet_name, range_ref, formula)
+            return f"Array formula {formula} applied to {range_ref} in '{sheet_name}'."
+        else:
+            ws[cell_ref] = formula
+            save_workbook_safe(wb, file_path)
+            logger.info("Set formula on %s!%s: %s", sheet_name, cell_ref, formula)
+            return f"Formula {formula} set on {cell_ref} in '{sheet_name}'."
+    finally:
+        wb.close()
 
 
 def set_formulas_batch(file_path: str, sheet_name: str, formulas: dict[str, str]) -> str:
     """Set multiple formulas at once. Keys are cell refs, values are formulas."""
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
+    try:
+        ws = get_sheet(wb, sheet_name)
 
-    for cell_ref, formula in formulas.items():
-        if not formula.startswith("="):
-            formula = f"={formula}"
-        ws[cell_ref] = formula
+        for cell_ref, formula in formulas.items():
+            if not formula.startswith("="):
+                formula = f"={formula}"
+            ws[cell_ref] = formula
 
-    save_workbook_safe(wb, file_path)
-    count = len(formulas)
-    logger.info("Set %d formulas in %s!%s", count, file_path, sheet_name)
-    return f"Set {count} formulas in '{sheet_name}'."
+        save_workbook_safe(wb, file_path)
+        count = len(formulas)
+        logger.info("Set %d formulas in %s!%s", count, file_path, sheet_name)
+        return f"Set {count} formulas in '{sheet_name}'."
+    finally:
+        wb.close()
 
 
 def get_formula_value(
@@ -157,6 +163,29 @@ def get_formula_precedents(
         wb.close()
 
 
+def _cell_in_range(cell_ref: str, range_ref: str) -> bool:
+    """Check if a cell falls within an A1-style range (e.g. 'B2' in 'B1:B10')."""
+    from openpyxl.utils import column_index_from_string, coordinate_from_string
+
+    parts = range_ref.split(":")
+    if len(parts) != 2:
+        return False
+
+    col_str, row = coordinate_from_string(cell_ref)
+    col = column_index_from_string(col_str)
+
+    start_col_str, start_row = coordinate_from_string(parts[0])
+    start_col = column_index_from_string(start_col_str)
+
+    end_col_str, end_row = coordinate_from_string(parts[1])
+    end_col = column_index_from_string(end_col_str)
+
+    return bool(
+        min(start_col, end_col) <= col <= max(start_col, end_col)
+        and min(start_row, end_row) <= row <= max(start_row, end_row)
+    )
+
+
 def get_formula_dependents(
     file_path: str,
     sheet_name: str,
@@ -170,15 +199,23 @@ def get_formula_dependents(
         ws = get_sheet(wb, sheet_name)
         cell_upper = cell_ref.upper().replace("$", "")
 
+        range_pattern = re.compile(r"[A-Z]{1,3}\d+:[A-Z]{1,3}\d+")
+
         dependents: list[dict] = []
         for row in ws.iter_rows():
             for cell in row:
                 if not isinstance(cell.value, str) or not cell.value.startswith("="):
                     continue
                 formula_clean = cell.value.upper().replace("$", "")
-                # Look for the cell ref as a whole token (not part of a larger range ref)
+                # Check for literal cell reference match
                 if re.search(r"(?<![A-Z0-9])" + re.escape(cell_upper) + r"(?![A-Z0-9])", formula_clean):
                     dependents.append({"cell": cell.coordinate, "formula": cell.value})
+                    continue
+                # Check if the target cell falls within any range references
+                for rng in range_pattern.findall(formula_clean):
+                    if _cell_in_range(cell_upper, rng):
+                        dependents.append({"cell": cell.coordinate, "formula": cell.value})
+                        break
 
         return {"cell": cell_ref, "dependents": dependents, "count": len(dependents)}
     finally:

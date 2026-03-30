@@ -12,6 +12,7 @@ dependencies = [
     "python-calamine>=0.3.0",
     "numpy-financial>=1.0.0",
     "scipy>=1.14.0",
+    "statsmodels>=0.14.0",
     "pillow>=10.0",
     "pytest-cov>=7.1.0",
 ]

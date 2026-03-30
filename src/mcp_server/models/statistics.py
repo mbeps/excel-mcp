@@ -19,7 +19,7 @@ class ColumnStatResult(TypedDict, total=False):
     message: str
 
 
-class RegressionResult(TypedDict):
+class RegressionResult(TypedDict, total=False):
     """Result returned by run_regression."""
 
     r_squared: float
@@ -28,3 +28,14 @@ class RegressionResult(TypedDict):
     ss_residual: float
     ss_total: float
     output_sheet: str
+    # Extended stats (present when statsmodels is available)
+    adjusted_r_squared: float
+    std_errors: list[float]
+    t_values: list[float]
+    p_values: list[float]
+    f_statistic: float
+    f_pvalue: float
+    confidence_intervals: list[list[float]]
+    intercept: float
+    equation: str
+    predictions: list[float]

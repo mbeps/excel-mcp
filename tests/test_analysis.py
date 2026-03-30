@@ -5,6 +5,7 @@ from mcp_server.tools.analysis import (
     column_statistics,
     filter_data_advanced,
     find_duplicates,
+    profile_data,
     sort_data,
 )
 from mcp_server.tools.cell_ops import read_cell
@@ -400,3 +401,21 @@ def test_filter_data_advanced_single_row(tmp_path) -> None:
 
     res_no_match = filter_data_advanced(path, "Sheet1", conditions=[{"column": "Age", "operator": "==", "value": 99}])
     assert res_no_match["rows"] == 0
+
+
+def test_profile_data(sample_xlsx: str) -> None:
+    result = profile_data(sample_xlsx)
+    assert result["status"] == "success"
+    assert result["row_count"] > 0
+    assert result["column_count"] > 0
+    assert len(result["columns"]) > 0
+    col = result["columns"][0]
+    assert "dtype" in col
+    assert "count" in col
+    assert "null_count" in col
+    assert "unique_count" in col
+
+
+def test_profile_data_with_sheet(sample_xlsx: str) -> None:
+    result = profile_data(sample_xlsx, sheet="Sheet1")
+    assert result["status"] == "success"

@@ -16,12 +16,14 @@ import mcp_server.tools.cleaning as _cleaning
 import mcp_server.tools.comments as _comments
 import mcp_server.tools.conditional_formatting as _cond_fmt
 import mcp_server.tools.csv_ops as _csv_ops
+import mcp_server.tools.custom_code as _custom_code
 import mcp_server.tools.data_validation as _data_val
 import mcp_server.tools.doc_properties as _doc_props
 import mcp_server.tools.financial as _financial
 import mcp_server.tools.formatting as _formatting
 import mcp_server.tools.formulas as _formulas
 import mcp_server.tools.hyperlinks as _hyperlinks
+import mcp_server.tools.images as _images
 import mcp_server.tools.multi_file as _multi_file
 import mcp_server.tools.named_ranges as _named_ranges
 import mcp_server.tools.pivot_etl as _pivot_etl
@@ -48,7 +50,6 @@ from mcp_server.models.pivot_etl import ChunkReadResult
 from mcp_server.models.scenarios import ScenarioInfo
 from mcp_server.models.solver import SolverResult
 from mcp_server.models.statistics import RegressionResult
-from mcp_server.tools.scenarios import ScenarioApplyResult
 from mcp_server.models.tables import TableInfo
 from mcp_server.models.workbook import (
     SheetDefinition,
@@ -57,6 +58,7 @@ from mcp_server.models.workbook import (
     WorkbookMetadata,
     WriteMultiSheetResult,
 )
+from mcp_server.tools.scenarios import ScenarioApplyResult
 from mcp_server.utils.logger import configure_logging
 
 mcp: FastMCP = FastMCP("excel-mcp-server")
@@ -123,16 +125,18 @@ def write_multi_sheet(file_path: str, sheets: list[SheetDefinition]) -> WriteMul
 
 @mcp.tool()
 def sheet_management(
-    action: Literal["rename", "delete", "copy"],
+    action: Literal["rename", "delete", "copy", "hide", "unhide"],
     file_path: str,
     sheet_name: str,
     new_name: str | None = None,
-) -> str:
+) -> str | dict:
     """Manage worksheets within a workbook.
 
     action="rename": Rename a sheet. Requires: new_name.
     action="delete": DESTRUCTIVE. Delete a sheet. Raises if only sheet.
     action="copy": Copy a sheet. Requires: new_name for the copy.
+    action="hide": Hide a sheet. Raises if it's the last visible sheet.
+    action="unhide": Unhide a hidden sheet.
     """
     if action == "rename":
         if not new_name:
@@ -144,6 +148,10 @@ def sheet_management(
         if not new_name:
             raise ValueError("new_name is required for action='copy'.")
         return _workbook.copy_sheet(file_path, sheet_name, new_name)
+    if action == "hide":
+        return _workbook.hide_sheet(file_path, sheet_name)
+    if action == "unhide":
+        return _workbook.unhide_sheet(file_path, sheet_name)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -207,7 +215,7 @@ def read_cells(
 
 @mcp.tool()
 def write_cells(
-    mode: Literal["single", "range", "series"],
+    mode: Literal["single", "range", "series", "merge", "unmerge"],
     file_path: str,
     sheet_name: str,
     cell_ref: str | None = None,
@@ -219,12 +227,15 @@ def write_cells(
     step: float | str = 1,
     direction: str = "down",
     start_value: float | int | None = None,
+    range_string: str | None = None,
 ) -> str | dict:
     """Write data to cells.
 
     mode="single": Write one cell. Requires: cell_ref, value.
     mode="range": Write 2D array. Requires: start_cell, data.
     mode="series": Fill series. Requires: start_cell, count. Optional: series_type, step, direction, start_value.
+    mode="merge": Merge cells. Requires: range_string (e.g. 'A1:D1').
+    mode="unmerge": Unmerge cells. Requires: range_string (e.g. 'A1:D1').
     """
     if mode == "single":
         if cell_ref is None:
@@ -244,6 +255,14 @@ def write_cells(
         return _cell_ops.fill_series(
             file_path, sheet_name, start_cell, series_type, count, step, direction, start_value
         )
+    if mode == "merge":
+        if not range_string:
+            raise ValueError("range_string is required for mode='merge'.")
+        return _cell_ops.merge_cells(file_path, sheet_name, range_string)
+    if mode == "unmerge":
+        if not range_string:
+            raise ValueError("range_string is required for mode='unmerge'.")
+        return _cell_ops.unmerge_cells(file_path, sheet_name, range_string)
     raise ValueError(f"Unknown mode: {mode}")
 
 
@@ -1124,7 +1143,23 @@ def multi_file(
 
 @mcp.tool()
 def worksheet_ops(
-    action: Literal["freeze", "auto_filter", "copy_range_across", "copy_sheet_across", "merge_workbooks"],
+    action: Literal[
+        "freeze",
+        "auto_filter",
+        "copy_range_across",
+        "copy_sheet_across",
+        "merge_workbooks",
+        "insert_rows",
+        "delete_rows",
+        "insert_cols",
+        "delete_cols",
+        "set_print_area",
+        "set_page_setup",
+        "group_rows",
+        "group_cols",
+        "ungroup_rows",
+        "ungroup_cols",
+    ],
     file_path: str | None = None,
     sheet_name: str | None = None,
     cell_ref: str | None = None,
@@ -1142,16 +1177,43 @@ def worksheet_ops(
     source_files: list[str] | None = None,
     output_file: str | None = None,
     conflict_strategy: str = "rename",
+    row: int | None = None,
+    col: int | None = None,
+    count: int | None = None,
+    start_row: int | None = None,
+    end_row: int | None = None,
+    start_col: int | None = None,
+    end_col: int | None = None,
+    outline_level: int | None = None,
+    hidden: bool | None = None,
+    print_area: str | None = None,
+    orientation: str | None = None,
+    paper_size: int | None = None,
+    fit_to_width: int | None = None,
+    fit_to_height: int | None = None,
 ) -> str | dict:
-    """Worksheet operations: freeze panes, auto filter, cross-sheet/workbook operations.
+    """Worksheet operations: freeze panes, auto filter, cross-sheet/workbook ops, row/col management, grouping, print.
 
-    action="freeze": Freeze panes at cell_ref. Requires: file_path, sheet_name. Optional: cell_ref (None to unfreeze).
+    action="freeze": Freeze panes. Requires: file_path, sheet_name. Optional: cell_ref.
     action="auto_filter": Toggle auto-filter. Requires: file_path, sheet_name. Optional: cell_range, remove.
     action="copy_range_across": Copy range between sheets.
         Requires: file_path, source_sheet, source_range, target_sheet.
-        Optional: target_start_cell (default "A1") — top-left cell in target_sheet to paste into.
+        Optional: target_start_cell (default "A1").
     action="copy_sheet_across": Copy sheet between workbooks. Requires: source_file, source_sheet, dest_file.
-    action="merge_workbooks": Merge multiple workbooks. Requires: source_files, output_file.
+    action="merge_workbooks": Merge workbooks. Requires: source_files, output_file.
+    action="insert_rows": Insert rows. Requires: file_path, sheet_name, row. Optional: count.
+    action="delete_rows": Delete rows. Requires: file_path, sheet_name, row. Optional: count.
+    action="insert_cols": Insert columns. Requires: file_path, sheet_name, col. Optional: count.
+    action="delete_cols": Delete columns. Requires: file_path, sheet_name, col. Optional: count.
+    action="set_print_area": Set print area. Requires: file_path, sheet_name, print_area.
+    action="set_page_setup": Configure page setup. Requires: file_path, sheet_name.
+        Optional: orientation, paper_size, fit_to_width, fit_to_height.
+    action="group_rows": Group rows. Requires: file_path, sheet_name, start_row, end_row.
+        Optional: outline_level, hidden.
+    action="group_cols": Group columns. Requires: file_path, sheet_name, start_col, end_col.
+        Optional: outline_level, hidden.
+    action="ungroup_rows": Ungroup rows. Requires: file_path, sheet_name, start_row, end_row.
+    action="ungroup_cols": Ungroup columns. Requires: file_path, sheet_name, start_col, end_col.
     """
     if action == "freeze":
         if file_path is None:
@@ -1199,6 +1261,94 @@ def worksheet_ops(
         if not output_file:
             raise ValueError("output_file is required for action='merge_workbooks'.")
         return _ws_ops.merge_workbooks(source_files, output_file, conflict_strategy)
+    if action == "insert_rows":
+        if file_path is None:
+            raise ValueError("file_path is required for action='insert_rows'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='insert_rows'.")
+        if row is None:
+            raise ValueError("row is required for action='insert_rows'.")
+        return _ws_ops.insert_rows(file_path, sheet_name, row, count or 1)
+    if action == "delete_rows":
+        if file_path is None:
+            raise ValueError("file_path is required for action='delete_rows'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='delete_rows'.")
+        if row is None:
+            raise ValueError("row is required for action='delete_rows'.")
+        return _ws_ops.delete_rows(file_path, sheet_name, row, count or 1)
+    if action == "insert_cols":
+        if file_path is None:
+            raise ValueError("file_path is required for action='insert_cols'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='insert_cols'.")
+        if col is None:
+            raise ValueError("col is required for action='insert_cols'.")
+        return _ws_ops.insert_cols(file_path, sheet_name, col, count or 1)
+    if action == "delete_cols":
+        if file_path is None:
+            raise ValueError("file_path is required for action='delete_cols'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='delete_cols'.")
+        if col is None:
+            raise ValueError("col is required for action='delete_cols'.")
+        return _ws_ops.delete_cols(file_path, sheet_name, col, count or 1)
+    if action == "set_print_area":
+        if file_path is None:
+            raise ValueError("file_path is required for action='set_print_area'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='set_print_area'.")
+        if not print_area:
+            raise ValueError("print_area is required for action='set_print_area'.")
+        return _ws_ops.set_print_area(file_path, sheet_name, print_area)
+    if action == "set_page_setup":
+        if file_path is None:
+            raise ValueError("file_path is required for action='set_page_setup'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='set_page_setup'.")
+        return _ws_ops.set_page_setup(
+            file_path, sheet_name, orientation or "portrait", paper_size or 1, fit_to_width, fit_to_height
+        )
+    if action == "group_rows":
+        if file_path is None:
+            raise ValueError("file_path is required for action='group_rows'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='group_rows'.")
+        if start_row is None:
+            raise ValueError("start_row is required for action='group_rows'.")
+        if end_row is None:
+            raise ValueError("end_row is required for action='group_rows'.")
+        return _ws_ops.group_rows(file_path, sheet_name, start_row, end_row, outline_level or 1, hidden or False)
+    if action == "group_cols":
+        if file_path is None:
+            raise ValueError("file_path is required for action='group_cols'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='group_cols'.")
+        if start_col is None:
+            raise ValueError("start_col is required for action='group_cols'.")
+        if end_col is None:
+            raise ValueError("end_col is required for action='group_cols'.")
+        return _ws_ops.group_cols(file_path, sheet_name, start_col, end_col, outline_level or 1, hidden or False)
+    if action == "ungroup_rows":
+        if file_path is None:
+            raise ValueError("file_path is required for action='ungroup_rows'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='ungroup_rows'.")
+        if start_row is None:
+            raise ValueError("start_row is required for action='ungroup_rows'.")
+        if end_row is None:
+            raise ValueError("end_row is required for action='ungroup_rows'.")
+        return _ws_ops.ungroup_rows(file_path, sheet_name, start_row, end_row)
+    if action == "ungroup_cols":
+        if file_path is None:
+            raise ValueError("file_path is required for action='ungroup_cols'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='ungroup_cols'.")
+        if start_col is None:
+            raise ValueError("start_col is required for action='ungroup_cols'.")
+        if end_col is None:
+            raise ValueError("end_col is required for action='ungroup_cols'.")
+        return _ws_ops.ungroup_cols(file_path, sheet_name, start_col, end_col)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1609,6 +1759,7 @@ def data_cleaner(
     output_file: str | None = None,
     header_row: int = 1,
     fill_missing_strategy: str = "value",
+    fill_value: str | None = None,
 ) -> dict:
     """Batch data cleaning pipeline.
 
@@ -1624,6 +1775,7 @@ def data_cleaner(
         output_file,
         header_row,
         fill_missing_strategy,
+        fill_value,
     )
 
 
@@ -1634,7 +1786,7 @@ def parse_date_column(
     column: str,
     output_column: str | None = None,
     output_format: str = "%Y-%m-%d",
-    dayfirst: bool = True,
+    dayfirst: bool = False,
     header_row: int = 1,
 ) -> dict:
     """Parse mixed date formats in a column and normalise to a standard output format."""
@@ -1688,8 +1840,16 @@ def run_exponential_smoothing(
     new_column_name: str | None = None,
     header_row: int = 1,
     output_file: str | None = None,
+    method: str = "simple",
+    seasonal_periods: int | None = None,
+    forecast_steps: int = 0,
 ) -> dict:
-    """Apply exponential smoothing to a time series and write the result to a new column."""
+    """Apply exponential smoothing to a time series and write the result to a new column.
+
+    method: "simple" (pandas EWM), "holt" (Holt linear trend), "holt_winters" (Holt-Winters seasonal).
+    seasonal_periods: required for holt_winters (e.g. 12 for monthly data).
+    forecast_steps: number of out-of-sample steps to forecast.
+    """
     return _statistical.run_exponential_smoothing(
         file_path,
         sheet_name,
@@ -1697,6 +1857,10 @@ def run_exponential_smoothing(
         alpha,
         new_column_name,
         header_row,
+        method=method,
+        seasonal_periods=seasonal_periods,
+        forecast_steps=forecast_steps,
+        output_file=output_file,
     )
 
 
@@ -1734,6 +1898,60 @@ def run_solver(
         tolerance,
         max_iterations,
     )
+
+
+# ---------------------------------------------------------------------------
+# Data Profiling (standalone)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def profile_data(
+    file_path: str,
+    sheet: str | None = None,
+    data_range: str | None = None,
+) -> dict:
+    """Profile data in a worksheet, returning column statistics, types, null counts, and sample values."""
+    return _analysis.profile_data(file_path, sheet, data_range)
+
+
+# ---------------------------------------------------------------------------
+# Image Insertion (standalone)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def insert_image(
+    file_path: str,
+    sheet: str,
+    image_path: str,
+    cell: str,
+    width: int | None = None,
+    height: int | None = None,
+) -> dict:
+    """Insert an image into a worksheet at the specified cell."""
+    return _images.insert_image(file_path, sheet, image_path, cell, width, height)
+
+
+# ---------------------------------------------------------------------------
+# Custom Code Execution (standalone)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def execute_custom_code(
+    file_path: str,
+    code: str,
+    sheet: str | None = None,
+    output_file: str | None = None,
+) -> dict:
+    """Execute custom Python/pandas code against an Excel file in a sandboxed environment.
+
+    Use this for operations not covered by other tools.
+    The code has access to 'df' (the DataFrame), 'pd' (pandas), and 'np' (numpy).
+    Set 'result' variable to return data.
+    """
+    return _custom_code.execute_custom_code(file_path, code, sheet, output_file)
 
 
 # ---------------------------------------------------------------------------

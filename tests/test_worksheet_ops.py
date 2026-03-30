@@ -6,9 +6,19 @@ import pytest
 from mcp_server.tools.worksheet_ops import (
     copy_range_across_sheets,
     copy_sheet_across_workbooks,
+    delete_cols,
+    delete_rows,
     freeze_panes,
+    group_cols,
+    group_rows,
+    insert_cols,
+    insert_rows,
     merge_workbooks,
     set_auto_filter,
+    set_page_setup,
+    set_print_area,
+    ungroup_cols,
+    ungroup_rows,
 )
 
 
@@ -228,3 +238,143 @@ def test_merge_workbooks_overwrite_conflict(tmp_path) -> None:
     wb_out = openpyxl.load_workbook(out)
     assert wb_out["Sheet1"]["A1"].value == "from_f2"
     wb_out.close()
+
+
+# ── insert / delete rows & columns ─────────────────────────────────────────────
+
+
+def test_insert_rows(sample_xlsx: str) -> None:
+    result = insert_rows(sample_xlsx, "Sheet1", row=2, count=3)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    # Header row stays at row 1; original row 2 ("Alice") is now at row 5
+    assert ws.cell(row=1, column=1).value == "Name"
+    assert ws.cell(row=2, column=1).value is None  # inserted blank row
+    assert ws.cell(row=5, column=1).value == "Alice"
+    wb.close()
+
+
+def test_delete_rows(sample_xlsx: str) -> None:
+    result = delete_rows(sample_xlsx, "Sheet1", row=2, count=1)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    # Row 2 ("Alice") deleted; "Bob" is now at row 2
+    assert ws.cell(row=2, column=1).value == "Bob"
+    wb.close()
+
+
+def test_insert_cols(sample_xlsx: str) -> None:
+    result = insert_cols(sample_xlsx, "Sheet1", col=2, count=2)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    # Column A ("Name") untouched; original col B ("Age") shifted to col D
+    assert ws.cell(row=1, column=1).value == "Name"
+    assert ws.cell(row=1, column=2).value is None  # inserted blank col
+    assert ws.cell(row=1, column=4).value == "Age"
+    wb.close()
+
+
+def test_delete_cols(sample_xlsx: str) -> None:
+    result = delete_cols(sample_xlsx, "Sheet1", col=2, count=1)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    # Column B ("Age") deleted; "City" is now column B
+    assert ws.cell(row=1, column=1).value == "Name"
+    assert ws.cell(row=1, column=2).value == "City"
+    wb.close()
+
+
+# ── print area & page setup ────────────────────────────────────────────────────
+
+
+def test_set_print_area(sample_xlsx: str) -> None:
+    result = set_print_area(sample_xlsx, "Sheet1", "A1:D10")
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    assert "A" in wb["Sheet1"].print_area
+    assert "D" in wb["Sheet1"].print_area
+    assert "10" in wb["Sheet1"].print_area
+    wb.close()
+
+
+def test_set_page_setup(sample_xlsx: str) -> None:
+    result = set_page_setup(sample_xlsx, "Sheet1", orientation="landscape", paper_size=1)
+    assert result["status"] == "success"
+    assert result["orientation"] == "landscape"
+    assert result["paper_size"] == 1
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    assert wb["Sheet1"].page_setup.orientation == "landscape"
+    wb.close()
+
+
+def test_set_page_setup_fit_to_page(sample_xlsx: str) -> None:
+    result = set_page_setup(sample_xlsx, "Sheet1", fit_to_width=1, fit_to_height=1)
+    assert result["status"] == "success"
+    assert result["fit_to_width"] == 1
+    assert result["fit_to_height"] == 1
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    assert ws.page_setup.fitToWidth == 1
+    assert ws.page_setup.fitToHeight == 1
+    assert ws.sheet_properties.pageSetUpPr.fitToPage is True
+    wb.close()
+
+
+# ── group / ungroup rows & columns ─────────────────────────────────────────────
+
+
+def test_group_rows(sample_xlsx: str) -> None:
+    result = group_rows(sample_xlsx, "Sheet1", start_row=2, end_row=5, outline_level=1)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    for row in range(2, 6):
+        assert ws.row_dimensions[row].outline_level == 1
+    wb.close()
+
+
+def test_group_cols(sample_xlsx: str) -> None:
+    result = group_cols(sample_xlsx, "Sheet1", start_col=2, end_col=4, outline_level=1)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    for letter in ["B", "C", "D"]:
+        assert ws.column_dimensions[letter].outline_level == 1
+    wb.close()
+
+
+def test_ungroup_rows(sample_xlsx: str) -> None:
+    group_rows(sample_xlsx, "Sheet1", start_row=2, end_row=5, outline_level=1)
+    result = ungroup_rows(sample_xlsx, "Sheet1", start_row=2, end_row=5)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    for row in range(2, 6):
+        assert ws.row_dimensions[row].outline_level == 0
+    wb.close()
+
+
+def test_ungroup_cols(sample_xlsx: str) -> None:
+    group_cols(sample_xlsx, "Sheet1", start_col=2, end_col=4, outline_level=1)
+    result = ungroup_cols(sample_xlsx, "Sheet1", start_col=2, end_col=4)
+    assert result["status"] == "success"
+
+    wb = openpyxl.load_workbook(sample_xlsx)
+    ws = wb["Sheet1"]
+    for letter in ["B", "C", "D"]:
+        assert ws.column_dimensions[letter].outline_level == 0
+    wb.close()

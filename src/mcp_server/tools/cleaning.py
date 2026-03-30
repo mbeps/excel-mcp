@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from logging import Logger
 
 import pandas as pd
@@ -99,13 +100,17 @@ def _remove_empty_columns(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.
 def _normalize_text(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataFrame, int]:
     count = 0
     for col in target_cols:
-        for idx in df.index:
-            val = df.at[idx, col]
-            if isinstance(val, str):
-                normalized = re.sub(r"\s+", " ", val.lower().strip())
-                if val != normalized:
-                    df.at[idx, col] = normalized
-                    count += 1
+        if df[col].dtype is not object and not isinstance(df[col].dtype, pd.StringDtype):
+            continue
+        original = df[col].copy()
+        # Vectorised: strip whitespace, lowercase, collapse internal whitespace
+        cleaned = df[col].astype(str).where(df[col].notna(), other=pd.NA)
+        cleaned = cleaned.str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
+        # Restore non-string / NA values
+        cleaned = cleaned.where(original.notna(), other=original)
+        changed = (original != cleaned) & original.notna()
+        count += int(changed.sum())
+        df[col] = cleaned
     return df, count
 
 
@@ -139,24 +144,26 @@ def _remove_duplicates(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.Dat
     return df, before - len(df)
 
 
-def _fill_missing(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataFrame, int]:
+def _fill_missing(df: pd.DataFrame, target_cols: list[str], fill_value: str = "") -> tuple[pd.DataFrame, int]:
     count = 0
     for col in target_cols:
-        # Convert column to object dtype so we can safely assign "N/A"
+        # Convert column to object dtype so we can safely assign fill_value
         if df[col].dtype != object:
             df[col] = df[col].astype(object)
         for idx in df.index:
             val = df.at[idx, col]
             if pd.isna(val) or (isinstance(val, str) and val.strip() == ""):
-                df.at[idx, col] = "N/A"
+                df.at[idx, col] = fill_value
                 count += 1
     return df, count
 
 
-def _fill_missing_with_strategy(df: pd.DataFrame, target_cols: list[str], strategy: str) -> tuple[pd.DataFrame, int]:
+def _fill_missing_with_strategy(
+    df: pd.DataFrame, target_cols: list[str], strategy: str, fill_value: str = ""
+) -> tuple[pd.DataFrame, int]:
     """Fill missing values using a named strategy."""
     if strategy == "value":
-        return _fill_missing(df, target_cols)
+        return _fill_missing(df, target_cols, fill_value=fill_value)
 
     count = 0
     if strategy == "ffill":
@@ -200,14 +207,13 @@ def _fill_missing_with_strategy(df: pd.DataFrame, target_cols: list[str], strate
     return df, count
 
 
-_OPERATION_MAP = {
+_OPERATION_MAP: dict[str, Callable[[pd.DataFrame, list[str]], tuple[pd.DataFrame, int]]] = {
     "trim_whitespace": _trim_whitespace,
     "remove_empty_rows": _remove_empty_rows,
     "remove_empty_columns": _remove_empty_columns,
     "normalize_text": _normalize_text,
     "fix_numbers": _fix_numbers,
     "remove_duplicates": _remove_duplicates,
-    "fill_missing": _fill_missing,
 }
 
 
@@ -250,13 +256,15 @@ def data_cleaner(
     output_file: str | None = None,
     header_row: int = 1,
     fill_missing_strategy: str = "value",
+    fill_value: str | None = None,
 ) -> dict[str, object]:
     """Run a configurable data cleaning pipeline on a sheet."""
     validate_file_path(file_path)
 
     ops = operations if operations is not None else list(ALL_OPERATIONS)
+    valid_ops = set(ALL_OPERATIONS)
     for op in ops:
-        if op not in _OPERATION_MAP:
+        if op not in valid_ops:
             raise ValueError(f"Unknown operation '{op}'. Allowed: {ALL_OPERATIONS}")
 
     df = read_sheet_df(file_path, sheet_name, header_row)
@@ -273,8 +281,9 @@ def data_cleaner(
         if not target:
             changes[op] = 0
             continue
-        if op == "fill_missing" and fill_missing_strategy != "value":
-            df, count = _fill_missing_with_strategy(df, target, fill_missing_strategy)
+        if op == "fill_missing":
+            resolved_fill = fill_value if fill_value is not None else ""
+            df, count = _fill_missing_with_strategy(df, target, fill_missing_strategy, fill_value=resolved_fill)
         else:
             df, count = _OPERATION_MAP[op](df, target)
         changes[op] = count
@@ -315,20 +324,23 @@ def data_cleaner(
         ws = wb.active
         ws.title = sheet_name
 
-    # Write headers
-    for c_idx, col_name in enumerate(df.columns, start=1):
-        ws.cell(row=1, column=c_idx, value=col_name)
+    try:
+        # Write headers
+        for c_idx, col_name in enumerate(df.columns, start=1):
+            ws.cell(row=1, column=c_idx, value=col_name)
 
-    # Write data
-    for r_idx, row_data in enumerate(df.values.tolist(), start=2):
-        for c_idx, val in enumerate(row_data, start=1):
-            # Convert numpy types to native Python for openpyxl
-            if hasattr(val, "item"):
-                val = val.item()
-            ws.cell(row=r_idx, column=c_idx, value=val)
+        # Write data
+        for r_idx, row_data in enumerate(df.values.tolist(), start=2):
+            for c_idx, val in enumerate(row_data, start=1):
+                # Convert numpy types to native Python for openpyxl
+                if hasattr(val, "item"):
+                    val = val.item()
+                ws.cell(row=r_idx, column=c_idx, value=val)
 
-    save_workbook_safe(wb, save_path)
-    logger.info("Cleaned data written to %s", save_path)
+        save_workbook_safe(wb, save_path)
+        logger.info("Cleaned data written to %s", save_path)
+    finally:
+        wb.close()
 
     return result
 
@@ -455,18 +467,33 @@ def parse_date_column(
     column: str,
     output_column: str | None = None,
     output_format: str = "%Y-%m-%d",
-    dayfirst: bool = True,
+    dayfirst: bool = False,
     header_row: int = 1,
 ) -> dict[str, str | int]:
     """Parse and normalize mixed date formats in a column to a standard format."""
+    from datetime import datetime
+
+    from dateutil import parser as dateutil_parser
+
     df = read_sheet_df(file_path, sheet_name, header_row)
+    column = _resolve_col(df, column)
     if column not in df.columns:
         raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
 
-    parsed = pd.to_datetime(df[column], dayfirst=dayfirst, errors="coerce")
-    formatted = parsed.dt.strftime(output_format)
-    # Replace NaT results (shown as "NaT") with None
-    formatted = formatted.where(parsed.notna(), other=None)
+    parsed_values: list[datetime | None] = []
+    for val in df[column]:
+        if pd.isna(val) or (isinstance(val, str) and val.strip() == ""):
+            parsed_values.append(None)
+        elif isinstance(val, (datetime, pd.Timestamp)):
+            parsed_values.append(val if isinstance(val, datetime) else val.to_pydatetime())
+        else:
+            try:
+                parsed_values.append(dateutil_parser.parse(str(val), dayfirst=dayfirst))
+            except (ValueError, OverflowError):
+                parsed_values.append(None)
+
+    parsed = pd.Series(parsed_values, index=df.index)
+    formatted = parsed.apply(lambda v: v.strftime(output_format) if v is not None and not pd.isna(v) else None)
 
     write_col = output_column if output_column else column
 
@@ -488,6 +515,6 @@ def parse_date_column(
         wb.close()
 
     parsed_count = int(parsed.notna().sum())
-    failed_count = int(parsed.isna().sum())
+    failed_count = int(parsed.isna().sum())  # None values count as NaN in pd.Series
     logger.info("parse_date_column: parsed %d/%d dates in column '%s'", parsed_count, len(df), column)
     return {"column": column, "parsed_count": parsed_count, "failed_count": failed_count, "output_column": write_col}

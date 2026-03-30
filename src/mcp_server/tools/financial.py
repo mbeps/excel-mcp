@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import math
+import os
 from logging import Logger
 
 import numpy_financial as npf
@@ -329,9 +330,15 @@ def budget_variance_analysis(
     if output_file:
         import openpyxl
 
-        out_wb = openpyxl.Workbook()
-        out_ws = out_wb.active
-        out_ws.title = "Variance Analysis"
+        if os.path.realpath(output_file) == os.path.realpath(file_path):
+            out_wb = load_workbook_safe(file_path)
+            if "Variance Analysis" in out_wb.sheetnames:
+                del out_wb["Variance Analysis"]
+            out_ws = out_wb.create_sheet(title="Variance Analysis")
+        else:
+            out_wb = openpyxl.Workbook()
+            out_ws = out_wb.active
+            out_ws.title = "Variance Analysis"
         headers = ["Category", "Budget", "Actual", "Variance", "Variance %", "Status"]
         out_ws.append(headers)
         for item in items:

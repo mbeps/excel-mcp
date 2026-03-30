@@ -280,3 +280,28 @@ def test_data_cleaner_deduplicate(dirty_xlsx: str) -> None:
     result = data_cleaner(dirty_xlsx, operations=["normalize_text", "remove_duplicates"])
     assert result["changes"]["remove_duplicates"] >= 1
     assert result["rows_after"] < result["rows_before"]
+
+
+def test_data_cleaner_fill_missing_custom_value(dirty_xlsx: str) -> None:
+    """Test that fill_missing with strategy='value' uses custom fill_value."""
+    result = data_cleaner(
+        dirty_xlsx,
+        operations=["fill_missing"],
+        columns=["A"],
+        fill_missing_strategy="value",
+        fill_value="UNKNOWN",
+    )
+    assert "fill_missing" in result["operations_applied"]
+    assert result["changes"]["fill_missing"] >= 0
+
+
+def test_data_cleaner_fill_missing_default_value(dirty_xlsx: str) -> None:
+    """Test that fill_missing with strategy='value' defaults to empty string when no fill_value."""
+    result = data_cleaner(
+        dirty_xlsx,
+        operations=["fill_missing"],
+        columns=["A"],
+        fill_missing_strategy="value",
+    )
+    assert "fill_missing" in result["operations_applied"]
+    assert result["changes"]["fill_missing"] >= 0

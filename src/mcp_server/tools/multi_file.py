@@ -21,7 +21,23 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 AGGREGATE_OPS = {"sum", "mean", "min", "max", "count"}
-FILTER_OPERATORS = {"equals", "not_equals", "greater_than", "less_than", "contains"}
+FILTER_OPERATORS = {
+    "equals",
+    "not_equals",
+    "greater_than",
+    "less_than",
+    "greater_than_or_equal",
+    "less_than_or_equal",
+    "contains",
+}
+OPERATOR_ALIASES: dict[str, str] = {
+    "==": "equals",
+    "!=": "not_equals",
+    ">": "greater_than",
+    "<": "less_than",
+    ">=": "greater_than_or_equal",
+    "<=": "less_than_or_equal",
+}
 
 
 def _write_df_to_new_file(df: pd.DataFrame, output_file: str, sheet_name: str = "Sheet1") -> None:
@@ -112,13 +128,14 @@ def bulk_filter_multi_files(
     output_file: str | None = None,
 ) -> dict[str, str | float | int | list[MultiFileFilterPerFileResult]]:
     """Filter rows across multiple files based on a condition."""
+    operator = OPERATOR_ALIASES.get(operator, operator)
     if operator not in FILTER_OPERATORS:
         raise ValueError(f"Unsupported operator '{operator}'. Allowed: {FILTER_OPERATORS}")
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
 
     per_file: list[dict] = []
-    all_matched = pd.DataFrame()
+    matched_frames: list[pd.DataFrame] = []
 
     for fp in file_paths:
         df = read_sheet_df(fp, sheet_name, header_row)
@@ -134,6 +151,10 @@ def bulk_filter_multi_files(
             mask = pd.to_numeric(col, errors="coerce") > float(value)
         elif operator == "less_than":
             mask = pd.to_numeric(col, errors="coerce") < float(value)
+        elif operator == "greater_than_or_equal":
+            mask = pd.to_numeric(col, errors="coerce") >= float(value)
+        elif operator == "less_than_or_equal":
+            mask = pd.to_numeric(col, errors="coerce") <= float(value)
         else:  # contains
             mask = col.astype(str).str.contains(str(value), case=False, na=False)
 
@@ -149,7 +170,7 @@ def bulk_filter_multi_files(
         if not matched.empty:
             tagged = matched.copy()
             tagged.insert(0, "_source_file", fp)
-            all_matched = pd.concat([all_matched, tagged], ignore_index=True)
+            matched_frames.append(tagged)
 
     total_matched = sum(f["matched_rows"] for f in per_file)
 
@@ -162,7 +183,8 @@ def bulk_filter_multi_files(
         "total_files": len(file_paths),
     }
 
-    if output_file and not all_matched.empty:
+    if output_file and matched_frames:
+        all_matched = pd.concat(matched_frames, ignore_index=True)
         _write_df_to_new_file(all_matched, output_file, sheet_name="FilteredResults")
         logger.info("Filtered results written to %s", output_file)
 
