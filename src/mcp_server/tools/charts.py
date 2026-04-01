@@ -18,6 +18,9 @@ from openpyxl.chart import (
 )
 from openpyxl.utils import get_column_letter, range_boundaries
 
+from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.legend import Legend
+
 from mcp_server.models.charts import ChartInfo
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
 from mcp_server.utils.logger import configure_logging
@@ -409,5 +412,74 @@ def create_combo_chart(
             f"Created combo chart at '{anchor_cell}' in '{sheet_name}'"
             f" with {len(bar_columns)} bar and {len(line_columns)} line series."
         )
+    finally:
+        wb.close()
+
+
+_VALID_LABEL_POSITIONS = {"b", "t", "l", "r", "ctr", "inBase", "inEnd", "outEnd"}
+_VALID_LEGEND_POSITIONS = {"b", "t", "l", "r", "tr"}
+
+
+def _find_chart_by_title(ws, chart_title: str):
+    """Return the first chart on ws whose title matches chart_title, or raise ValueError."""
+    for chart in ws._charts:
+        if _safe_chart_title(chart.title) == chart_title:
+            return chart
+    raise ValueError(f"Chart with title '{chart_title}' not found in sheet '{ws.title}'.")
+
+
+def set_chart_data_labels(
+    file_path: str,
+    sheet_name: str,
+    chart_title: str,
+    show_value: bool = True,
+    show_category: bool = False,
+    show_series_name: bool = False,
+    show_percentage: bool = False,
+    position: str | None = None,
+) -> dict:
+    """Set data labels on all series of a chart identified by title."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        chart = _find_chart_by_title(ws, chart_title)
+        dLbls = DataLabelList(
+            showVal=show_value,
+            showCatName=show_category,
+            showSerName=show_series_name,
+            showPercent=show_percentage,
+        )
+        if position is not None and position in _VALID_LABEL_POSITIONS:
+            dLbls.dLblPos = position
+        chart.dLbls = dLbls
+        save_workbook_safe(wb, file_path)
+        logger.info("Set data labels on chart '%s' in %s", chart_title, sheet_name)
+        return {"status": "ok", "chart_title": chart_title, "show_value": show_value}
+    finally:
+        wb.close()
+
+
+def set_chart_legend(
+    file_path: str,
+    sheet_name: str,
+    chart_title: str,
+    show: bool = True,
+    position: str | None = None,
+) -> dict:
+    """Show or hide the legend on a chart identified by title."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        chart = _find_chart_by_title(ws, chart_title)
+        if not show:
+            chart.legend = None
+        else:
+            legend = Legend()
+            if position is not None and position in _VALID_LEGEND_POSITIONS:
+                legend.legendPos = position
+            chart.legend = legend
+        save_workbook_safe(wb, file_path)
+        logger.info("Set legend show=%s on chart '%s' in %s", show, chart_title, sheet_name)
+        return {"status": "ok", "chart_title": chart_title, "show": show, "position": position}
     finally:
         wb.close()

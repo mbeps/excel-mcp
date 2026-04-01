@@ -478,6 +478,10 @@ def profile_data(
             info["mean"] = float(non_null.mean()) if len(non_null) else None
             info["median"] = float(non_null.median()) if len(non_null) else None
             info["std"] = float(non_null.std()) if len(non_null) > 1 else None
+            info["p25"] = round(float(non_null.quantile(0.25)), 2) if len(non_null) else None
+            info["p75"] = round(float(non_null.quantile(0.75)), 2) if len(non_null) else None
+            info["p90"] = round(float(non_null.quantile(0.90)), 2) if len(non_null) else None
+            info["iqr"] = round(float(non_null.quantile(0.75) - non_null.quantile(0.25)), 2) if len(non_null) else None
         else:
             str_vals = non_null.astype(str)
             if len(str_vals):
@@ -498,4 +502,84 @@ def profile_data(
         "row_count": len(df),
         "column_count": len(df.columns),
         "columns": columns_profile,
+    }
+
+
+def insert_subtotals(
+    file_path: str,
+    sheet_name: str,
+    group_col: str,
+    value_col: str,
+    subtotal_func: int = 9,
+    include_grand_total: bool = True,
+) -> dict:
+    """Insert SUBTOTAL formula rows after each group in a sorted sheet.
+
+    Supported subtotal_func values: 1=AVERAGE, 2=COUNT, 3=COUNTA, 4=MAX, 5=MIN, 9=SUM.
+    """
+    from openpyxl.utils import get_column_letter as _get_col_letter
+
+    valid_funcs = {1, 2, 3, 4, 5, 9}
+    if subtotal_func not in valid_funcs:
+        raise ValueError(f"subtotal_func must be one of {sorted(valid_funcs)}, got {subtotal_func}")
+
+    df = read_sheet_df(file_path, sheet_name, header_row=1)
+
+    if group_col not in df.columns:
+        raise ValueError(f"group_col '{group_col}' not found. Available: {list(df.columns)}")
+    if value_col not in df.columns:
+        raise ValueError(f"value_col '{value_col}' not found. Available: {list(df.columns)}")
+
+    df = df.sort_values(by=group_col).reset_index(drop=True)
+
+    col_names = list(df.columns)
+    group_col_idx = col_names.index(group_col) + 1
+    value_col_idx = col_names.index(value_col) + 1
+    value_col_letter = _get_col_letter(value_col_idx)
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+
+        for c_idx, col_name in enumerate(col_names, start=1):
+            ws.cell(row=1, column=c_idx, value=col_name)
+
+        ws.delete_rows(2, ws.max_row)
+
+        current_row = 2
+        n_groups = 0
+
+        for group_val, group_df in df.groupby(group_col, sort=False):
+            n_groups += 1
+            group_start_row = current_row
+
+            for _, row_data in group_df.iterrows():
+                for c_idx, col_name in enumerate(col_names, start=1):
+                    ws.cell(row=current_row, column=c_idx, value=row_data[col_name])
+                current_row += 1
+
+            group_end_row = current_row - 1
+            subtotal_range = f"{value_col_letter}{group_start_row}:{value_col_letter}{group_end_row}"
+            ws.cell(row=current_row, column=group_col_idx, value="Subtotal")
+            ws.cell(row=current_row, column=value_col_idx, value=f"=SUBTOTAL({subtotal_func},{subtotal_range})")
+            current_row += 1
+
+        subtotal_rows_inserted = n_groups
+
+        if include_grand_total and n_groups:
+            grand_range = f"{value_col_letter}2:{value_col_letter}{current_row - 1}"
+            ws.cell(row=current_row, column=group_col_idx, value="Grand Total")
+            ws.cell(row=current_row, column=value_col_idx, value=f"=SUBTOTAL({subtotal_func},{grand_range})")
+            subtotal_rows_inserted += 1
+
+        save_workbook_safe(wb, file_path)
+        logger.info("Inserted %d subtotal rows in %s!%s", subtotal_rows_inserted, sheet_name, file_path)
+    finally:
+        wb.close()
+
+    return {
+        "status": "ok",
+        "sheet": sheet_name,
+        "groups": n_groups,
+        "subtotal_rows_inserted": subtotal_rows_inserted,
     }

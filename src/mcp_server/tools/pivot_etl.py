@@ -333,8 +333,43 @@ def add_computed_column(
     new_column_name: str,
     expression: str,
     has_header: bool = True,
-) -> str:
-    """Add a computed column using a pandas-eval expression like 'Revenue - Cost'."""
+    column_type: str = "formula",
+    source_col: str | None = None,
+) -> "str | dict":
+    """Add a computed column using a pandas-eval expression or cumulative sum.
+
+    column_type='formula' (default): evaluate ``expression`` via pandas eval.
+    column_type='cumsum': compute a running total of ``source_col``.
+    """
+    if column_type == "cumsum":
+        if source_col is None:
+            raise ValueError("source_col is required when column_type='cumsum'")
+        df = _read_sheet_df(file_path, sheet_name, has_header)
+        if source_col not in df.columns:
+            raise ValueError(f"source_col '{source_col}' not found. Available: {list(df.columns)}")
+        df[new_column_name] = df[source_col].cumsum()
+
+        wb = load_workbook_safe(file_path)
+        try:
+            ws = get_sheet(wb, sheet_name)
+
+            new_col_idx = len(df.columns)
+            if has_header:
+                ws.cell(row=1, column=new_col_idx, value=new_column_name)
+
+            start_row = 2 if has_header else 1
+            for r_idx, val in enumerate(df[new_column_name].tolist(), start=start_row):
+                ws.cell(row=r_idx, column=new_col_idx, value=val)
+
+            save_workbook_safe(wb, file_path)
+            logger.info(
+                "Added cumsum column '%s' from '%s' to %s!%s", new_column_name, source_col, sheet_name, file_path
+            )
+            return {"status": "ok", "new_column": new_column_name, "column_type": "cumsum"}
+        finally:
+            wb.close()
+
+    # column_type == "formula" (default path)
     df = _read_sheet_df(file_path, sheet_name, has_header)
     _validate_eval_expression(expression)
 

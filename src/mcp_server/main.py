@@ -692,7 +692,7 @@ def conditional_format(
 
 @mcp.tool()
 def table(
-    action: Literal["create", "list", "resize", "totals", "data"],
+    action: Literal["create", "list", "resize", "totals", "data", "convert_to_range"],
     file_path: str,
     sheet_name: str,
     table_name: str | None = None,
@@ -734,6 +734,10 @@ def table(
         if table_name is None:
             raise ValueError("table_name is required for action='data'.")
         return _tables.get_table_data(file_path, sheet_name, table_name)
+    if action == "convert_to_range":
+        if table_name is None:
+            raise ValueError("table_name is required for action='convert_to_range'.")
+        return _tables.convert_table_to_range(file_path, sheet_name, table_name)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -915,7 +919,9 @@ def protection(
 
 @mcp.tool()
 def chart(
-    action: Literal["create", "delete", "list", "add_series", "set_axes", "trendline", "combo"],
+    action: Literal[
+        "create", "delete", "list", "add_series", "set_axes", "trendline", "combo", "data_labels", "legend"
+    ],
     file_path: str,
     sheet_name: str,
     chart_index: int | None = None,
@@ -946,6 +952,14 @@ def chart(
     line_columns: list[int] | None = None,
     anchor_cell: str = "F1",
     x_axis_column: int = 0,
+    chart_title: str | None = None,
+    show_value: bool = True,
+    show_category: bool = False,
+    show_series_name: bool = False,
+    show_percentage: bool = False,
+    label_position: str | None = None,
+    show_legend: bool = True,
+    legend_position: str | None = None,
 ) -> str | list[ChartInfo]:
     """Chart operations.
 
@@ -1027,6 +1041,23 @@ def chart(
             width,
             height,
         )
+    if action == "data_labels":
+        if not chart_title:
+            raise ValueError("chart_title is required for action='data_labels'.")
+        return _charts.set_chart_data_labels(
+            file_path,
+            sheet_name,
+            chart_title,
+            show_value,
+            show_category,
+            show_series_name,
+            show_percentage,
+            label_position,
+        )
+    if action == "legend":
+        if not chart_title:
+            raise ValueError("chart_title is required for action='legend'.")
+        return _charts.set_chart_legend(file_path, sheet_name, chart_title, show_legend, legend_position)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1310,6 +1341,11 @@ def worksheet_ops(
         "group_cols",
         "ungroup_rows",
         "ungroup_cols",
+        "set_print_titles",
+        "set_row_height",
+        "set_col_width",
+        "set_gridlines",
+        "stack_sheets",
     ],
     file_path: str | None = None,
     sheet_name: str | None = None,
@@ -1342,6 +1378,17 @@ def worksheet_ops(
     paper_size: int | None = None,
     fit_to_width: int | None = None,
     fit_to_height: int | None = None,
+    title_rows: str | None = None,
+    title_cols: str | None = None,
+    rows: list[int] | None = None,
+    height: float | None = None,
+    cols_list: list[str] | None = None,
+    width: float | None = None,
+    show: bool = True,
+    sheet_names: list[str] | None = None,
+    dest_sheet: str | None = None,
+    include_header: bool = True,
+    output_path: str | None = None,
 ) -> str | dict:
     """Worksheet operations: freeze panes, auto filter, cross-sheet/workbook ops, row/col management, grouping, print.
 
@@ -1500,6 +1547,46 @@ def worksheet_ops(
         if end_col is None:
             raise ValueError("end_col is required for action='ungroup_cols'.")
         return _ws_ops.ungroup_cols(file_path, sheet_name, start_col, end_col)
+    if action == "set_print_titles":
+        if file_path is None:
+            raise ValueError("file_path is required for action='set_print_titles'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='set_print_titles'.")
+        return _ws_ops.set_print_titles(file_path, sheet_name, title_rows, title_cols)
+    if action == "set_row_height":
+        if file_path is None:
+            raise ValueError("file_path is required for action='set_row_height'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='set_row_height'.")
+        if rows is None:
+            raise ValueError("rows is required for action='set_row_height'.")
+        if height is None:
+            raise ValueError("height is required for action='set_row_height'.")
+        return _ws_ops.set_row_height(file_path, sheet_name, rows, height)
+    if action == "set_col_width":
+        if file_path is None:
+            raise ValueError("file_path is required for action='set_col_width'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='set_col_width'.")
+        if cols_list is None:
+            raise ValueError("cols_list is required for action='set_col_width'.")
+        if width is None:
+            raise ValueError("width is required for action='set_col_width'.")
+        return _ws_ops.set_col_width(file_path, sheet_name, cols_list, width)
+    if action == "set_gridlines":
+        if file_path is None:
+            raise ValueError("file_path is required for action='set_gridlines'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='set_gridlines'.")
+        return _ws_ops.set_gridlines(file_path, sheet_name, show)
+    if action == "stack_sheets":
+        if file_path is None:
+            raise ValueError("file_path is required for action='stack_sheets'.")
+        if sheet_names is None:
+            raise ValueError("sheet_names is required for action='stack_sheets'.")
+        if dest_sheet is None:
+            raise ValueError("dest_sheet is required for action='stack_sheets'.")
+        return _ws_ops.stack_sheets(file_path, sheet_names, dest_sheet, include_header, output_path)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1577,7 +1664,7 @@ def vlookup_helper(
     )
 
 
-@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+@mcp.tool()
 def filter_data_advanced(
     file_path: str,
     sheet_name: str,
@@ -1588,6 +1675,22 @@ def filter_data_advanced(
 ) -> dict:
     """Multi-condition AND/OR filtering. Each condition: {column, operator, value}."""
     return _analysis.filter_data_advanced(file_path, sheet_name, conditions, logic, output_sheet, header_row)
+
+
+@mcp.tool()
+def insert_subtotals(
+    file_path: str,
+    sheet_name: str,
+    group_col: str,
+    value_col: str,
+    subtotal_func: int = 9,
+    include_grand_total: bool = True,
+) -> dict:
+    """Insert SUBTOTAL formula rows after each group in a sorted sheet.
+
+    subtotal_func: 1=AVERAGE, 2=COUNT, 3=COUNTA, 4=MAX, 5=MIN, 9=SUM.
+    """
+    return _analysis.insert_subtotals(file_path, sheet_name, group_col, value_col, subtotal_func, include_grand_total)
 
 
 # ---------------------------------------------------------------------------
@@ -1679,9 +1782,17 @@ def add_computed_column(
     new_column_name: str,
     expression: str,
     has_header: bool = True,
+    column_type: str = "formula",
+    source_col: str | None = None,
 ) -> str:
-    """Add a computed column using a pandas-eval expression (e.g. 'Revenue - Cost')."""
-    return _pivot_etl.add_computed_column(file_path, sheet_name, new_column_name, expression, has_header)
+    """Add a computed column using a pandas-eval expression (e.g. 'Revenue - Cost').
+
+    column_type='formula' (default): evaluate expression via pandas eval.
+    column_type='cumsum': compute a running total of source_col.
+    """
+    return _pivot_etl.add_computed_column(
+        file_path, sheet_name, new_column_name, expression, has_header, column_type, source_col
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))

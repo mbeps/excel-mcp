@@ -126,3 +126,18 @@ def get_table_data(
         }
     finally:
         wb.close()
+
+
+def convert_table_to_range(file_path: str, sheet_name: str, table_name: str) -> dict:
+    """Remove a table definition while preserving all cell data and formatting."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if table_name not in ws.tables:
+            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+        del ws.tables[table_name]
+        save_workbook_safe(wb, file_path)
+        logger.info("Converted table '%s' to range in %s", table_name, sheet_name)
+        return {"status": "ok", "sheet": sheet_name, "table": table_name}
+    finally:
+        wb.close()

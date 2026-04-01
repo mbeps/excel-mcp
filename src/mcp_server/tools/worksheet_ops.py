@@ -415,3 +415,137 @@ def ungroup_cols(file_path: str, sheet: str, start_col: int, end_col: int) -> di
         return {"status": "success", "message": f"Ungrouped columns {start_col}-{end_col}"}
     finally:
         wb.close()
+
+
+def set_print_titles(
+    file_path: str,
+    sheet_name: str,
+    title_rows: str | None = None,
+    title_cols: str | None = None,
+) -> dict[str, str | None]:
+    """Set repeat rows/cols for print titles (e.g. title_rows='1:2', title_cols='A:B')."""
+    import re
+
+    if title_rows is None and title_cols is None:
+        raise ValueError("At least one of title_rows or title_cols must be provided.")
+    if title_rows is not None and not re.match(r"^\d+:\d+$", title_rows):
+        raise ValueError(f"title_rows must be a row-range string like '1:3', got: {title_rows!r}")
+    if title_cols is not None and not re.match(r"^[A-Za-z]+:[A-Za-z]+$", title_cols):
+        raise ValueError(f"title_cols must be a column-range string like 'A:B', got: {title_cols!r}")
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if title_rows is not None:
+            ws.print_title_rows = title_rows
+        if title_cols is not None:
+            ws.print_title_cols = title_cols
+        save_workbook_safe(wb, file_path)
+        logger.info("Set print titles rows=%s cols=%s in '%s' of %s", title_rows, title_cols, sheet_name, file_path)
+        return {"status": "ok", "sheet": sheet_name, "title_rows": title_rows, "title_cols": title_cols}
+    finally:
+        wb.close()
+
+
+def set_row_height(file_path: str, sheet_name: str, rows: list[int], height: float) -> dict[str, object]:
+    """Set the row height for one or more rows."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        for r in rows:
+            if r < 1:
+                raise ValueError(f"Row number must be >= 1, got {r}")
+            ws.row_dimensions[r].height = height
+        save_workbook_safe(wb, file_path)
+        logger.info("Set height=%s for %d row(s) in '%s' of %s", height, len(rows), sheet_name, file_path)
+        return {"status": "ok", "sheet": sheet_name, "updated": len(rows)}
+    finally:
+        wb.close()
+
+
+def set_col_width(file_path: str, sheet_name: str, cols: list[str], width: float) -> dict[str, object]:
+    """Set the column width for one or more columns (specified as column letters)."""
+    wb = load_workbook_safe(file_path)
+    try:
+        from openpyxl.utils import column_index_from_string
+
+        ws = get_sheet(wb, sheet_name)
+        for c in cols:
+            column_index_from_string(c)  # raises ValueError on invalid column letter
+            ws.column_dimensions[c].width = width
+        save_workbook_safe(wb, file_path)
+        logger.info("Set width=%s for %d col(s) in '%s' of %s", width, len(cols), sheet_name, file_path)
+        return {"status": "ok", "sheet": sheet_name, "updated": len(cols)}
+    finally:
+        wb.close()
+
+
+def stack_sheets(
+    file_path: str,
+    sheet_names: list[str],
+    dest_sheet: str,
+    include_header: bool = True,
+    output_path: str | None = None,
+) -> dict[str, object]:
+    """Concatenate multiple sheets row-wise into a single destination sheet."""
+    import pandas as pd
+
+    validate_file_path(file_path, must_exist=True)
+    frames: list[pd.DataFrame] = []
+    for name in sheet_names:
+        df = pd.read_excel(file_path, sheet_name=name, engine="calamine")
+        frames.append(df)
+    combined = pd.concat(frames, ignore_index=True)
+
+    target = output_path if output_path is not None else file_path
+    if output_path is not None:
+        from pathlib import Path as _Path
+
+        validate_file_path(output_path, must_exist=False)
+        if _Path(output_path).resolve().exists():
+            out_wb = load_workbook_safe(output_path)
+        else:
+            import openpyxl as _openpyxl
+
+            out_wb = _openpyxl.Workbook()
+            out_wb.remove(out_wb.active)
+    else:
+        out_wb = load_workbook_safe(file_path)
+
+    try:
+        if dest_sheet in out_wb.sheetnames:
+            del out_wb[dest_sheet]
+        dest_ws = out_wb.create_sheet(dest_sheet)
+        if include_header:
+            dest_ws.append(list(combined.columns))
+        for row_tuple in combined.itertuples(index=False, name=None):
+            dest_ws.append(list(row_tuple))
+        save_workbook_safe(out_wb, target)
+        total_rows = len(combined)
+        logger.info(
+            "Stacked %d sheet(s) into '%s' (%d rows) in %s",
+            len(sheet_names),
+            dest_sheet,
+            total_rows,
+            target,
+        )
+        return {
+            "status": "ok",
+            "dest_sheet": dest_sheet,
+            "total_rows": total_rows,
+            "source_sheets": sheet_names,
+        }
+    finally:
+        out_wb.close()
+
+
+def set_gridlines(file_path: str, sheet_name: str, show: bool = True) -> dict[str, object]:
+    """Show or hide gridlines for a worksheet."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        ws.sheet_view.showGridLines = show
+        save_workbook_safe(wb, file_path)
+        logger.info("Set showGridLines=%s in '%s' of %s", show, sheet_name, file_path)
+        return {"status": "ok", "sheet": sheet_name, "showGridLines": show}
+    finally:
+        wb.close()
