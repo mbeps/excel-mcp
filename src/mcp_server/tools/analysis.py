@@ -583,3 +583,49 @@ def insert_subtotals(
         "groups": n_groups,
         "subtotal_rows_inserted": subtotal_rows_inserted,
     }
+
+
+def value_counts(
+    file_path: str,
+    sheet_name: str,
+    column: str,
+    normalize: bool = False,
+    top_n: int | None = None,
+    dropna: bool = True,
+    has_header: bool = True,
+) -> dict:
+    """Return a full value-frequency table for a column.
+
+    column: the column header name (or letter if has_header=False).
+    normalize: if True, return proportions (0-1) instead of raw counts.
+    top_n: if given, return only the top N most frequent values.
+    dropna: if True (default), exclude null/NaN values from counts.
+    Returns: {"column": str, "total_rows": int, "counts": [{"value": ..., "count": ...}, ...]}
+    """
+    validate_file_path(file_path, must_exist=True)
+    df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
+    if df.empty:
+        raise ValueError(f"Sheet '{sheet_name}' is empty.")
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
+
+    series = df[column]
+    counts = series.value_counts(normalize=normalize, dropna=dropna)
+
+    if top_n is not None:
+        if top_n < 1:
+            raise ValueError("top_n must be a positive integer.")
+        counts = counts.head(top_n)
+
+    result_list = [
+        {"value": (None if (isinstance(k, float) and k != k) else k), "count": round(v, 6) if normalize else int(v)}
+        for k, v in counts.items()
+    ]
+
+    logger.info("value_counts for column '%s' in '%s': %d unique values", column, sheet_name, len(result_list))
+    return {
+        "column": column,
+        "total_rows": int(series.count() if dropna else len(series)),
+        "normalize": normalize,
+        "counts": result_list,
+    }

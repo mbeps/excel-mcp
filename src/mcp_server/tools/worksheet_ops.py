@@ -339,7 +339,11 @@ def set_page_setup(
 def group_rows(
     file_path: str, sheet: str, start_row: int, end_row: int, outline_level: int = 1, hidden: bool = False
 ) -> dict[str, str]:
-    """Group rows by setting their outline level and optional hidden state."""
+    """Group rows by setting their outline level and optional hidden state.
+
+    When hidden=True, the summary row at end_row+1 gets collapsed=True so the
+    collapse button renders correctly in Excel.
+    """
     validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
@@ -347,6 +351,9 @@ def group_rows(
         for row in range(start_row, end_row + 1):
             ws.row_dimensions[row].outline_level = outline_level
             ws.row_dimensions[row].hidden = hidden
+        if hidden:
+            # Mark the summary row so Excel renders the collapse button correctly
+            ws.row_dimensions[end_row + 1].collapsed = True
         save_workbook_safe(wb, file_path)
         logger.info("Grouped rows %d-%d at level %d in '%s' of %s", start_row, end_row, outline_level, sheet, file_path)
         return {"status": "success", "message": f"Grouped rows {start_row}-{end_row} at level {outline_level}"}
@@ -357,7 +364,11 @@ def group_rows(
 def group_cols(
     file_path: str, sheet: str, start_col: int, end_col: int, outline_level: int = 1, hidden: bool = False
 ) -> dict[str, str]:
-    """Group columns by setting their outline level and optional hidden state."""
+    """Group columns by setting their outline level and optional hidden state.
+
+    When hidden=True, the summary column at end_col+1 gets collapsed=True so the
+    collapse button renders correctly in Excel.
+    """
     from openpyxl.utils import get_column_letter
 
     validate_file_path(file_path, must_exist=True)
@@ -368,6 +379,10 @@ def group_cols(
             letter = get_column_letter(col)
             ws.column_dimensions[letter].outline_level = outline_level
             ws.column_dimensions[letter].hidden = hidden
+        if hidden:
+            # Mark the summary column so Excel renders the collapse button correctly
+            summary_letter = get_column_letter(end_col + 1)
+            ws.column_dimensions[summary_letter].collapsed = True
         save_workbook_safe(wb, file_path)
         logger.info(
             "Grouped columns %d-%d at level %d in '%s' of %s",
@@ -547,5 +562,83 @@ def set_gridlines(file_path: str, sheet_name: str, show: bool = True) -> dict[st
         save_workbook_safe(wb, file_path)
         logger.info("Set showGridLines=%s in '%s' of %s", show, sheet_name, file_path)
         return {"status": "ok", "sheet": sheet_name, "showGridLines": show}
+    finally:
+        wb.close()
+
+
+def add_page_break(
+    file_path: str,
+    sheet_name: str,
+    row: int | None = None,
+    col: int | None = None,
+) -> dict[str, str]:
+    """Insert a manual page break before a row or column.
+
+    row: insert a horizontal page break BEFORE this row number (1-based).
+    col: insert a vertical page break BEFORE this column index (1-based).
+    At least one of row or col must be provided. Both can be provided simultaneously.
+    """
+    from openpyxl.worksheet.pagebreak import Break
+
+    if row is None and col is None:
+        raise ValueError("At least one of 'row' or 'col' must be provided.")
+
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        added = []
+        if row is not None:
+            if row < 2:
+                raise ValueError("row must be >= 2 (a break before row 1 has no effect).")
+            ws.row_breaks.append(Break(id=row))
+            added.append(f"row {row}")
+        if col is not None:
+            if col < 2:
+                raise ValueError("col must be >= 2 (a break before column 1 has no effect).")
+            ws.col_breaks.append(Break(id=col))
+            added.append(f"col {col}")
+        save_workbook_safe(wb, file_path)
+        msg = f"Page break(s) added: {', '.join(added)} in sheet '{sheet_name}'."
+        logger.info(msg)
+        return {"status": "success", "message": msg}
+    finally:
+        wb.close()
+
+
+def remove_page_break(
+    file_path: str,
+    sheet_name: str,
+    row: int | None = None,
+    col: int | None = None,
+) -> dict[str, str]:
+    """Remove a manual page break at a specific row or column.
+
+    row: remove the horizontal page break at this row number.
+    col: remove the vertical page break at this column index.
+    If row/col is None, all breaks of that type are cleared.
+    """
+    if row is None and col is None:
+        raise ValueError("At least one of 'row' or 'col' must be provided.")
+
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        removed = []
+        if row is not None:
+            before = len(ws.row_breaks.brk)
+            ws.row_breaks.brk = [b for b in ws.row_breaks.brk if b.id != row]
+            after = len(ws.row_breaks.brk)
+            removed.append(f"row {row} ({before - after} removed)")
+        if col is not None:
+            before = len(ws.col_breaks.brk)
+            ws.col_breaks.brk = [b for b in ws.col_breaks.brk if b.id != col]
+            after = len(ws.col_breaks.brk)
+            removed.append(f"col {col} ({before - after} removed)")
+        save_workbook_safe(wb, file_path)
+        msg = f"Page break(s) removed: {', '.join(removed)} in sheet '{sheet_name}'."
+        logger.info(msg)
+        return {"status": "success", "message": msg}
     finally:
         wb.close()

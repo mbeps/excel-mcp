@@ -633,6 +633,32 @@ def calculate_depreciation(
         raise ValueError(f"Unknown method '{method}'. Valid values: 'sln', 'syd', 'ddb'")
 
 
+def calculate_irr(cash_flows: list[float]) -> dict:
+    """Calculate Internal Rate of Return for a series of cash flows.
+
+    cash_flows: list with at least one negative value (initial investment)
+    and subsequent returns. E.g. [-1000, 300, 400, 500].
+    Returns the periodic IRR as a decimal (e.g. 0.15 for 15%).
+    """
+    if len(cash_flows) < 2:
+        raise ValueError("cash_flows must contain at least 2 values.")
+    if not any(v < 0 for v in cash_flows):
+        raise ValueError("cash_flows must contain at least one negative value (initial investment).")
+    if not any(v > 0 for v in cash_flows):
+        raise ValueError("cash_flows must contain at least one positive value (return).")
+
+    result = npf.irr(cash_flows)
+    if result is None or (isinstance(result, float) and (result != result)):  # NaN check
+        raise ValueError("IRR could not converge for the given cash flows.")
+
+    logger.info("IRR calculated: %.6f for %d cash flows", result, len(cash_flows))
+    return {
+        "irr": round(float(result), 6),
+        "irr_percent": round(float(result) * 100, 4),
+        "cash_flows": cash_flows,
+    }
+
+
 def create_sensitivity_table(
     file_path: str,
     sheet_name: str,

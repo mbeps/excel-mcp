@@ -10,7 +10,13 @@ import pandas as pd
 from openpyxl import Workbook
 
 from mcp_server.models.statistics import RegressionResult
-from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, read_sheet_df, save_workbook_safe
+from mcp_server.utils.excel_helpers import (
+    get_sheet,
+    load_workbook_safe,
+    read_sheet_df,
+    save_workbook_safe,
+    validate_file_path,
+)
 from mcp_server.utils.logger import configure_logging
 
 try:
@@ -367,3 +373,74 @@ def run_exponential_smoothing(
         "forecast_steps": len(forecast_values),
         **model_info,
     }
+
+
+def correlation_matrix(
+    file_path: str,
+    sheet_name: str,
+    columns: list[str] | None = None,
+    output_sheet: str | None = None,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Compute a Pearson correlation matrix for numeric columns.
+
+    columns: list of column names to include. If None, all numeric columns are used.
+    output_sheet: if given, writes the matrix to this sheet (created if absent).
+    output_file: if given, writes to a separate file; defaults to file_path.
+    Returns a dict with "columns" list and "matrix" (list of rows, each a list of floats).
+    """
+    validate_file_path(file_path, must_exist=True)
+    dest_path = output_file or file_path
+    if output_file:
+        validate_file_path(output_file, must_exist=False)
+
+    df = read_sheet_df(file_path, sheet_name, header_row=header_row)
+    if df.empty:
+        raise ValueError(f"Sheet '{sheet_name}' is empty.")
+
+    if columns:
+        missing = [c for c in columns if c not in df.columns]
+        if missing:
+            raise ValueError(f"Columns not found: {missing}")
+        df = df[columns]
+
+    numeric_df = df.select_dtypes(include="number")
+    if numeric_df.empty:
+        raise ValueError("No numeric columns found for correlation matrix.")
+
+    corr = numeric_df.corr()
+    col_names = list(corr.columns)
+    matrix = [[round(v, 6) if pd.notna(v) else None for v in row] for row in corr.values.tolist()]
+
+    if output_sheet:
+        wb = load_workbook_safe(dest_path)
+        try:
+            if output_sheet in wb.sheetnames:
+                ws = wb[output_sheet]
+                ws.delete_rows(1, ws.max_row)
+            else:
+                ws = wb.create_sheet(output_sheet)
+            # Header row
+            ws.cell(row=1, column=1, value="")
+            for ci, name in enumerate(col_names, start=2):
+                ws.cell(row=1, column=ci, value=name)
+            # Data rows
+            for ri, (name, row_vals) in enumerate(zip(col_names, matrix), start=2):
+                ws.cell(row=ri, column=1, value=name)
+                for ci, val in enumerate(row_vals, start=2):
+                    ws.cell(row=ri, column=ci, value=val)
+            save_workbook_safe(wb, dest_path)
+        finally:
+            wb.close()
+
+    logger.info("Computed correlation matrix for %d columns in '%s'", len(col_names), sheet_name)
+    result: dict = {
+        "columns": col_names,
+        "matrix": matrix,
+        "file_path": file_path,
+    }
+    if output_sheet:
+        result["output_sheet"] = output_sheet
+        result["output_file"] = dest_path
+    return result

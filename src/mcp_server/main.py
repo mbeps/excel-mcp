@@ -125,10 +125,12 @@ def write_multi_sheet(file_path: str, sheets: list[SheetDefinition]) -> WriteMul
 
 @mcp.tool()
 def sheet_management(
-    action: Literal["rename", "delete", "copy", "hide", "unhide"],
+    action: Literal["rename", "delete", "copy", "hide", "unhide", "tab_color", "move"],
     file_path: str,
     sheet_name: str,
     new_name: str | None = None,
+    color: str | None = None,
+    offset: int | None = None,
 ) -> str | dict:
     """Manage worksheets within a workbook.
 
@@ -137,6 +139,8 @@ def sheet_management(
     action="copy": Copy a sheet. Requires: new_name for the copy.
     action="hide": Hide a sheet. Raises if it's the last visible sheet.
     action="unhide": Unhide a hidden sheet.
+    action="tab_color": Set the tab colour. Requires: color (6-char hex, e.g. "FF0000"). Pass "000000" to clear.
+    action="move": Reorder the sheet tab. Requires: offset (positive=right, negative=left).
     """
     if action == "rename":
         if not new_name:
@@ -152,6 +156,14 @@ def sheet_management(
         return _workbook.hide_sheet(file_path, sheet_name)
     if action == "unhide":
         return _workbook.unhide_sheet(file_path, sheet_name)
+    if action == "tab_color":
+        if not color:
+            raise ValueError("color is required for action='tab_color'.")
+        return _workbook.set_tab_color(file_path, sheet_name, color)
+    if action == "move":
+        if offset is None:
+            raise ValueError("offset is required for action='move'.")
+        return _workbook.move_sheet(file_path, sheet_name, offset)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -920,7 +932,7 @@ def protection(
 @mcp.tool()
 def chart(
     action: Literal[
-        "create", "delete", "list", "add_series", "set_axes", "trendline", "combo", "data_labels", "legend"
+        "create", "delete", "list", "add_series", "set_axes", "trendline", "combo", "data_labels", "legend", "update"
     ],
     file_path: str,
     sheet_name: str,
@@ -970,6 +982,7 @@ def chart(
     action="set_axes": Configure axes. Optional: chart_index, x/y titles, min/max, number_format, log_scale.
     action="trendline": Add trendline. Optional: chart_index, series_index, trendline_type, periods.
     action="combo": Create combo chart. Requires: data_range, bar_columns, line_columns.
+    action="update": Update chart title, size, or anchor. Optional: chart_index, title, width, height, anchor_cell.
     """
     if action == "create":
         if data_range is None:
@@ -1058,6 +1071,16 @@ def chart(
         if not chart_title:
             raise ValueError("chart_title is required for action='legend'.")
         return _charts.set_chart_legend(file_path, sheet_name, chart_title, show_legend, legend_position)
+    if action == "update":
+        return _charts.update_chart(
+            file_path,
+            sheet_name,
+            chart_index or 0,
+            title,
+            width if width != 15 else None,
+            height if height != 10 else None,
+            anchor_cell if anchor_cell != "F1" else None,
+        )
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1346,6 +1369,8 @@ def worksheet_ops(
         "set_col_width",
         "set_gridlines",
         "stack_sheets",
+        "add_page_break",
+        "remove_page_break",
     ],
     file_path: str | None = None,
     sheet_name: str | None = None,
@@ -1412,6 +1437,11 @@ def worksheet_ops(
         Optional: outline_level, hidden.
     action="ungroup_rows": Ungroup rows. Requires: file_path, sheet_name, start_row, end_row.
     action="ungroup_cols": Ungroup columns. Requires: file_path, sheet_name, start_col, end_col.
+    action="add_page_break": Insert a manual page break. Requires: file_path, sheet_name.
+      Optional: row (horizontal break before this row), col (vertical break before this column).
+      At least one of row or col must be provided. row/col must be >= 2.
+    action="remove_page_break": Remove a manual page break. Requires: file_path, sheet_name.
+      Optional: row, col. If omitted for a type, all breaks of that type are cleared.
     """
     if action == "freeze":
         if file_path is None:
@@ -1587,6 +1617,18 @@ def worksheet_ops(
         if dest_sheet is None:
             raise ValueError("dest_sheet is required for action='stack_sheets'.")
         return _ws_ops.stack_sheets(file_path, sheet_names, dest_sheet, include_header, output_path)
+    if action == "add_page_break":
+        if file_path is None:
+            raise ValueError("file_path is required for action='add_page_break'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='add_page_break'.")
+        return _ws_ops.add_page_break(file_path, sheet_name, row, col)
+    if action == "remove_page_break":
+        if file_path is None:
+            raise ValueError("file_path is required for action='remove_page_break'.")
+        if sheet_name is None:
+            raise ValueError("sheet_name is required for action='remove_page_break'.")
+        return _ws_ops.remove_page_break(file_path, sheet_name, row, col)
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1708,8 +1750,14 @@ def create_pivot_table(
     output_sheet: str | None = None,
     output_file: str | None = None,
     column_field: str | None = None,
+    date_freq: str | None = None,
 ) -> dict:
-    """Create a pivot table and optionally write results to a sheet or file."""
+    """Create a pivot table and optionally write results to a sheet or file.
+
+    date_freq: if set, groups datetime index columns by this period before pivoting.
+      Common values: 'ME' (month-end), 'QE' (quarter-end), 'YE' (year-end), 'W' (weekly).
+      Any valid pandas DateOffset alias is accepted.
+    """
     return _pivot_etl.create_pivot_table(
         file_path,
         sheet_name,
@@ -1720,6 +1768,7 @@ def create_pivot_table(
         output_file,
         False,
         column_field,
+        date_freq,
     )
 
 
@@ -1784,14 +1833,26 @@ def add_computed_column(
     has_header: bool = True,
     column_type: str = "formula",
     source_col: str | None = None,
+    window: int | None = None,
+    rolling_func: str = "mean",
 ) -> str:
     """Add a computed column using a pandas-eval expression (e.g. 'Revenue - Cost').
 
     column_type='formula' (default): evaluate expression via pandas eval.
-    column_type='cumsum': compute a running total of source_col.
+    column_type='cumsum': compute a running total of source_col. Requires: source_col.
+    column_type='rolling': compute a rolling window aggregation of source_col.
+      Requires: source_col, window (int). Optional: rolling_func ('mean' or 'sum', default 'mean').
     """
     return _pivot_etl.add_computed_column(
-        file_path, sheet_name, new_column_name, expression, has_header, column_type, source_col
+        file_path,
+        sheet_name,
+        new_column_name,
+        expression,
+        has_header,
+        column_type,
+        source_col,
+        window,
+        rolling_func,
     )
 
 
@@ -1930,7 +1991,7 @@ def create_sensitivity_table(
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def time_value_calc(
-    operation: Literal["fv", "pv", "nper", "rate", "depreciation"],
+    operation: Literal["fv", "pv", "nper", "rate", "depreciation", "irr"],
     rate: float | None = None,
     nper: int | None = None,
     pmt: float | None = None,
@@ -1943,6 +2004,7 @@ def time_value_calc(
     life: int | None = None,
     method: str = "sln",
     period: int | None = None,
+    cash_flows: list[float] | None = None,
 ) -> dict:
     """Time value of money and depreciation calculations.
 
@@ -1953,6 +2015,8 @@ def time_value_calc(
     operation="depreciation": Asset depreciation. Requires: cost, salvage, life. Optional: method, period.
       method values: "sln" / "straight_line", "syd" / "sum_of_years" / "sum_of_years_digits",
                      "ddb" / "double_declining" / "double_declining_balance". Default: "sln".
+    operation="irr": Internal Rate of Return. Requires: cash_flows (list of floats,
+      first value typically negative as initial investment). Returns irr and irr_percent.
     """
     if operation == "fv":
         if rate is None:
@@ -1990,6 +2054,10 @@ def time_value_calc(
         if life is None:
             raise ValueError("life is required for operation='depreciation'.")
         return _financial.calculate_depreciation(cost, salvage, life, method, period)
+    if operation == "irr":
+        if cash_flows is None:
+            raise ValueError("cash_flows is required for operation='irr'.")
+        return _financial.calculate_irr(cash_flows)
     raise ValueError(f"Unknown operation: {operation}")
 
 
@@ -2186,6 +2254,46 @@ def profile_data(
 ) -> dict:
     """Profile data in a worksheet, returning column statistics, types, null counts, and sample values."""
     return _analysis.profile_data(file_path, sheet, data_range)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def value_counts(
+    file_path: str,
+    sheet_name: str,
+    column: str,
+    normalize: bool = False,
+    top_n: int | None = None,
+    dropna: bool = True,
+    has_header: bool = True,
+) -> dict:
+    """Return a full value-frequency table for a column.
+
+    column: header name of the column to count.
+    normalize: if True, return proportions (0–1) instead of raw counts.
+    top_n: if given, return only the top N most-frequent values.
+    dropna: if True (default), exclude null values from counts.
+    Returns: {"column", "total_rows", "normalize", "counts": [{"value", "count"}, ...]}.
+    """
+    return _analysis.value_counts(file_path, sheet_name, column, normalize, top_n, dropna, has_header)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def correlation_matrix(
+    file_path: str,
+    sheet_name: str,
+    columns: list[str] | None = None,
+    output_sheet: str | None = None,
+    output_file: str | None = None,
+    header_row: int = 1,
+) -> dict:
+    """Compute a Pearson correlation matrix for numeric columns.
+
+    columns: list of column names to include. If None, all numeric columns are used.
+    output_sheet: if given, writes the matrix to this sheet (created if absent).
+    output_file: target file for output; defaults to file_path.
+    Returns: {"columns": [...], "matrix": [[float, ...], ...]}.
+    """
+    return _statistical.correlation_matrix(file_path, sheet_name, columns, output_sheet, output_file, header_row)
 
 
 # ---------------------------------------------------------------------------

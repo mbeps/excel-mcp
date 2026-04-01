@@ -483,3 +483,58 @@ def set_chart_legend(
         return {"status": "ok", "chart_title": chart_title, "show": show, "position": position}
     finally:
         wb.close()
+
+
+def update_chart(
+    file_path: str,
+    sheet_name: str,
+    chart_index: int = 0,
+    title: str | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    anchor_cell: str | None = None,
+) -> str:
+    """Update an existing chart's title, dimensions, or anchor position.
+
+    chart_index: 0-based index of the chart on the sheet (default 0).
+    title: new chart title. Pass empty string "" to clear the title.
+    width: new width in cm (e.g. 15.0).
+    height: new height in cm (e.g. 10.0).
+    anchor_cell: new top-left anchor cell (e.g. "H1"). Moves the chart.
+    """
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        charts = ws._charts
+        if not charts:
+            raise ValueError(f"No charts found on sheet '{sheet_name}'.")
+        if chart_index < 0 or chart_index >= len(charts):
+            raise ValueError(f"chart_index {chart_index} is out of range. Sheet has {len(charts)} chart(s).")
+
+        chart = charts[chart_index]
+
+        if title is not None:
+            chart.title = title if title else None
+
+        if width is not None:
+            chart.width = width
+        if height is not None:
+            chart.height = height
+
+        if anchor_cell is not None:
+            chart.anchor = anchor_cell
+
+        save_workbook_safe(wb, file_path)
+        logger.info(
+            "Updated chart %d on sheet '%s' in %s (title=%r, width=%s, height=%s, anchor=%s)",
+            chart_index,
+            sheet_name,
+            file_path,
+            title,
+            width,
+            height,
+            anchor_cell,
+        )
+        return f"Chart {chart_index} updated on sheet '{sheet_name}'."
+    finally:
+        wb.close()

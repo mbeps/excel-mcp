@@ -238,3 +238,55 @@ def unhide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
         return {"status": "success", "message": f"Sheet '{sheet_name}' is now visible"}
     finally:
         wb.close()
+
+
+def set_tab_color(file_path: str, sheet_name: str, color: str) -> dict[str, str]:
+    """Set the tab colour of a worksheet.
+
+    color: a 6-character hex string without '#', e.g. "FF0000" for red.
+    Pass color="000000" to reset to default (no colour).
+    """
+    from openpyxl.styles import Color
+
+    color = color.lstrip("#").upper()
+    if len(color) != 6 or not all(c in "0123456789ABCDEF" for c in color):
+        raise ValueError(f"Invalid color '{color}'. Expected a 6-character hex string, e.g. 'FF0000'.")
+
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if color == "000000":
+            ws.sheet_properties.tabColor = None
+        else:
+            ws.sheet_properties.tabColor = Color(rgb=color)
+        save_workbook_safe(wb, file_path)
+        logger.info("Set tab color to %s for sheet '%s' in %s", color, sheet_name, file_path)
+        return {"status": "success", "sheet": sheet_name, "color": color}
+    finally:
+        wb.close()
+
+
+def move_sheet(file_path: str, sheet_name: str, offset: int) -> dict[str, str]:
+    """Move a worksheet tab by a relative offset within the workbook.
+
+    offset: positive = move right, negative = move left.
+    E.g. offset=-1 moves the sheet one position to the left.
+    """
+    validate_file_path(file_path, must_exist=True)
+    wb = load_workbook_safe(file_path)
+    try:
+        get_sheet(wb, sheet_name)  # validates sheet exists
+        wb.move_sheet(sheet_name, offset=offset)
+        sheet_names = wb.sheetnames
+        new_index = sheet_names.index(sheet_name)
+        save_workbook_safe(wb, file_path)
+        logger.info("Moved sheet '%s' by offset %d (new index %d) in %s", sheet_name, offset, new_index, file_path)
+        return {
+            "status": "success",
+            "sheet": sheet_name,
+            "new_index": new_index,
+            "sheet_order": sheet_names,
+        }
+    finally:
+        wb.close()

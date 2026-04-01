@@ -141,6 +141,7 @@ def create_pivot_table(
     output_file: str | None = None,
     include_margins: bool = False,
     column_field: str | None = None,
+    date_freq: str | None = None,
 ) -> dict[str, list[dict[str, CellScalar]] | list[str] | str | dict | None]:
     """Create a static pivot table using pandas and write to a sheet or file."""
     df = _read_sheet_df(file_path, sheet_name)
@@ -150,10 +151,29 @@ def create_pivot_table(
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found. Available: {list(df.columns)}")
 
+    # Apply date period grouping if requested
+    if date_freq:
+        new_index: list = []
+        for col in index_cols:
+            if col in df.columns:
+                try:
+                    df[col] = pd.to_datetime(df[col], errors="coerce")
+                    if df[col].notna().any():
+                        new_index.append(pd.Grouper(key=col, freq=date_freq))
+                    else:
+                        new_index.append(col)
+                except Exception:
+                    new_index.append(col)
+            else:
+                new_index.append(col)
+        pivot_index = new_index
+    else:
+        pivot_index = index_cols
+
     pivot_kwargs: dict = {"margins": True, "margins_name": "Total"} if include_margins else {}
     if column_field:
         pivot_kwargs["columns"] = column_field
-    pivot = pd.pivot_table(df, index=index_cols, values=value_cols, aggfunc=aggfunc, **pivot_kwargs)
+    pivot = pd.pivot_table(df, index=pivot_index, values=value_cols, aggfunc=aggfunc, **pivot_kwargs)
     pivot = pivot.reset_index()
 
     # Flatten multi-level column headers produced by column_field
@@ -335,6 +355,8 @@ def add_computed_column(
     has_header: bool = True,
     column_type: str = "formula",
     source_col: str | None = None,
+    window: int | None = None,
+    rolling_func: str = "mean",
 ) -> "str | dict":
     """Add a computed column using a pandas-eval expression or cumulative sum.
 
@@ -368,6 +390,47 @@ def add_computed_column(
             return {"status": "ok", "new_column": new_column_name, "column_type": "cumsum"}
         finally:
             wb.close()
+
+    if column_type == "rolling":
+        if source_col is None:
+            raise ValueError("source_col is required for column_type='rolling'.")
+        if window is None:
+            raise ValueError("window is required for column_type='rolling'.")
+        if rolling_func not in ("mean", "sum"):
+            raise ValueError("rolling_func must be 'mean' or 'sum'.")
+        df = _read_sheet_df(file_path, sheet_name, has_header)
+        if source_col not in df.columns:
+            raise ValueError(f"source_col '{source_col}' not found in sheet columns.")
+
+        roller = df[source_col].rolling(window=window)
+        rolled = getattr(roller, rolling_func)()
+
+        wb2 = load_workbook_safe(file_path)
+        try:
+            ws2 = get_sheet(wb2, sheet_name)
+            header_offset = 1 if has_header else 0
+            new_col_idx = len(df.columns) + 1
+            if has_header:
+                ws2.cell(row=1, column=new_col_idx, value=new_column_name)
+            for i, val in enumerate(rolled):
+                row_num = i + 1 + header_offset
+                ws2.cell(row=row_num, column=new_col_idx, value=None if (val != val) else round(float(val), 6))
+            save_workbook_safe(wb2, file_path)
+        finally:
+            wb2.close()
+
+        logger.info(
+            "Rolling %s (window=%d) column '%s' added in '%s'", rolling_func, window, new_column_name, sheet_name
+        )
+        return {
+            "status": "success",
+            "new_column": new_column_name,
+            "column_type": "rolling",
+            "rolling_func": rolling_func,
+            "window": window,
+            "source_col": source_col,
+            "rows_added": len(rolled),
+        }
 
     # column_type == "formula" (default path)
     df = _read_sheet_df(file_path, sheet_name, has_header)
