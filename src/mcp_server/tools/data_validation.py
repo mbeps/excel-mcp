@@ -161,3 +161,34 @@ def remove_validation(file_path: str, sheet_name: str, cell_range: str) -> str:
         return f"Removed {count} validation(s) from '{cell_range}' on sheet '{sheet_name}'."
     finally:
         wb.close()
+
+
+def add_formula_validation(
+    file_path: str,
+    sheet_name: str,
+    range_str: str,
+    formula: str,
+    error_title: str = "Invalid",
+    error_message: str = "Value does not meet the criteria.",
+    show_error: bool = True,
+) -> dict:
+    """Add a custom formula-based data validation rule."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+
+        dv = DataValidation(
+            type="custom",
+            formula1=formula,
+            showErrorMessage=show_error,
+            error=error_message,
+            errorTitle=error_title,
+        )
+        dv.add(range_str)
+        ws.add_data_validation(dv)
+
+        save_workbook_safe(wb, file_path)
+        logger.info("Added formula validation to %s in %s", range_str, file_path)
+        return {"range": range_str, "formula": formula, "validation_type": "custom"}
+    finally:
+        wb.close()

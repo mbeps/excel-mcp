@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from logging import Logger
 
-from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule, FormulaRule, IconSetRule
+from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule, FormulaRule, IconSetRule, Rule
 from openpyxl.styles import Font, PatternFill
+from openpyxl.styles.differential import DifferentialStyle
 
 from mcp_server.utils.excel_helpers import (
     get_sheet,
@@ -165,5 +166,77 @@ def add_formula_rule(
         save_workbook_safe(wb, file_path)
         logger.info("Added formula rule to %s in %s", cell_range, file_path)
         return f"Added formula-based conditional formatting to '{cell_range}' on sheet '{sheet_name}'."
+    finally:
+        wb.close()
+
+
+def add_top_bottom_rule(
+    file_path: str,
+    sheet_name: str,
+    range_str: str,
+    is_top: bool = True,
+    rank: int = 10,
+    percent: bool = False,
+    bg_color: str = "FFFF00",
+    font_color: str | None = None,
+) -> dict:
+    """Add a top/bottom N (or %) conditional formatting rule."""
+    if rank <= 0:
+        raise ValueError(f"rank must be a positive integer, got {rank}")
+    if percent and rank > 100:
+        raise ValueError(f"rank as percentage must be 0-100, got {rank}")
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+
+        font = Font(color=font_color) if font_color else None
+        dxf = DifferentialStyle(fill=PatternFill(bgColor=bg_color), font=font)
+        rule = Rule(
+            type="top10",
+            dxf=dxf,
+            rank=rank,
+            percent=(1 if percent else 0),
+            bottom=(1 if not is_top else 0),
+        )
+        ws.conditional_formatting.add(range_str, rule)
+        save_workbook_safe(wb, file_path)
+        logger.info("Added top10 rule (is_top=%s, rank=%d) to %s in %s", is_top, rank, range_str, file_path)
+        return {"range": range_str, "type": "top10", "rank": rank, "percent": percent, "is_top": is_top}
+    finally:
+        wb.close()
+
+
+def add_above_below_average_rule(
+    file_path: str,
+    sheet_name: str,
+    range_str: str,
+    is_above: bool = True,
+    equal_average: bool = False,
+    bg_color: str = "FFFF00",
+    font_color: str | None = None,
+) -> dict:
+    """Add an above/below average conditional formatting rule."""
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+
+        font = Font(color=font_color) if font_color else None
+        dxf = DifferentialStyle(fill=PatternFill(bgColor=bg_color), font=font)
+        rule = Rule(
+            type="aboveAverage",
+            dxf=dxf,
+            aboveAverage=(1 if is_above else 0),
+            equalAverage=(1 if equal_average else 0),
+        )
+        ws.conditional_formatting.add(range_str, rule)
+        save_workbook_safe(wb, file_path)
+        logger.info(
+            "Added aboveAverage rule (is_above=%s, equal=%s) to %s in %s",
+            is_above,
+            equal_average,
+            range_str,
+            file_path,
+        )
+        return {"range": range_str, "type": "aboveAverage", "is_above": is_above, "equal_average": equal_average}
     finally:
         wb.close()

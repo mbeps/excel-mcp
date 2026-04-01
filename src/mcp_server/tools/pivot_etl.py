@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from logging import Logger
 
 import pandas as pd
@@ -19,7 +20,34 @@ from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
 
+_PIVOTS_SHEET = "_mcp_pivots"
+
 VALID_KEEP = {"first", "last", False}
+
+
+def _load_pivots(wb: Workbook) -> dict:  # type: ignore[type-arg]
+    """Load pivot definitions from the hidden pivots sheet."""
+    if _PIVOTS_SHEET not in wb.sheetnames:
+        return {}
+    ws = wb[_PIVOTS_SHEET]
+    raw = ws["A1"].value
+    if not raw:
+        return {}
+    try:
+        return json.loads(str(raw))  # type: ignore[no-any-return]
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _save_pivots(wb: Workbook, pivots: dict) -> None:  # type: ignore[type-arg]
+    """Save pivot definitions dict to hidden sheet."""
+    if _PIVOTS_SHEET in wb.sheetnames:
+        ws = wb[_PIVOTS_SHEET]
+    else:
+        ws = wb.create_sheet(_PIVOTS_SHEET)
+        ws.sheet_state = "hidden"
+    ws["A1"] = json.dumps(pivots)
+
 
 _FORBIDDEN_NAMES: frozenset[str] = frozenset(
     {
@@ -140,9 +168,24 @@ def create_pivot_table(
         logger.info("Pivot table written to %s", output_file)
     elif output_sheet:
         wb = load_workbook_safe(file_path)
-        _write_df_to_sheet(wb, output_sheet, pivot)
-        save_workbook_safe(wb, file_path)
-        logger.info("Pivot table written to sheet '%s' in %s", output_sheet, file_path)
+        try:
+            _write_df_to_sheet(wb, output_sheet, pivot)
+            pivots = _load_pivots(wb)
+            pivots[output_sheet] = {
+                "file_path": file_path,
+                "sheet_name": sheet_name,
+                "index_cols": index_cols,
+                "value_cols": value_cols,
+                "aggfunc": aggfunc,
+                "output_sheet": output_sheet,
+                "include_margins": include_margins,
+                "column_field": column_field,
+            }
+            _save_pivots(wb, pivots)
+            save_workbook_safe(wb, file_path)
+            logger.info("Pivot table written to sheet '%s' in %s", output_sheet, file_path)
+        finally:
+            wb.close()
 
     return {
         "data": pivot.to_dict(orient="records"),
@@ -150,6 +193,53 @@ def create_pivot_table(
         "value_columns": value_cols,
         "column_field": column_field,
         "operation": aggfunc,
+    }
+
+
+def refresh_pivot_table(
+    file_path: str,
+    output_sheet: str,
+    source_file_path: str | None = None,
+    source_sheet: str | None = None,
+) -> dict:  # type: ignore[type-arg]
+    """Refresh a pivot table by re-running its stored definition.
+
+    Reads the pivot parameters persisted in the hidden '_mcp_pivots' sheet
+    and re-invokes create_pivot_table() to regenerate the snapshot.
+    """
+    wb = load_workbook_safe(file_path)
+    try:
+        pivots = _load_pivots(wb)
+        if output_sheet not in pivots:
+            raise ValueError(f"No pivot definition found for sheet '{output_sheet}'. Available: {list(pivots.keys())}")
+        params = dict(pivots[output_sheet])
+    finally:
+        wb.close()
+
+    if source_file_path is not None:
+        params["file_path"] = source_file_path
+    if source_sheet is not None:
+        params["sheet_name"] = source_sheet
+
+    result = create_pivot_table(
+        file_path=params["file_path"],
+        sheet_name=params["sheet_name"],
+        index_cols=params["index_cols"],
+        value_cols=params["value_cols"],
+        aggfunc=params.get("aggfunc", "sum"),
+        output_sheet=params["output_sheet"],
+        output_file=None,
+        include_margins=params.get("include_margins", False),
+        column_field=params.get("column_field"),
+    )
+
+    rows = len(result.get("data", []))  # type: ignore[arg-type]
+    logger.info("Refreshed pivot '%s' in %s (%d rows)", output_sheet, file_path, rows)
+    return {
+        "refreshed": output_sheet,
+        "source_file": params["file_path"],
+        "source_sheet": params["sheet_name"],
+        "rows": rows,
     }
 
 

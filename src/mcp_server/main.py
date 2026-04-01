@@ -286,9 +286,58 @@ def copy_range(
     dest_range: str,
     copy_values: bool = True,
     copy_styles: bool = True,
+    paste_values_only: bool = False,
 ) -> str:
     """Copy cells from source range to destination range within same or across sheets."""
-    return _cell_ops.copy_range(file_path, source_sheet, source_range, dest_sheet, dest_range, copy_values, copy_styles)
+    return _cell_ops.copy_range(
+        file_path, source_sheet, source_range, dest_sheet, dest_range, copy_values, copy_styles, paste_values_only
+    )
+
+
+@mcp.tool()
+def find_replace(
+    file_path: str,
+    sheet_name: str,
+    find_text: str,
+    replace_text: str,
+    match_case: bool = False,
+    match_entire_cell: bool = False,
+    search_formulas: bool = False,
+) -> str:
+    """Find and replace text across a worksheet. Set match_case for case-sensitive search."""
+    return json.dumps(
+        _cell_ops.find_replace(
+            file_path,
+            sheet_name,
+            find_text,
+            replace_text,
+            match_case,
+            match_entire_cell,
+            search_formulas,
+        )
+    )
+
+
+@mcp.tool()
+def transpose_range(
+    file_path: str,
+    sheet_name: str,
+    source_range: str,
+    target_cell: str,
+    source_sheet: str | None = None,
+    paste_values_only: bool = False,
+) -> str:
+    """Transpose (swap rows and columns) of source_range and write starting at target_cell."""
+    return json.dumps(
+        _cell_ops.transpose_range(
+            file_path,
+            sheet_name,
+            source_range,
+            target_cell,
+            source_sheet,
+            paste_values_only,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +371,8 @@ def format_cells(
     bottom_border_style: BorderStyle | None = None,
     left_border_style: BorderStyle | None = None,
     right_border_style: BorderStyle | None = None,
+    number_format_preset: str | None = None,
+    preserve_existing: bool = False,
 ) -> str:
     """Apply formatting (font, fill, alignment, borders, number format) to a cell range."""
     return _formatting.format_cells(
@@ -334,6 +385,7 @@ def format_cells(
         font_color,
         bg_color,
         number_format,
+        number_format_preset,
         horizontal_alignment,
         vertical_alignment,
         wrap_text,
@@ -349,6 +401,7 @@ def format_cells(
         bottom_border_style,
         left_border_style,
         right_border_style,
+        preserve_existing,
     )
 
 
@@ -358,6 +411,38 @@ def auto_fit_columns(file_path: str, sheet_name: str) -> str:
     return _formatting.auto_fit_columns(file_path, sheet_name)
 
 
+@mcp.tool()
+def copy_cell_format(
+    file_path: str,
+    sheet_name: str,
+    source_cell: str,
+    target_range: str,
+) -> str:
+    """Copy all formatting from source_cell and apply it to every cell in target_range."""
+    return json.dumps(_formatting.copy_cell_format(file_path, sheet_name, source_cell, target_range))
+
+
+@mcp.tool()
+def clear_cell_format(
+    file_path: str,
+    sheet_name: str,
+    range_str: str,
+) -> str:
+    """Reset all formatting on cells in range_str without touching values."""
+    return json.dumps(_formatting.clear_cell_format(file_path, sheet_name, range_str))
+
+
+@mcp.tool()
+def apply_named_style(
+    file_path: str,
+    sheet_name: str,
+    range_str: str,
+    style_name: str,
+) -> str:
+    """Apply a named built-in Excel style (e.g. 'Good', 'Bad', 'Neutral', 'Heading 1') to a cell range."""
+    return json.dumps(_formatting.apply_named_style(file_path, sheet_name, range_str, style_name))
+
+
 # ---------------------------------------------------------------------------
 # Formula Write (consolidated)
 # ---------------------------------------------------------------------------
@@ -365,7 +450,7 @@ def auto_fit_columns(file_path: str, sheet_name: str) -> str:
 
 @mcp.tool()
 def formula_write(
-    action: Literal["set", "batch"],
+    action: Literal["set", "batch", "fill", "auto_sum"],
     file_path: str,
     sheet_name: str,
     cell_ref: str | None = None,
@@ -373,11 +458,14 @@ def formula_write(
     is_array: bool = False,
     target_range: str | None = None,
     formulas: dict[str, str] | None = None,
+    source_range: str | None = None,
 ) -> str:
     """Write formulas to cells.
 
     action="set": Set a formula on a cell. Requires: cell_ref, formula. Optional: is_array, target_range.
     action="batch": Set multiple formulas. Requires: formulas (dict of cell_ref -> formula).
+    action="fill": Drag-fill a formula. Requires: cell_ref (source), target_range.
+    action="auto_sum": Insert =SUM() formula. Requires: cell_ref (destination). Optional: source_range.
     """
     if action == "set":
         if cell_ref is None:
@@ -389,6 +477,16 @@ def formula_write(
         if formulas is None:
             raise ValueError("formulas is required for action='batch'.")
         return _formulas.set_formulas_batch(file_path, sheet_name, formulas)
+    if action == "fill":
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='fill'.")
+        if target_range is None:
+            raise ValueError("target_range is required for action='fill'.")
+        return json.dumps(_cell_ops.fill_formula(file_path, sheet_name, cell_ref, target_range))
+    if action == "auto_sum":
+        if cell_ref is None:
+            raise ValueError("cell_ref is required for action='auto_sum'.")
+        return json.dumps(_cell_ops.auto_sum(file_path, sheet_name, cell_ref, source_range))
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -483,7 +581,7 @@ def csv_ops(
 
 @mcp.tool()
 def conditional_format(
-    action: Literal["apply", "highlight", "formula_rule", "remove"],
+    action: Literal["apply", "highlight", "formula_rule", "remove", "top_bottom", "above_below_average"],
     file_path: str,
     sheet_name: str,
     cell_range: str | None = None,
@@ -498,6 +596,11 @@ def conditional_format(
     formula: str | None = None,
     font_color: str = "9C0006",
     bg_color: str = "FFC7CE",
+    is_top: bool = True,
+    rank: int = 10,
+    percent: bool = False,
+    is_above: bool = True,
+    equal_average: bool = False,
 ) -> str:
     """Conditional formatting operations.
 
@@ -505,6 +608,8 @@ def conditional_format(
     action="highlight": Highlight rule based on operator. Requires: cell_range, operator, formula.
     action="formula_rule": Custom formula-based rule. Requires: cell_range, formula.
     action="remove": DESTRUCTIVE. Remove rules. Optional: cell_range (omit to clear all).
+    action="top_bottom": Top/bottom N rule. Requires: cell_range. Optional: is_top, rank, percent, bg_color, font_color.
+    action="above_below_average": Above/below average rule. Requires: cell_range. Optional: is_above, equal_average, bg_color, font_color.
     """
     if action == "apply":
         if cell_range is None:
@@ -548,6 +653,35 @@ def conditional_format(
         return _cond_fmt.add_formula_rule(file_path, sheet_name, cell_range, formula, font_color, bg_color)
     if action == "remove":
         return _cond_fmt.remove_conditional_formatting(file_path, sheet_name, cell_range)
+    if action == "top_bottom":
+        if cell_range is None:
+            raise ValueError("cell_range is required for action='top_bottom'.")
+        return json.dumps(
+            _cond_fmt.add_top_bottom_rule(
+                file_path,
+                sheet_name,
+                cell_range,
+                is_top,
+                rank,
+                percent,
+                bg_color,
+                font_color,
+            )
+        )
+    if action == "above_below_average":
+        if cell_range is None:
+            raise ValueError("cell_range is required for action='above_below_average'.")
+        return json.dumps(
+            _cond_fmt.add_above_below_average_rule(
+                file_path,
+                sheet_name,
+                cell_range,
+                is_above,
+                equal_average,
+                bg_color,
+                font_color,
+            )
+        )
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -610,7 +744,7 @@ def table(
 
 @mcp.tool()
 def data_validation(
-    action: Literal["dropdown", "numeric", "date", "remove"],
+    action: Literal["dropdown", "numeric", "date", "remove", "formula"],
     file_path: str,
     sheet_name: str,
     cell_range: str,
@@ -627,6 +761,8 @@ def data_validation(
     error_message: str | None = None,
     prompt_title: str | None = None,
     prompt_message: str | None = None,
+    formula: str | None = None,
+    show_error: bool = True,
 ) -> str:
     """Data validation operations.
 
@@ -634,6 +770,7 @@ def data_validation(
     action="numeric": Numeric validation. Requires: operator, value1. Optional: value2 for between.
     action="date": Date validation. Optional: operator, date1, date2.
     action="remove": DESTRUCTIVE. Remove validations from range.
+    action="formula": Custom formula validation. Requires: formula. Optional: error_title, error_message, show_error.
     """
     if action == "dropdown":
         if options is None and source_range is None:
@@ -687,6 +824,20 @@ def data_validation(
         )
     if action == "remove":
         return _data_val.remove_validation(file_path, sheet_name, cell_range)
+    if action == "formula":
+        if formula is None:
+            raise ValueError("formula is required for action='formula'.")
+        return json.dumps(
+            _data_val.add_formula_validation(
+                file_path,
+                sheet_name,
+                cell_range,
+                formula,
+                error_title or "Invalid",
+                error_message or "Value does not meet the criteria.",
+                show_error,
+            )
+        )
     raise ValueError(f"Unknown action: {action}")
 
 
@@ -1467,6 +1618,17 @@ def create_pivot_table(
         False,
         column_field,
     )
+
+
+@mcp.tool()
+def refresh_pivot_table(
+    file_path: str,
+    output_sheet: str,
+    source_file_path: str | None = None,
+    source_sheet: str | None = None,
+) -> str:
+    """Refresh a previously-created pivot table by re-running its stored definition."""
+    return json.dumps(_pivot_etl.refresh_pivot_table(file_path, output_sheet, source_file_path, source_sheet))
 
 
 @mcp.tool()

@@ -264,20 +264,35 @@ def copy_range(
     dest_range: str,
     copy_values: bool = True,
     copy_styles: bool = True,
+    paste_values_only: bool = False,
 ) -> str:
-    """Copy cells from source range to destination within same or across sheets."""
+    """Copy cells from source range to destination within same or across sheets.
+
+    When paste_values_only=True, the computed (data_only) value of each source cell is
+    copied instead of the formula string, mimicking Excel's Paste Special → Values.
+    """
+    if ":" in source_range:
+        src_start, src_end = source_range.split(":")
+    else:
+        src_start = src_end = source_range
+    range_key = f"{src_start}:{src_end}"
+
+    # Pre-read computed values when paste_values_only is requested
+    computed: list[list] | None = None
+    if paste_values_only:
+        wb_data = load_workbook_safe(file_path, data_only=True)
+        try:
+            ws_data = get_sheet(wb_data, source_sheet)
+            computed = [[c.value for c in row] for row in ws_data[range_key]]
+        finally:
+            wb_data.close()
+
     wb = load_workbook_safe(file_path)
     try:
         ws_src = get_sheet(wb, source_sheet)
         ws_dst = get_sheet(wb, dest_sheet)
 
-        # Parse source range
-        if ":" in source_range:
-            src_start, src_end = source_range.split(":")
-        else:
-            src_start = src_end = source_range
-
-        src_cells = list(ws_src[f"{src_start}:{src_end}"])
+        src_cells = list(ws_src[range_key])
 
         # Parse destination top-left cell
         dest_cell = ws_dst[dest_range.split(":")[0]]
@@ -292,7 +307,7 @@ def copy_range(
                     column=dest_start_col + c_offset,
                 )
                 if copy_values:
-                    dst.value = cell.value
+                    dst.value = computed[r_offset][c_offset] if paste_values_only else cell.value  # type: ignore[index]
                 if copy_styles:
                     dst.font = copy.copy(cell.font)
                     dst.fill = copy.copy(cell.fill)
@@ -448,3 +463,211 @@ def unmerge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[st
         return {"status": "success", "message": f"Unmerged cells {range_string}"}
     finally:
         wb.close()
+
+
+# ---------------------------------------------------------------------------
+# New cell-operation features
+# ---------------------------------------------------------------------------
+
+
+def fill_formula(
+    file_path: str,
+    sheet_name: str,
+    source_cell: str,
+    target_range: str,
+) -> dict[str, int | str]:
+    """Drag-fill: translate a formula from source_cell into every cell of target_range.
+
+    Uses openpyxl Translator to adjust relative references for each destination cell.
+    Absolute references (e.g. $A$1) are left unchanged, matching Excel behaviour.
+    """
+    from openpyxl.formula.translate import Translator
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        source_formula = ws[source_cell.upper()].value
+        if not isinstance(source_formula, str) or not source_formula.startswith("="):
+            raise ValueError(f"Source cell {source_cell} does not contain a formula.")
+
+        range_key = target_range if ":" in target_range else f"{target_range}:{target_range}"
+        translator = Translator(source_formula, source_cell.upper())
+        filled = 0
+        for row in ws[range_key]:
+            for cell in row:
+                cell.value = translator.translate_formula(cell.coordinate)
+                filled += 1
+
+        save_workbook_safe(wb, file_path)
+        logger.info("fill_formula: filled %d cells in %s", filled, sheet_name)
+        return {"cells_filled": filled, "source_formula": source_formula}
+    finally:
+        wb.close()
+
+
+def find_replace(
+    file_path: str,
+    sheet_name: str,
+    find_text: str,
+    replace_text: str,
+    match_case: bool = False,
+    match_entire_cell: bool = False,
+    search_formulas: bool = False,
+) -> dict[str, int | list[str]]:
+    """Find and replace text in cell values (or formula strings) across a sheet.
+
+    By default formula cells are skipped (search_formulas=False).
+    Set match_case=True for a case-sensitive search.
+    Set match_entire_cell=True to require an exact whole-cell match.
+    """
+    import re as _re
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        modified: list[str] = []
+        needle = find_text if match_case else find_text.lower()
+        flags = 0 if match_case else _re.IGNORECASE
+
+        for row in ws.iter_rows():
+            for cell in row:
+                val = cell.value
+                if val is None:
+                    continue
+                is_formula = isinstance(val, str) and val.startswith("=")
+                if is_formula and not search_formulas:
+                    continue
+                content = str(val)
+                compare = content if match_case else content.lower()
+
+                if match_entire_cell:
+                    if compare == needle:
+                        cell.value = replace_text
+                        modified.append(cell.coordinate)
+                else:
+                    if needle in compare:
+                        cell.value = _re.sub(_re.escape(find_text), replace_text, content, flags=flags)
+                        modified.append(cell.coordinate)
+
+        if modified:
+            save_workbook_safe(wb, file_path)
+        logger.info("find_replace: %d replacements in %s", len(modified), sheet_name)
+        return {"replacements_made": len(modified), "cells_modified": modified}
+    finally:
+        wb.close()
+
+
+def transpose_range(
+    file_path: str,
+    sheet_name: str,
+    source_range: str,
+    target_cell: str,
+    source_sheet: str | None = None,
+    paste_values_only: bool = False,
+) -> dict[str, list[int]]:
+    """Read source_range, swap rows and columns, and write starting at target_cell.
+
+    When paste_values_only=True the computed (data_only) values are used instead of
+    raw formula strings.  Styles are never copied.
+    """
+    src_sheet = source_sheet if source_sheet is not None else sheet_name
+    range_key = source_range if ":" in source_range else f"{source_range}:{source_range}"
+
+    data: list[list]
+    if paste_values_only:
+        wb_data = load_workbook_safe(file_path, data_only=True)
+        try:
+            ws_data = get_sheet(wb_data, src_sheet)
+            data = [[cell.value for cell in row] for row in ws_data[range_key]]
+        finally:
+            wb_data.close()
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws_src = get_sheet(wb, src_sheet)
+        ws_dst = get_sheet(wb, sheet_name)
+
+        if not paste_values_only:
+            data = [[cell.value for cell in row] for row in ws_src[range_key]]
+
+        n_rows = len(data)
+        n_cols = len(data[0]) if data else 0
+
+        dst = ws_dst[target_cell.upper()]
+        dst_row, dst_col = dst.row, dst.column
+
+        for r in range(n_rows):
+            for c in range(n_cols):
+                ws_dst.cell(row=dst_row + c, column=dst_col + r, value=data[r][c])
+
+        save_workbook_safe(wb, file_path)
+        logger.info("transpose_range: %dx%d → %dx%d in %s", n_rows, n_cols, n_cols, n_rows, sheet_name)
+        return {"source_shape": [n_rows, n_cols], "target_shape": [n_cols, n_rows]}
+    finally:
+        wb.close()
+
+
+def auto_sum(
+    file_path: str,
+    sheet_name: str,
+    cell: str,
+    source_range: str | None = None,
+) -> dict[str, str]:
+    """Write =SUM(...) into cell.
+
+    If source_range is provided it is used directly.  Otherwise, the function
+    scans upward for consecutive numeric cells in the same column; if none are
+    found it scans left along the same row.  Falls back to the single cell
+    immediately above if no numeric neighbours exist.
+    """
+    from openpyxl.utils import column_index_from_string, get_column_letter
+    from openpyxl.utils.cell import coordinate_from_string
+
+    cell_upper = cell.upper()
+
+    if source_range is not None:
+        formula = f"=SUM({source_range})"
+        wb = load_workbook_safe(file_path)
+        try:
+            ws = get_sheet(wb, sheet_name)
+            ws[cell_upper] = formula
+            save_workbook_safe(wb, file_path)
+        finally:
+            wb.close()
+        return {"formula": formula, "cell": cell_upper}
+
+    col_letter, row_num = coordinate_from_string(cell_upper)
+    col_idx = column_index_from_string(col_letter)
+
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+
+        # Scan upward for consecutive numeric cells
+        top = row_num - 1
+        while top >= 1 and isinstance(ws.cell(row=top, column=col_idx).value, (int, float)):
+            top -= 1
+        top += 1  # first numeric row, or row_num if none found
+
+        if top < row_num:
+            range_str = f"{col_letter}{top}:{col_letter}{row_num - 1}"
+        else:
+            # Scan left for consecutive numeric cells in the same row
+            left = col_idx - 1
+            while left >= 1 and isinstance(ws.cell(row=row_num, column=left).value, (int, float)):
+                left -= 1
+            left += 1
+
+            if left < col_idx:
+                range_str = f"{get_column_letter(left)}{row_num}:{get_column_letter(col_idx - 1)}{row_num}"
+            else:
+                raise ValueError(f"No numeric cells found adjacent to '{cell}'. Provide source_range explicitly.")
+
+        formula = f"=SUM({range_str})"
+        ws[cell_upper] = formula
+        save_workbook_safe(wb, file_path)
+        logger.info("auto_sum: wrote %s into %s!%s", formula, sheet_name, cell_upper)
+    finally:
+        wb.close()
+
+    return {"formula": formula, "cell": cell_upper}
