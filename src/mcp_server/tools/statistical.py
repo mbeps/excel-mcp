@@ -247,6 +247,8 @@ def run_exponential_smoothing(
     seasonal_periods: int | None = None,
     forecast_steps: int = 0,
     output_file: str | None = None,
+    smoothing_trend: float | None = None,
+    smoothing_seasonal: float | None = None,
 ) -> dict[str, object]:
     """Compute and write exponentially smoothed series to the sheet.
 
@@ -293,7 +295,20 @@ def run_exponential_smoothing(
             seasonal=seasonal,
             seasonal_periods=sp,
         )
-        fit = hw_model.fit(smoothing_level=alpha, optimized=False)
+        fit_kwargs: dict[str, object] = {"smoothing_level": alpha}
+        all_provided = True
+        if method in ("holt", "holt_winters"):
+            if smoothing_trend is not None:
+                fit_kwargs["smoothing_trend"] = smoothing_trend
+            else:
+                all_provided = False
+        if method == "holt_winters":
+            if smoothing_seasonal is not None:
+                fit_kwargs["smoothing_seasonal"] = smoothing_seasonal
+            else:
+                all_provided = False
+        fit_kwargs["optimized"] = not all_provided
+        fit = hw_model.fit(**fit_kwargs)
         values = fit.fittedvalues.tolist()
 
         if forecast_steps > 0:

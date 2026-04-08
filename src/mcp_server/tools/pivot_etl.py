@@ -357,7 +357,7 @@ def add_computed_column(
     source_col: str | None = None,
     window: int | None = None,
     rolling_func: str = "mean",
-) -> "str | dict":
+) -> str:
     """Add a computed column using a pandas-eval expression or cumulative sum.
 
     column_type='formula' (default): evaluate ``expression`` via pandas eval.
@@ -387,7 +387,7 @@ def add_computed_column(
             logger.info(
                 "Added cumsum column '%s' from '%s' to %s!%s", new_column_name, source_col, sheet_name, file_path
             )
-            return {"status": "ok", "new_column": new_column_name, "column_type": "cumsum"}
+            return f"Added cumsum column '{new_column_name}' from source column '{source_col}' to sheet '{sheet_name}' ({len(df)} rows written)."
         finally:
             wb.close()
 
@@ -422,15 +422,7 @@ def add_computed_column(
         logger.info(
             "Rolling %s (window=%d) column '%s' added in '%s'", rolling_func, window, new_column_name, sheet_name
         )
-        return {
-            "status": "success",
-            "new_column": new_column_name,
-            "column_type": "rolling",
-            "rolling_func": rolling_func,
-            "window": window,
-            "source_col": source_col,
-            "rows_added": len(rolled),
-        }
+        return f"Added rolling {rolling_func} column '{new_column_name}' (window={window}) from source column '{source_col}' to sheet '{sheet_name}'."
 
     # column_type == "formula" (default path)
     df = _read_sheet_df(file_path, sheet_name, has_header)

@@ -165,7 +165,8 @@ def get_formula_precedents(
 
 def _cell_in_range(cell_ref: str, range_ref: str) -> bool:
     """Check if a cell falls within an A1-style range (e.g. 'B2' in 'B1:B10')."""
-    from openpyxl.utils import column_index_from_string, coordinate_from_string
+    from openpyxl.utils import column_index_from_string
+    from openpyxl.utils.cell import coordinate_from_string
 
     parts = range_ref.split(":")
     if len(parts) != 2:

@@ -2210,12 +2210,16 @@ def run_exponential_smoothing(
     method: str = "simple",
     seasonal_periods: int | None = None,
     forecast_steps: int = 0,
+    smoothing_trend: float | None = None,
+    smoothing_seasonal: float | None = None,
 ) -> dict:
     """Apply exponential smoothing to a time series and write the result to a new column.
 
     method: "simple" (pandas EWM), "holt" (Holt linear trend), "holt_winters" (Holt-Winters seasonal).
     seasonal_periods: required for holt_winters (e.g. 12 for monthly data).
     forecast_steps: number of out-of-sample steps to forecast.
+    smoothing_trend: trend smoothing factor for holt/holt_winters (0 < value <= 1). If omitted, statsmodels optimizes it.
+    smoothing_seasonal: seasonal smoothing factor for holt_winters (0 < value <= 1). If omitted, statsmodels optimizes it.
     """
     return _statistical.run_exponential_smoothing(
         file_path,
@@ -2228,6 +2232,8 @@ def run_exponential_smoothing(
         seasonal_periods=seasonal_periods,
         forecast_steps=forecast_steps,
         output_file=output_file,
+        smoothing_trend=smoothing_trend,
+        smoothing_seasonal=smoothing_seasonal,
     )
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from logging import Logger
 
+from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import range_boundaries
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from mcp_server.models.common import CellScalar
@@ -86,16 +88,56 @@ def set_table_totals_row(
 
     Valid function names: sum, count, average, max, min, countNums, stdDev, var, none.
     """
+    _SUBTOTAL_IDS = {
+        "average": 101,
+        "count": 103,
+        "countNums": 102,
+        "max": 104,
+        "min": 105,
+        "stdDev": 107,
+        "sum": 109,
+        "var": 110,
+    }
+
     wb = load_workbook_safe(file_path)
     ws = get_sheet(wb, sheet_name)
     if table_name not in ws.tables:
         raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
     table = ws.tables[table_name]
-    table.totalsRowCount = 1 if show_totals else None
-    if show_totals and column_totals and table.tableColumns:
-        for col in table.tableColumns:
-            if col.name in column_totals:
-                col.totalsRowFunction = column_totals[col.name]
+
+    min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+
+    if show_totals:
+        # Only extend ref if table doesn't already have a totals row
+        if not table.totalsRowCount:
+            totals_row = max_row + 1
+            table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{totals_row}"
+        else:
+            totals_row = max_row  # ref already includes totals row
+
+        table.totalsRowCount = 1
+
+        if column_totals and table.tableColumns:
+            for col_idx, col in enumerate(table.tableColumns, start=min_col):
+                if col.name in column_totals:
+                    func = column_totals[col.name]
+                    col.totalsRowFunction = func
+                    subtotal_id = _SUBTOTAL_IDS.get(func)
+                    if subtotal_id is not None:
+                        cell = ws.cell(row=totals_row, column=col_idx)
+                        cell.value = f"=SUBTOTAL({subtotal_id},[{col.name}])"
+    else:
+        # Disable totals
+        if table.totalsRowCount:
+            # Clear cells in the totals row and shrink ref
+            for c in range(min_col, max_col + 1):
+                ws.cell(row=max_row, column=c).value = None
+            table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row - 1}"
+            if table.tableColumns:
+                for col in table.tableColumns:
+                    col.totalsRowFunction = None
+        table.totalsRowCount = None
+
     save_workbook_safe(wb, file_path)
     logger.info("Set totals row for table '%s': show=%s", table_name, show_totals)
     return f"Totals row {'enabled' if show_totals else 'disabled'} for table '{table_name}'."
