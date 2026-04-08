@@ -75,6 +75,12 @@ class _NoopMCP:
 
         return decorator
 
+    def prompt(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
 
 # During testing, we may want to skip FastMCP registration and avoid potential startup blocking.
 if __import__("os").environ.get("MCP_SERVER_DISABLE_TOOL_REGISTRATION") == "1":
@@ -2353,6 +2359,15 @@ def execute_custom_code(
     Set 'result' variable to return data.
     """
     return _custom_code.execute_custom_code(file_path, code, sheet, output_file)
+
+
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
+
+from mcp_server.prompts import register_prompts as _register_prompts  # noqa: E402
+
+_register_prompts(mcp)
 
 
 # ---------------------------------------------------------------------------
