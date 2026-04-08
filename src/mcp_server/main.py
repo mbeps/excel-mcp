@@ -61,7 +61,27 @@ from mcp_server.models.workbook import (
 from mcp_server.tools.scenarios import ScenarioApplyResult
 from mcp_server.utils.logger import configure_logging
 
-mcp: FastMCP = FastMCP("excel-mcp-server")
+
+class _NoopMCP:
+    def resource(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    def tool(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+
+# During testing, we may want to skip FastMCP registration and avoid potential startup blocking.
+if __import__("os").environ.get("MCP_SERVER_DISABLE_TOOL_REGISTRATION") == "1":
+    mcp = _NoopMCP()
+else:
+    mcp = FastMCP("excel-mcp-server")
+
 logger: Logger = configure_logging("mcp_server.main")
 
 
