@@ -52,16 +52,17 @@ def chart(
     label_position: str | None = None,
     show_legend: bool = True,
     legend_position: str | None = None,
+    categories_range: str | None = None,
 ) -> str | list[ChartInfo]:
     """Perform chart lifecycle and series/configuration operations on a worksheet.
 
     Args:
         action: One of "create", "delete", "list", "add_series", "set_axes", "trendline", "combo", "data_labels", "legend", "update".
-            - "create": create a chart from `data_range` at `target_cell`.
+            - "create": create a chart from `data_range` at `target_cell`; optional `categories_range` overrides x-axis category labels.
             - "delete": remove a chart (optionally `chart_index`). Destructive.
             - "list": return list of charts (read-only).
             - "add_series": add a series to an existing chart (requires `chart_index`, `data_range`).
-            - "set_axes": configure axis titles/ranges/number format.
+            - "set_axes": configure axis titles/ranges/number format; optional `categories_range` sets x-axis category labels.
             - "trendline": add a trendline to a series.
             - "combo": create a combo chart; requires `bar_columns` and `line_columns`.
             - "data_labels": configure data labels by `chart_title`.
@@ -100,6 +101,7 @@ def chart(
             style,
             width,
             height,
+            categories_range=categories_range,
         )
     if action == "delete":
         return _charts.delete_chart(file_path, sheet_name, chart_index or 0)
@@ -124,6 +126,7 @@ def chart(
             y_max,
             y_number_format,
             log_scale_y,
+            categories_range=categories_range,
         )
     if action == "trendline":
         return _charts.add_chart_trendline(

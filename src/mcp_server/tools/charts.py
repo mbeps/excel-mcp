@@ -73,6 +73,7 @@ def create_chart(
     style: int = 10,
     width: float = 15,
     height: float = 10,
+    categories_range: str | None = None,
 ) -> str:
     """Create a native Excel chart from a rectangular data range and insert it into a sheet.
 
@@ -88,6 +89,9 @@ def create_chart(
         style (int): openpyxl chart style index.
         width (float): Width in Excel units.
         height (float): Height in Excel units.
+        categories_range (str|None): Optional A1 range for x-axis category labels. When provided
+            the entire ``data_range`` is used as series data and this range supplies categories.
+            Ignored for bubble charts.
 
     Returns:
         str: Human-readable confirmation.
@@ -115,11 +119,19 @@ def create_chart(
         chart.height = height
 
         if chart_type == "scatter":
-            x_values = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
-            for col_idx in range(min_col + 1, max_col + 1):
-                y_values = Reference(ws, min_col=col_idx, min_row=min_row, max_row=max_row)
-                chart.add_data(y_values, titles_from_data=True)
-                chart.series[-1].xvalues = x_values
+            if categories_range is not None:
+                cat_bounds = range_boundaries(categories_range)
+                x_values = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+                for col_idx in range(min_col, max_col + 1):
+                    y_values = Reference(ws, min_col=col_idx, min_row=min_row, max_row=max_row)
+                    chart.add_data(y_values, titles_from_data=True)
+                    chart.series[-1].xvalues = x_values
+            else:
+                x_values = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
+                for col_idx in range(min_col + 1, max_col + 1):
+                    y_values = Reference(ws, min_col=col_idx, min_row=min_row, max_row=max_row)
+                    chart.add_data(y_values, titles_from_data=True)
+                    chart.series[-1].xvalues = x_values
         elif chart_type == "bubble":
             # Bubble chart needs x, y, size columns (at least 3 data columns)
             x_values = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
@@ -130,13 +142,23 @@ def create_chart(
             chart.series[0].zvalues = size_values
         elif chart_type == "stock":
             # Stock chart expects Open/High/Low/Close data in columns
-            data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
-            categories = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
+            if categories_range is not None:
+                data = Reference(ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
+                cat_bounds = range_boundaries(categories_range)
+                categories = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+            else:
+                data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
+                categories = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(categories)
         else:
-            data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
-            categories = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
+            if categories_range is not None:
+                data = Reference(ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
+                cat_bounds = range_boundaries(categories_range)
+                categories = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+            else:
+                data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
+                categories = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(categories)
 
@@ -325,6 +347,7 @@ def set_chart_axes(
     y_max: float | None = None,
     y_number_format: str | None = None,
     log_scale_y: bool = False,
+    categories_range: str | None = None,
 ) -> str:
     """Configure numeric axis properties and titles for an existing chart.
 
@@ -336,6 +359,7 @@ def set_chart_axes(
         x_min/x_max/y_min/y_max (float|None): Axis bounds.
         y_number_format (str|None): Number format string for Y axis.
         log_scale_y (bool): If True set log scale on Y axis.
+        categories_range (str|None): Optional A1 range to set as x-axis category labels.
 
     Returns:
         str: Confirmation message.
@@ -376,6 +400,10 @@ def set_chart_axes(
                 chart.y_axis.numFmt = y_number_format
             if log_scale_y:
                 chart.y_axis.scaling.logBase = 10
+        if categories_range is not None:
+            cat_bounds = range_boundaries(categories_range)
+            cat_ref = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+            chart.set_categories(cat_ref)
         save_workbook_safe(wb, file_path)
         logger.info("Updated axes for chart %d in %s", chart_index, sheet_name)
         return f"Axes updated for chart {chart_index} in '{sheet_name}'."

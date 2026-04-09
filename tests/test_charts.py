@@ -428,6 +428,54 @@ def test_create_chart_column_three_series(tmp_path: Path) -> None:
     wb.close()
 
 
+# ── categories_range parameter ────────────────────────────────────────────
+
+
+def _make_car_workbook(tmp_path: Path, name: str = "cars.xlsx") -> tuple[str, str]:
+    """Create a workbook with car names in column A and numeric data in B-E."""
+    path = str(tmp_path / name)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Car", "Speed", "Accel", "HP", "Torque"])
+    ws.append(["Lexus", 220, 6.5, 300, 380])
+    ws.append(["BMW", 250, 5.8, 340, 420])
+    ws.append(["Mercedes", 240, 6.0, 320, 400])
+    wb.save(path)
+    wb.close()
+    return path, "Sheet1"
+
+
+def test_create_chart_with_categories_range(tmp_path: Path) -> None:
+    """create_chart with categories_range uses entire data_range as series."""
+    path, sheet = _make_car_workbook(tmp_path)
+    result = create_chart(
+        path,
+        sheet,
+        data_range="B1:E4",
+        chart_type="column",
+        target_cell="A6",
+        categories_range="A2:A4",
+    )
+    assert "Created" in result
+    wb = openpyxl.load_workbook(path)
+    chart = wb[sheet]._charts[0]
+    assert len(wb[sheet]._charts) == 1
+    assert len(chart.series) == 4
+    wb.close()
+
+
+def test_set_axes_with_categories_range(tmp_path: Path) -> None:
+    """set_chart_axes with categories_range sets categories without error."""
+    path, sheet = _make_car_workbook(tmp_path)
+    create_chart(path, sheet, data_range="B1:E4", chart_type="column", target_cell="A6")
+    result = set_chart_axes(path, sheet, chart_index=0, categories_range="A2:A4")
+    assert "updated" in result.lower()
+    wb = openpyxl.load_workbook(path)
+    assert len(wb[sheet]._charts) == 1
+    wb.close()
+
+
 def test_create_chart_title_attribute_set(tmp_path: Path) -> None:
     """create_chart stores a non-None title on the chart object."""
     path = _make_chart_workbook(tmp_path)
