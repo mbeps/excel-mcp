@@ -1,3 +1,16 @@
+"""excel-mcp MCP server entrypoint and route registration.
+
+This module configures logging and initialises the MCP `mcp` object (a
+`FastMCP` instance) unless tool registration is disabled for testing. It
+registers JSON resources and all tool routes, exposes a backwards-compatible
+set of route exports for tests/consumers, and provides `run()` as the
+convenience entrypoint to start the server.
+
+Usage:
+    Call `run()` to start the MCP server. Tests may set
+    `MCP_SERVER_DISABLE_TOOL_REGISTRATION=1` to avoid real registration.
+"""
+
 from __future__ import annotations
 
 import json

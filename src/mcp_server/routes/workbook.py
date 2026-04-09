@@ -23,27 +23,68 @@ __all__ = [
 
 
 def get_workbook_metadata(file_path: str) -> WorkbookMetadata:
-    """Get workbook metadata including sheet names, dimensions, active sheet, and named ranges."""
+    """Return workbook metadata including sheet names, active sheet, dimensions, and named ranges.
+
+    Args:
+        file_path: Path to the workbook to inspect.
+
+    Returns:
+        WorkbookMetadata: Pydantic model containing sheet list, active sheet, named ranges, and other metadata.
+
+    Notes:
+        - Read-only operation. Underlying implementation may use a lightweight reader for speed.
+    """
     return _workbook.get_workbook_metadata(file_path)
 
 
 def create_workbook(
     file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None
 ) -> WorkbookCreatedResult:
-    """Create a new .xlsx workbook.
+    """Create a new Excel workbook at `file_path` with optional initial sheets.
 
-    Optionally specify initial sheet names via sheet_names (list) or sheet_name (single).
+    Args:
+        file_path: Destination path for the new workbook.
+        sheet_names: Optional list of sheet names to create.
+        sheet_name: Optional single sheet name (legacy convenience).
+
+    Returns:
+        WorkbookCreatedResult: Contains file path and sheet information.
+
+    Notes:
+        - Mutates filesystem by creating a new .xlsx. Parent directory will be created if permitted by utils.
     """
     return _workbook.create_workbook(file_path, sheet_names, sheet_name)
 
 
 def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
-    """Get sheet summary: name, row/col counts, headers, and used range."""
+    """Return a brief summary of a sheet: header row, used range, row/column counts and detected headers.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet to summarise.
+
+    Returns:
+        SheetSummary: Pydantic model with summary fields.
+
+    Notes:
+        - Read-only.
+    """
     return _workbook.get_sheet_summary(file_path, sheet_name)
 
 
 def write_multi_sheet(file_path: str, sheets: list[SheetDefinition]) -> WriteMultiSheetResult:
-    """Create a new workbook with multiple named sheets, headers, data, and column widths in one call."""
+    """Create or overwrite a workbook with multiple sheets, headers and data in a single call.
+
+    Args:
+        file_path: Destination workbook path.
+        sheets: List of SheetDefinition (name, headers, rows, column widths, etc.).
+
+    Returns:
+        WriteMultiSheetResult: Result model with file path and any warnings.
+
+    Notes:
+        - Destructive when targeting existing files — document overwrite semantics in higher-level docs.
+    """
     return _workbook.write_multi_sheet(file_path, sheets)
 
 
@@ -55,15 +96,33 @@ def sheet_management(
     color: str | None = None,
     offset: int | None = None,
 ) -> str | dict:
-    """Manage worksheets within a workbook.
+    """Manage sheets within a workbook (rename, delete, copy, hide/unhide, set tab color, move order).
 
-    action="rename": Rename a sheet. Requires: new_name.
-    action="delete": DESTRUCTIVE. Delete a sheet. Raises if only sheet.
-    action="copy": Copy a sheet. Requires: new_name for the copy.
-    action="hide": Hide a sheet. Raises if it's the last visible sheet.
-    action="unhide": Unhide a hidden sheet.
-    action="tab_color": Set the tab colour. Requires: color (6-char hex, e.g. "FF0000"). Pass "000000" to clear.
-    action="move": Reorder the sheet tab. Requires: offset (positive=right, negative=left).
+    Args:
+        action: One of "rename", "delete", "copy", "hide", "unhide", "tab_color", "move".
+            - "rename": requires `new_name`.
+            - "delete": deletes the sheet; destructive.
+            - "copy": requires `new_name` for the copy.
+            - "hide": hides the sheet (cannot hide all visible sheets).
+            - "unhide": unhides the sheet.
+            - "tab_color": requires `color` (6-char hex) to set or "000000" to clear.
+            - "move": requires `offset` (int) to shift position.
+        file_path: Workbook path.
+        sheet_name: Target sheet name for the action.
+        new_name: New name for rename/copy.
+        color: Tab color hex string for "tab_color".
+        offset: Position offset for "move" (positive = right).
+
+    Returns:
+        str or dict: Operation result or metadata.
+
+    Raises:
+        ValueError: When required arguments for an action are missing.
+
+    Notes:
+        - Dispatch mapping: "rename"→`tools.workbook.rename_sheet`, "delete"→`tools.workbook.delete_sheet`,
+          "copy"→`tools.workbook.copy_sheet`, "hide"→`tools.workbook.hide_sheet`, etc.
+        - Deletions and moves are destructive operations and should be annotated in external docs and UIs.
     """
     if action == "rename":
         if not new_name:

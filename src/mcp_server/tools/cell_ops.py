@@ -1,4 +1,7 @@
-"""Cell-level read/write operations and chunked reading."""
+"""Low-level cell and range read/write helpers, including chunked reads and copy/paste semantics (supports paste_values_only).
+
+Functions mutate workbooks when writing and use ``load_workbook_safe()``/``save_workbook_safe()`` for safety.
+"""
 
 from __future__ import annotations
 
@@ -26,8 +29,24 @@ def read_cell(
     include_formula: bool = False,
     include_metadata: bool = False,
 ) -> dict[str, CellScalar | str | bool | None]:
-    """Read a single cell. Set include_formula=True to get the stored formula string.
-    Set include_metadata=True to also return is_merged, has_comment, has_hyperlink, number_format."""
+    """Read a single cell value with optional metadata and formula exposure.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet name.
+        cell_ref (str): A1-style cell reference (e.g. 'B2').
+        include_formula (bool): If True return the stored formula string when present.
+        include_metadata (bool): If True return merged/comment/hyperlink/number_format metadata.
+
+    Returns:
+        dict: {cell_ref, value, data_type, ...}.
+
+    Raises:
+        FileNotFoundError/PermissionError: on invalid file path or I/O.
+
+    Remarks:
+        - Uses ``load_workbook_safe()`` (may open read_only when include_metadata is False). Always closes workbook.
+    """
     wb = load_workbook_safe(file_path, read_only=not include_metadata)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -58,7 +77,23 @@ def write_cell(
     cell_ref: str,
     value: str | int | float | bool | None,
 ) -> str:
-    """Write a value to a single cell."""
+    """Write a Python scalar value to a single cell and save the workbook.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to write.
+        cell_ref (str): A1 cell reference.
+        value (scalar): Value to write (int/float/str/bool/None).
+
+    Returns:
+        str: Success message.
+
+    Raises:
+        FileNotFoundError, PermissionError: on save.
+
+    Remarks:
+        - Mutates workbook; uses ``load_workbook_safe()`` and ``save_workbook_safe()``.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -80,13 +115,27 @@ def read_range(
     output_format: str = "json",
     max_cells: int | None = None,
 ) -> dict[str, list[list[CellScalar]] | list[list[CellStyleInfo]] | str | int | bool]:
-    """Read a rectangular range and return rows as a list of lists.
+    """Read a rectangular A1 range from a sheet returning rows as lists. Supports returning style metadata and HTML output.
 
     Args:
-        show_formula: When True, return stored formulas instead of values.
-        show_style: When True, include style metadata per cell.
-        output_format: 'json' (default) or 'html' for HTML table output.
-        max_cells: If set, cap total cells returned; excess rows are truncated.
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to read.
+        start_cell (str): Top-left cell.
+        end_cell (str): Bottom-right cell.
+        show_formula (bool): Return formula strings when present instead of evaluated values.
+        show_style (bool): Include per-cell style metadata (requires non-read-only openpyxl workbook).
+        output_format (str): 'json' (rows returned) or 'html' (HTML table string).
+        max_cells (int | None): Maximum total cells to return (truncates rows if exceeded).
+
+    Returns:
+        dict: rows/styles/html, row_count, col_count, truncated flag.
+
+    Raises:
+        ValueError: on invalid cell coordinates.
+
+    Remarks:
+        - Uses ``load_workbook_safe()`` with read_only=False when styles requested.
+        - Be cautious with very large ranges (use ``max_cells`` to limit memory usage).
     """
     from openpyxl.utils import coordinate_to_tuple, get_column_letter
 
@@ -181,7 +230,23 @@ def read_range(
 
 
 def write_range(file_path: str, sheet_name: str, start_cell: str, data: list[list[CellScalar]]) -> str:
-    """Write a 2D array starting from start_cell."""
+    """Write a 2D list of values to a sheet starting at ``start_cell`` and save.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to write.
+        start_cell (str): Top-left anchor for the provided 2D data.
+        data (list[list[scalar]]): Rows to write.
+
+    Returns:
+        str: Summary of rows x cols written.
+
+    Raises:
+        FileNotFoundError/PermissionError: on write.
+
+    Remarks:
+        - Mutates workbook via openpyxl; calls ``save_workbook_safe()``.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -202,7 +267,23 @@ def write_range(file_path: str, sheet_name: str, start_cell: str, data: list[lis
 
 
 def clear_range(file_path: str, sheet_name: str, start_cell: str, end_cell: str) -> str:
-    """Clear all values in a rectangular range."""
+    """Clear all values in an A1 rectangular range.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet name.
+        start_cell (str): Top-left.
+        end_cell (str): Bottom-right.
+
+    Returns:
+        str: Status message.
+
+    Raises:
+        FileNotFoundError/PermissionError: on save.
+
+    Remarks:
+        - Mutates workbook and saves changes.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -224,7 +305,23 @@ def read_file_chunked(
     start_row: int = 0,
     chunk_size: int = 1000,
 ) -> dict[str, list[dict[str, CellScalar]] | int | bool | None]:
-    """Read a sheet in chunks using pandas for performance."""
+    """Read a worksheet in chunks using pandas to prevent huge memory use.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to read.
+        start_row (int): 0-based start index.
+        chunk_size (int): Number of rows to read.
+
+    Returns:
+        dict: rows as dictionaries, chunk metadata (has_more, next_start_row, total_rows, paging).
+
+    Raises:
+        ValueError: if chunk_size invalid.
+
+    Remarks:
+        - Uses pandas.read_excel with ``calamine`` or ``openpyxl`` engine; ``validate_file_path()`` is invoked.
+    """
     import pandas as pd
 
     path = validate_file_path(file_path)
@@ -266,10 +363,28 @@ def copy_range(
     copy_styles: bool = True,
     paste_values_only: bool = False,
 ) -> str:
-    """Copy cells from source range to destination within same or across sheets.
+    """Copy cells from a source range to a destination range; can copy formulas, styles or paste values only.
 
-    When paste_values_only=True, the computed (data_only) value of each source cell is
-    copied instead of the formula string, mimicking Excel's Paste Special → Values.
+    Args:
+        file_path (str): Path to workbook.
+        source_sheet (str): Source worksheet name.
+        source_range (str): A1 source range (e.g. 'A1:C10').
+        dest_sheet (str): Destination worksheet name.
+        dest_range (str): Top-left target cell or range where content will be written.
+        copy_values (bool): Whether to copy values (default True).
+        copy_styles (bool): Whether to copy styles (default True).
+        paste_values_only (bool): If True, use ``data_only=True`` pass to read computed values and paste those.
+
+    Returns:
+        str: Human readable summary including number of cells copied.
+
+    Raises:
+        ValueError: on invalid ranges or sheet names.
+        FileNotFoundError/PermissionError: on write.
+
+    Remarks:
+        - When ``paste_values_only`` is True the function reads the source sheet with ``data_only=True`` to obtain computed values.
+        - Uses ``load_workbook_safe()``/``save_workbook_safe()`` and always closes workbooks.
     """
     if ":" in source_range:
         src_start, src_end = source_range.split(":")
@@ -340,11 +455,26 @@ def fill_series(
     direction: str = "down",
     start_value: float | int | None = None,
 ) -> dict[str, str | int | list[CellScalar]]:
-    """Fill a series of values starting from start_cell.
+    """Auto-fill a sequence of cells with numeric, date, text-increment or custom series types.
 
-    series_type: 'number' (1,2,3...), 'date' (requires step as offset like '1D','1M','1Y'),
-                 'text_increment' (A1, A2, A3...), 'custom' (fill count cells with the step value)
-    direction: 'down' or 'right'
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to modify.
+        start_cell (str): Anchor cell to begin the series.
+        series_type (str): 'number', 'date', 'text_increment', or 'custom'.
+        count (int): Number of values to generate.
+        step (float | str): Step increment (numeric) or offset spec for dates (e.g. '1D').
+        direction (str): 'down' or 'right'.
+        start_value (optional): Override starting value.
+
+    Returns:
+        dict: {start_cell, end_cell, count, values_written}.
+
+    Raises:
+        ValueError: for invalid parameters or when start value types cannot be parsed.
+
+    Remarks:
+        - Mutates workbook and saves changes.
     """
     import re as _re
 
@@ -438,7 +568,22 @@ def fill_series(
 
 
 def merge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str, str]:
-    """Merge cells in the given range (e.g. 'A1:D1')."""
+    """Merge or unmerge a given range of cells.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to modify.
+        range_string (str): Range to merge/unmerge (e.g. 'A1:D1').
+
+    Returns:
+        dict: status/message.
+
+    Raises:
+        ValueError: if range invalid.
+
+    Remarks:
+        - Mutates workbook; uses ``validate_file_path()`` and ``load_workbook_safe()``.
+    """
     validate_file_path(file_path)
     wb = load_workbook_safe(file_path)
     try:
@@ -452,7 +597,22 @@ def merge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str,
 
 
 def unmerge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str, str]:
-    """Unmerge previously merged cells in the given range (e.g. 'A1:D1')."""
+    """Merge or unmerge a given range of cells.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to modify.
+        range_string (str): Range to merge/unmerge (e.g. 'A1:D1').
+
+    Returns:
+        dict: status/message.
+
+    Raises:
+        ValueError: if range invalid.
+
+    Remarks:
+        - Mutates workbook; uses ``validate_file_path()`` and ``load_workbook_safe()``.
+    """
     validate_file_path(file_path)
     wb = load_workbook_safe(file_path)
     try:
@@ -476,10 +636,22 @@ def fill_formula(
     source_cell: str,
     target_range: str,
 ) -> dict[str, int | str]:
-    """Drag-fill: translate a formula from source_cell into every cell of target_range.
+    """Translate a source formula to every cell in a target range using openpyxl's Translator (excel-like drag-fill).
 
-    Uses openpyxl Translator to adjust relative references for each destination cell.
-    Absolute references (e.g. $A$1) are left unchanged, matching Excel behaviour.
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet containing the formula to copy.
+        source_cell (str): Cell with the source formula (must start with '=').
+        target_range (str): A1 range to fill.
+
+    Returns:
+        dict: {'cells_filled': int, 'source_formula': str}.
+
+    Raises:
+        ValueError: if source_cell does not contain a formula.
+
+    Remarks:
+        - Uses openpyxl.formula.translate.Translator and mutates workbook.
     """
     from openpyxl.formula.translate import Translator
 
@@ -514,11 +686,22 @@ def find_replace(
     match_entire_cell: bool = False,
     search_formulas: bool = False,
 ) -> dict[str, int | list[str]]:
-    """Find and replace text in cell values (or formula strings) across a sheet.
+    """Find and replace text in cell values (and optionally formulas) across a sheet.
 
-    By default formula cells are skipped (search_formulas=False).
-    Set match_case=True for a case-sensitive search.
-    Set match_entire_cell=True to require an exact whole-cell match.
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to scan.
+        find_text (str): Text to search for.
+        replace_text (str): Replacement text.
+        match_case (bool): Case-sensitive matching.
+        match_entire_cell (bool): Replace only when full cell equals needle.
+        search_formulas (bool): If True search & replace inside formula strings.
+
+    Returns:
+        dict: {'replacements_made': int, 'cells_modified': list[str]}.
+
+    Remarks:
+        - Mutates workbook and saves; uses ``load_workbook_safe()`` and ``save_workbook_safe()`` only when replacements occurred.
     """
     import re as _re
 
@@ -565,10 +748,21 @@ def transpose_range(
     source_sheet: str | None = None,
     paste_values_only: bool = False,
 ) -> dict[str, list[int]]:
-    """Read source_range, swap rows and columns, and write starting at target_cell.
+    """Transpose a rectangular source_range and write it starting at target_cell. Optionally uses computed values when paste_values_only=True.
 
-    When paste_values_only=True the computed (data_only) values are used instead of
-    raw formula strings.  Styles are never copied.
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Destination worksheet name.
+        source_range (str): Source A1 range.
+        target_cell (str): Top-left destination cell.
+        source_sheet (str | None): Source sheet name (defaults to sheet_name).
+        paste_values_only (bool): If True use computed values (data_only read) instead of formulas.
+
+    Returns:
+        dict: {'source_shape': [rows, cols], 'target_shape': [cols, rows]}.
+
+    Remarks:
+        - Uses ``load_workbook_safe()`` possibly twice (for data_only read) and mutates workbook to write.
     """
     src_sheet = source_sheet if source_sheet is not None else sheet_name
     range_key = source_range if ":" in source_range else f"{source_range}:{source_range}"
@@ -613,12 +807,22 @@ def auto_sum(
     cell: str,
     source_range: str | None = None,
 ) -> dict[str, str]:
-    """Write =SUM(...) into cell.
+    """Write a `=SUM(...)` formula into a target cell. If ``source_range`` is omitted the function heuristically finds adjacent numeric cells to sum.
 
-    If source_range is provided it is used directly.  Otherwise, the function
-    scans upward for consecutive numeric cells in the same column; if none are
-    found it scans left along the same row.  Falls back to the single cell
-    immediately above if no numeric neighbours exist.
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet name.
+        cell (str): Target cell to write formula.
+        source_range (str | None): Optional explicit range to sum.
+
+    Returns:
+        dict: {'formula': str, 'cell': str}.
+
+    Raises:
+        ValueError: if no numeric neighbours are found and source_range was not provided.
+
+    Remarks:
+        - Mutates workbook and saves change.
     """
     from openpyxl.utils import column_index_from_string, get_column_letter
     from openpyxl.utils.cell import coordinate_from_string

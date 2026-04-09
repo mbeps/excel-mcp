@@ -63,6 +63,17 @@ _SAFE_NODES = (
     ast.NotEq,
 )
 
+"""
+SAFE_MATH_FUNCS (dict[str, object]): Mapping of allowed math function names to
+callable implementations exposed to validated expressions.
+
+Purpose:
+    Provide a small, auditable set of math helpers (sqrt, log, sin, cos, etc.) that
+    callers can reference in expressions validated by `validate_expression`.
+
+Typical entries:
+    'sqrt', 'log', 'log10', 'exp', 'sin', 'cos', 'tan', 'abs', 'pow'
+"""
 SAFE_MATH_FUNCS: dict[str, object] = {
     "sqrt": math.sqrt,
     "log": math.log,
@@ -82,9 +93,25 @@ def validate_expression(
     allowed_names: frozenset[str] | None = None,
     forbidden_names: frozenset[str] | None = None,
 ) -> ast.Expression:
-    """Validate a mathematical expression via AST inspection.
+    """
+    Validate a mathematical expression using AST inspection and a conservative whitelist.
 
-    Raises ValueError if the expression contains unsafe constructs.
+    Args:
+        expression (str): The expression to validate. Must be valid Python expression
+            syntax (mode='eval').
+        allowed_names (frozenset[str] | None): Optional set of variable names permitted
+            in the expression. If provided, variable references not in this set (and not
+            in `SAFE_MATH_FUNCS`) will be rejected.
+        forbidden_names (frozenset[str] | None): Optional set of names to explicitly
+            forbid; if None a default forbid-list is used (e.g. 'exec', 'eval', 'open').
+
+    Returns:
+        ast.Expression: Parsed AST expression if validation succeeds.
+
+    Raises:
+        ValueError: If the expression contains syntax errors, uses disallowed AST node
+            types, references forbidden names, includes unknown variable names, or
+            invokes disallowed functions.
     """
     if forbidden_names is None:
         forbidden_names = _DEFAULT_FORBIDDEN_NAMES

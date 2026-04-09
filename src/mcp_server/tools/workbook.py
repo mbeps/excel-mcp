@@ -1,4 +1,9 @@
-"""Workbook-level operations: metadata, sheets, creation."""
+"""Workbook-level operations: metadata, sheet management, and bulk creation utilities.
+
+This module provides helpers to safely inspect and mutate workbook structure (sheets, tab colour, ordering)
+and to create new workbooks with pre-populated sheets and data. Mutating functions use ``load_workbook_safe()``
+and ``save_workbook_safe()`` to ensure files are validated and closed correctly.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +35,20 @@ logger: Logger = configure_logging(__name__)
 
 
 def get_workbook_metadata(file_path: str) -> WorkbookMetadata:
-    """Return workbook metadata: sheets, active sheet, and named ranges."""
+    """Return workbook-level metadata including sheets, active sheet and defined names.
+
+    Args:
+        file_path (str): Path to the workbook to inspect.
+
+    Returns:
+        WorkbookMetadata: Pydantic model with sheet list, active sheet, and named ranges.
+
+    Raises:
+        FileNotFoundError/PermissionError: if file cannot be opened.
+
+    Remarks:
+        - Opens the workbook in read-only mode via ``load_workbook_safe(read_only=True)`` and always closes it.
+    """
     wb = load_workbook_safe(file_path, read_only=True)
     try:
         sheets: list[SheetInfo] = []
@@ -60,7 +78,22 @@ def get_workbook_metadata(file_path: str) -> WorkbookMetadata:
 def create_workbook(
     file_path: str, sheet_names: list[str] | None = None, sheet_name: str | None = None
 ) -> WorkbookCreatedResult:
-    """Create a new .xlsx workbook with optional sheet names."""
+    """Create and persist a new workbook with optional named sheets.
+
+    Args:
+        file_path (str): Destination path for the new workbook. Parent directories will be created when allowed.
+        sheet_names (list[str] | None): Optional list of sheet names to create.
+        sheet_name (str | None): Backwards-compatible single-sheet name parameter.
+
+    Returns:
+        WorkbookCreatedResult: Contains created file path and sheet list.
+
+    Raises:
+        PermissionError: if the file cannot be written.
+
+    Remarks:
+        - Calls ``validate_file_path(..., must_exist=False)`` before creating and ``save_workbook_safe()`` to persist.
+    """
     validate_file_path(file_path, must_exist=False)
     wb = Workbook()
 
@@ -79,7 +112,18 @@ def create_workbook(
 
 
 def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
-    """Return summary of a sheet: name, dimensions, headers, used range."""
+    """Return a compact summary of a worksheet including dimensions, headers and used range.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to summarise.
+
+    Returns:
+        SheetSummary: name, row_count, col_count, headers, used_range.
+
+    Remarks:
+        - Best-effort: attempts to use a fast DataFrame read for accurate row/col counts and falls back to openpyxl heuristics on failure.
+    """
     wb = load_workbook_safe(file_path, read_only=True)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -116,7 +160,22 @@ def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
 
 
 def rename_sheet(file_path: str, old_name: str, new_name: str) -> str:
-    """Rename a worksheet."""
+    """Rename an existing worksheet and persist the workbook.
+
+    Args:
+        file_path (str): Path to workbook.
+        old_name (str): Existing sheet name.
+        new_name (str): New desired name.
+
+    Returns:
+        str: Human-readable success message.
+
+    Raises:
+        KeyError/ValueError: if the sheet does not exist or the rename is invalid.
+
+    Remarks:
+        - Mutates workbook and saves using ``save_workbook_safe()``.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, old_name)
@@ -129,7 +188,21 @@ def rename_sheet(file_path: str, old_name: str, new_name: str) -> str:
 
 
 def delete_sheet(file_path: str, sheet_name: str) -> str:
-    """Delete a worksheet. Raises ValueError if it's the only sheet."""
+    """Delete a worksheet from a workbook. The workbook must contain at least one remaining sheet.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Sheet to delete.
+
+    Returns:
+        str: Confirmation message.
+
+    Raises:
+        ValueError: if attempting to delete the only remaining sheet.
+
+    Remarks:
+        - Mutates workbook and saves changes.
+    """
     wb = load_workbook_safe(file_path)
     try:
         if len(wb.sheetnames) == 1:
@@ -144,7 +217,19 @@ def delete_sheet(file_path: str, sheet_name: str) -> str:
 
 
 def copy_sheet(file_path: str, source_sheet: str, new_name: str) -> str:
-    """Copy a sheet within the same workbook."""
+    """Copy a worksheet within the same workbook and assign a new name to the copy.
+
+    Args:
+        file_path (str): Path to workbook.
+        source_sheet (str): Name of existing sheet to copy.
+        new_name (str): New name for the copied sheet.
+
+    Returns:
+        str: Confirmation message.
+
+    Remarks:
+        - Uses openpyxl.copy_worksheet; styles and many sheet-level properties are copied but some workbook-level features (e.g. charts) may require additional handling.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, source_sheet)
@@ -161,7 +246,21 @@ def write_multi_sheet(
     file_path: str,
     sheets: list[SheetDefinition],
 ) -> WriteMultiSheetResult:
-    """Create a new workbook with multiple named sheets, data, and headers in one call."""
+    """Create a new workbook and write multiple sheets with headers, data and optional column widths.
+
+    Args:
+        file_path (str): Destination file path (will be created).
+        sheets (list[SheetDefinition]): Each item must include name and may include headers, data (values), and column_widths.
+
+    Returns:
+        WriteMultiSheetResult: Metadata describing created sheets.
+
+    Raises:
+        PermissionError: if the destination cannot be written.
+
+    Remarks:
+        - This is a convenience function for batch workbook creation; it uses ``save_workbook_safe()`` to persist the final workbook.
+    """
     validate_file_path(file_path, must_exist=False)
     wb = Workbook()
 
@@ -212,7 +311,21 @@ def write_multi_sheet(
 
 
 def hide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
-    """Hide a worksheet. Raises ValueError if it's the last visible sheet."""
+    """Hide a worksheet tab, ensuring at least one visible sheet remains.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Sheet to hide.
+
+    Returns:
+        dict: {'status': 'success', 'message': ...}.
+
+    Raises:
+        ValueError: if attempting to hide the last visible sheet.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -228,7 +341,18 @@ def hide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
 
 
 def unhide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
-    """Unhide a hidden worksheet."""
+    """Unhide a previously hidden worksheet tab and persist the change.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Sheet to unhide.
+
+    Returns:
+        dict: status/message.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -241,10 +365,21 @@ def unhide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
 
 
 def set_tab_color(file_path: str, sheet_name: str, color: str) -> dict[str, str]:
-    """Set the tab colour of a worksheet.
+    """Set the worksheet tab colour using a 6-character hex string.
 
-    color: a 6-character hex string without '#', e.g. "FF0000" for red.
-    Pass color="000000" to reset to default (no colour).
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to modify.
+        color (str): 6-character hex RGB string (e.g. 'FF0000'). Use '000000' to reset/remove colour.
+
+    Returns:
+        dict: status with updated colour.
+
+    Raises:
+        ValueError: if color string is not a 6-character hex string.
+
+    Remarks:
+        - Mutates workbook and saves the change.
     """
     from openpyxl.styles import Color
 
@@ -268,10 +403,18 @@ def set_tab_color(file_path: str, sheet_name: str, color: str) -> dict[str, str]
 
 
 def move_sheet(file_path: str, sheet_name: str, offset: int) -> dict[str, str]:
-    """Move a worksheet tab by a relative offset within the workbook.
+    """Move a worksheet tab by a relative offset within the workbook's sheet order.
 
-    offset: positive = move right, negative = move left.
-    E.g. offset=-1 moves the sheet one position to the left.
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Name of sheet to move.
+        offset (int): Positive to move right, negative to move left.
+
+    Returns:
+        dict: status, new_index and sheet_order.
+
+    Remarks:
+        - Mutates workbook and saves.
     """
     validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)

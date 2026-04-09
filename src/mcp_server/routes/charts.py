@@ -53,16 +53,37 @@ def chart(
     show_legend: bool = True,
     legend_position: str | None = None,
 ) -> str | list[ChartInfo]:
-    """Chart operations.
+    """Perform chart lifecycle and series/configuration operations on a worksheet.
 
-    action="create": Create chart. Requires: data_range. Optional: chart_type, target_cell, title, axes, style, size.
-    action="delete": DESTRUCTIVE. Delete chart. Optional: chart_index (default 0).
-    action="list": List all charts. Read-only.
-    action="add_series": Add data series. Requires: chart_index, data_range.
-    action="set_axes": Configure axes. Optional: chart_index, x/y titles, min/max, number_format, log_scale.
-    action="trendline": Add trendline. Optional: chart_index, series_index, trendline_type, periods.
-    action="combo": Create combo chart. Requires: data_range, bar_columns, line_columns.
-    action="update": Update chart title, size, or anchor. Optional: chart_index, title, width, height, anchor_cell.
+    Args:
+        action: One of "create", "delete", "list", "add_series", "set_axes", "trendline", "combo", "data_labels", "legend", "update".
+            - "create": create a chart from `data_range` at `target_cell`.
+            - "delete": remove a chart (optionally `chart_index`). Destructive.
+            - "list": return list of charts (read-only).
+            - "add_series": add a series to an existing chart (requires `chart_index`, `data_range`).
+            - "set_axes": configure axis titles/ranges/number format.
+            - "trendline": add a trendline to a series.
+            - "combo": create a combo chart; requires `bar_columns` and `line_columns`.
+            - "data_labels": configure data labels by `chart_title`.
+            - "legend": configure legend by `chart_title`.
+            - "update": update basic title/size/anchor of an existing chart.
+        file_path: Workbook path.
+        sheet_name: Worksheet name containing chart or data.
+        chart_index: Optional index of target chart (default 0 or required for some actions).
+        data_range: Range string used for chart creation or series.
+        chart_type: Chart kind (e.g. "column", "line").
+        target_cell: Anchor cell for new chart.
+        ... (other visual/series parameters)
+
+    Returns:
+        str or list[ChartInfo]: Created chart id/string or list of ChartInfo for "list".
+
+    Raises:
+        ValueError: If required parameters are missing for the selected `action`.
+
+    Notes:
+        - Dispatch mapping: see function source; common destructive actions include "delete".
+        - Chart creation mutates the workbook; consider documenting expected anchor and sizing units.
     """
     if action == "create":
         if data_range is None:

@@ -25,7 +25,24 @@ def split_column(
     output_file: str | None = None,
     header_row: int = 1,
 ) -> dict:
-    """Split a text column into multiple columns by delimiter."""
+        """Split a single text column into multiple columns using a delimiter.
+
+        Args:
+            file_path: Path to workbook.
+            sheet_name: Worksheet name.
+            column: Column letter or header name to split.
+            delimiter: Delimiter string (default ",").
+            new_columns: Optional list of new column names.
+            drop_original: If True, remove the original column after split.
+            output_file: Optional path to write results instead of overwriting input.
+            header_row: 1-based header row index.
+
+        Returns:
+            dict: Summary of created columns and row counts.
+
+        Notes:
+            - Destructive unless `output_file` is provided.
+        """
     return _cleaning.split_column(
         file_path,
         sheet_name,
@@ -49,11 +66,25 @@ def data_cleaner(
     fill_missing_strategy: str = "value",
     fill_value: str | None = None,
 ) -> dict:
-    """Batch data cleaning pipeline.
+        """Run a pipeline of cleaning operations (trim, dedupe, fill missing, normalize, etc.) on a sheet.
 
-    Operations: trim_whitespace, remove_empty_rows, remove_empty_columns,
-    normalize_text, fix_numbers, remove_duplicates, fill_missing.
-    """
+        Args:
+            file_path: Workbook path.
+            sheet_name: Worksheet to operate on.
+            operations: Ordered list of operations to run (see tool docs for allowed names).
+            columns: Optional subset of columns to target.
+            preview: If True, return a preview without persisting changes.
+            output_file: Optional path to write cleaned results.
+            header_row: 1-based header index.
+            fill_missing_strategy: Strategy name for filling missing values.
+            fill_value: Literal value to use if strategy is "value".
+
+        Returns:
+            dict: Summary including rows modified and operations applied.
+
+        Notes:
+            - Document allowed `operations` strings in the route or underlying tool docs.
+        """
     return _cleaning.data_cleaner(
         file_path,
         sheet_name,
@@ -76,7 +107,23 @@ def parse_date_column(
     dayfirst: bool = False,
     header_row: int = 1,
 ) -> dict:
-    """Parse mixed date formats in a column and normalise to a standard output format."""
+        """Parse varying date formats in a column and write normalized results to an output column.
+
+        Args:
+            file_path: Workbook path.
+            sheet_name: Worksheet name.
+            column: Column to parse.
+            output_column: Optional target column; if omitted, overwrites `column`.
+            output_format: Strftime format for normalized output.
+            dayfirst: Whether to parse day-first dates.
+            header_row: 1-based header index.
+
+        Returns:
+            dict: Summary including number of parsed rows and parse errors.
+
+        Notes:
+            - Destructive by default when `output_column` targets existing column.
+        """
     return _cleaning.parse_date_column(
         file_path,
         sheet_name,
@@ -99,11 +146,26 @@ def csv_ops(
     delimiter: str = ",",
     encoding: str = "utf-8",
 ) -> dict | str:
-    """CSV operations: preview, convert CSV to XLSX, export XLSX to CSV.
+    """CSV helper operations: preview CSV, convert CSV→XLSX, and export XLSX→CSV.
 
-    action="preview": Preview CSV. Requires: file_path. Optional: rows, delimiter, encoding.
-    action="to_xlsx": Convert CSV to XLSX. Requires: csv_path, xlsx_path. Optional: sheet_name, delimiter, encoding.
-    action="to_csv": Export sheet to CSV. Requires: file_path, sheet_name, output_path. Optional: delimiter, encoding.
+    Args:
+        action: "preview", "to_xlsx", or "to_csv".
+            - "preview": requires `file_path` (CSV path); returns a small preview as dict.
+            - "to_xlsx": requires `csv_path` (or `file_path`) and `xlsx_path` (or `output_path`).
+            - "to_csv": requires `file_path` (XLSX) and `output_path` (CSV destination).
+        file_path, csv_path, xlsx_path, output_path: Path parameters as described above.
+        sheet_name: Sheet to export when converting XLSX→CSV.
+        rows: Number of preview rows to return.
+        delimiter, encoding: CSV parameters.
+
+    Returns:
+        dict or str: Preview dict for "preview" or destination path for conversions.
+
+    Raises:
+        ValueError: If required path parameters are missing for the selected `action`.
+
+    Notes:
+        - "to_xlsx" and "to_csv" perform file writes; document whether they overwrite existing files.
     """
     if action == "preview":
         if file_path is None:

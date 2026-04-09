@@ -23,11 +23,22 @@ def worksheet_view(
     remove: bool = False,
     show: bool = True,
 ) -> str:
-    """View-related worksheet settings.
+    """Toggle view-related settings such as freeze panes, auto-filter and gridlines.
 
-    action="freeze": Freeze panes at cell_ref. Optional: cell_ref (omit to unfreeze).
-    action="auto_filter": Toggle auto-filter. Optional: cell_range, remove.
-    action="set_gridlines": Show or hide gridlines. Optional: show (default True).
+    Args:
+        action: "freeze", "auto_filter", or "set_gridlines".
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        cell_ref: For freeze, the pane freeze cell (omit to unfreeze).
+        cell_range: For auto_filter set/remove.
+        remove: For auto_filter, remove filter when True.
+        show: For set_gridlines, show/hide gridlines.
+
+    Returns:
+        str: Result message.
+
+    Notes:
+        - Usually non-destructive aside from toggling UI settings stored in workbook.
     """
     if action == "freeze":
         return _ws_ops.freeze_panes(file_path, sheet_name, cell_ref)
@@ -69,18 +80,20 @@ def worksheet_structure(
     cols_list: list[str] | None = None,
     width: float | None = None,
 ) -> str:
-    """Row and column structure operations.
+    """Perform row/column insert/delete, grouping, and size adjustments.
 
-    action="insert_rows": Insert rows before row. Requires: row. Optional: count (default 1).
-    action="insert_cols": Insert columns before col. Requires: col. Optional: count (default 1).
-    action="delete_rows": DESTRUCTIVE. Delete rows starting at row. Requires: row. Optional: count.
-    action="delete_cols": DESTRUCTIVE. Delete columns starting at col. Requires: col. Optional: count.
-    action="set_row_height": Set height for rows. Requires: rows (list of row numbers), height.
-    action="set_col_width": Set width for columns. Requires: cols_list (list of column letters), width.
-    action="group_rows": Group rows. Requires: start_row, end_row. Optional: outline_level, hidden.
-    action="group_cols": Group columns. Requires: start_col, end_col. Optional: outline_level, hidden.
-    action="ungroup_rows": Ungroup rows. Requires: start_row, end_row.
-    action="ungroup_cols": Ungroup columns. Requires: start_col, end_col.
+    Args:
+        action: One of insert/delete/group/ungroup/set_row_height/set_col_width.
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        row, col, count, start_row, end_row, start_col, end_col: Position arguments.
+        outline_level, hidden, rows, cols_list, height, width: Operation-specific params.
+
+    Returns:
+        str: Result message.
+
+    Notes:
+        - Many actions are destructive (delete_rows/delete_cols) — document irreversible effects.
     """
     if action == "insert_rows":
         if row is None:
@@ -151,13 +164,18 @@ def worksheet_print(
     row: int | None = None,
     col: int | None = None,
 ) -> str:
-    """Print and page setup operations.
+    """Configure print areas, page setup, print titles and manual page breaks.
 
-    action="set_print_area": Set print area. Requires: print_area (e.g. 'A1:H20').
-    action="set_page_setup": Configure page setup. Optional: orientation, paper_size, fit_to_width, fit_to_height.
-    action="set_print_titles": Set repeating title rows/columns on print. Optional: title_rows, title_cols.
-    action="add_page_break": Insert a manual page break. Optional: row, col. At least one required; must be >= 2.
-    action="remove_page_break": Remove a manual page break. Optional: row, col. Omit to clear all of that type.
+    Args:
+        action: "set_print_area", "set_page_setup", "set_print_titles", "add_page_break", "remove_page_break".
+        file_path, sheet_name: Workbook and worksheet.
+        print_area, orientation, paper_size, fit_to_width, fit_to_height, title_rows, title_cols, row, col: params.
+
+    Returns:
+        str: Result message.
+
+    Notes:
+        - Mostly metadata changes to the sheet's print settings.
     """
     if action == "set_print_area":
         if not print_area:
@@ -196,17 +214,23 @@ def worksheet_transfer(
     include_header: bool = True,
     output_path: str | None = None,
 ) -> str | dict:
-    """Cross-sheet and cross-workbook transfer operations.
+    """Cross-sheet and cross-workbook copy/merge/stack operations.
 
-    action="copy_range_across": Copy range between sheets in the same workbook.
-        Requires: file_path, source_sheet, source_range, target_sheet.
-        Optional: target_start_cell (default "A1"), copy_values, copy_styles.
-    action="copy_sheet_across": Copy an entire sheet to another workbook.
-        Requires: source_file, source_sheet, dest_file. Optional: dest_sheet_name.
-    action="merge_workbooks": Merge multiple workbooks into one.
-        Requires: source_files, output_file. Optional: conflict_strategy.
-    action="stack_sheets": Stack (concatenate) multiple sheets vertically into one.
-        Requires: file_path, sheet_names, dest_sheet. Optional: include_header, output_path.
+    Args:
+        action: "copy_range_across", "copy_sheet_across", "merge_workbooks", or "stack_sheets".
+        file_path: Source workbook path (varies by action).
+        source_sheet, source_range: Source identifiers for copy.
+        target_sheet, target_start_cell: Destination identifiers.
+        copy_values, copy_styles: Copy options.
+        source_file, dest_file, dest_sheet_name: For copy_sheet_across.
+        source_files, output_file, conflict_strategy: For merge_workbooks.
+        sheet_names, dest_sheet, include_header, output_path: For stack_sheets.
+
+    Returns:
+        str or dict: Result metadata.
+
+    Notes:
+        - These operations can be expensive (many file opens) and destructive. Document conflict resolution strategies.
     """
     if action == "copy_range_across":
         if file_path is None:

@@ -1,4 +1,9 @@
-"""Chart operations: create, delete, and list Excel charts."""
+"""Chart helpers: create, update, delete and inspect native Excel charts using openpyxl.
+
+This module wraps common chart lifecyle operations. Functions that persist changes open
+workbooks via ``load_workbook_safe()`` and call ``save_workbook_safe()``; charts are added
+using openpyxl native chart objects.
+"""
 
 from __future__ import annotations
 
@@ -69,7 +74,31 @@ def create_chart(
     width: float = 15,
     height: float = 10,
 ) -> str:
-    """Create a native Excel chart from a data range."""
+    """Create a native Excel chart from a rectangular data range and insert it into a sheet.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to add the chart to.
+        data_range (str): A1 style rectangular range including header row.
+        chart_type (str): One of CHART_TYPES (default 'column').
+        target_cell (str): Anchor cell (top-left) for the chart object.
+        title (str): Chart title.
+        x_axis_title (str): X axis title (if applicable).
+        y_axis_title (str): Y axis title (if applicable).
+        style (int): openpyxl chart style index.
+        width (float): Width in Excel units.
+        height (float): Height in Excel units.
+
+    Returns:
+        str: Human-readable confirmation.
+
+    Raises:
+        ValueError: for unsupported chart_type or invalid data ranges.
+
+    Remarks:
+        - Mutates workbook and saves.
+        - Special chart types (scatter, bubble, stock) have specific column expectations documented in the function.
+    """
     if chart_type not in CHART_TYPES:
         raise ValueError(f"Unsupported chart type '{chart_type}'. Allowed: {CHART_TYPES}")
 
@@ -126,7 +155,22 @@ def create_chart(
 
 
 def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0) -> str:
-    """Delete a chart from a sheet by index."""
+    """Delete a chart object from a worksheet by 0-based index.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet containing the chart.
+        chart_index (int): 0-based index of the chart to remove.
+
+    Returns:
+        str: Confirmation message including the removed chart title (if available).
+
+    Raises:
+        ValueError: if no charts are present or index out of range.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -183,7 +227,18 @@ def _safe_chart_title(title: object) -> str:
 
 
 def list_charts(file_path: str, sheet_name: str) -> list[ChartInfo]:
-    """List all charts on a sheet with title, type, and position."""
+    """List chart metadata for all charts present on a worksheet.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to inspect.
+
+    Returns:
+        list[ChartInfo]: Each entry contains title, type and approximate position.
+
+    Remarks:
+        - Opens workbook read/write when needed; does not mutate by itself.
+    """
     wb = load_workbook_safe(file_path, read_only=False)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -216,7 +271,24 @@ def add_chart_series(
     data_range: str,
     title_from_data: bool = True,
 ) -> str:
-    """Add a new data series to an existing chart."""
+    """Add a new data series to an existing chart object.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet containing the chart.
+        chart_index (int): 0-based index of chart.
+        data_range (str): A1 rectangular range for the series.
+        title_from_data (bool): Use first row as series title.
+
+    Returns:
+        str: Confirmation message.
+
+    Raises:
+        ValueError: when chart is missing, index out of range, or chart type cannot accept the series.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -254,7 +326,26 @@ def set_chart_axes(
     y_number_format: str | None = None,
     log_scale_y: bool = False,
 ) -> str:
-    """Configure chart axes: titles, min/max bounds, number format, log scale."""
+    """Configure numeric axis properties and titles for an existing chart.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet containing the chart.
+        chart_index (int): 0-based chart index.
+        x_title/y_title (str|None): Axis titles.
+        x_min/x_max/y_min/y_max (float|None): Axis bounds.
+        y_number_format (str|None): Number format string for Y axis.
+        log_scale_y (bool): If True set log scale on Y axis.
+
+    Returns:
+        str: Confirmation message.
+
+    Raises:
+        ValueError: if chart missing or chart type does not support axes.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -302,9 +393,25 @@ def add_chart_trendline(
     periods_forward: int = 0,
     periods_backward: int = 0,
 ) -> str:
-    """Add a trendline to a chart series.
+    """Add a trendline to a specified series of an existing chart.
 
-    trendline_type: 'linear', 'exponential', 'polynomial', 'logarithmic', 'moving_average', 'power'
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet with the chart.
+        chart_index (int): 0-based chart index.
+        series_index (int): 0-based series index.
+        trendline_type (str): One of supported trendline types.
+        name (str|None): Optional custom name for trendline.
+        periods_forward/periods_backward (int): Forecasting horizons.
+
+    Returns:
+        str: Confirmation message.
+
+    Raises:
+        ValueError: for invalid types or indexes.
+
+    Remarks:
+        - Mutates workbook and saves.
     """
     from openpyxl.chart.trendline import Trendline
 
@@ -364,11 +471,27 @@ def create_combo_chart(
     width: float = 15,
     height: float = 10,
 ) -> str:
-    """Create a combo chart with bar (column) + line series.
+    """Create a combination chart mixing bar and line series from a single data range.
 
-    bar_columns: 1-based column indices within the data range for bar series.
-    line_columns: 1-based column indices within the data range for line series.
-    x_axis_column: 0-based column offset within the data range for categories.
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to add the chart.
+        data_range (str): A1 rectangular data range including headers.
+        bar_columns (list[int]): 1-based indices (relative to range) for bar series.
+        line_columns (list[int]): 1-based indices for line series.
+        title (str|None): Chart title.
+        anchor_cell (str): Anchor cell for the chart.
+        x_axis_column (int): 0-based offset for category column within range.
+        width/height (float): Chart dimensions.
+
+    Returns:
+        str: Confirmation message summarising created series.
+
+    Raises:
+        ValueError: for invalid column indices.
+
+    Remarks:
+        - Mutates workbook and saves.
     """
     for idx in bar_columns:
         if idx < 1:
@@ -438,7 +561,21 @@ def set_chart_data_labels(
     show_percentage: bool = False,
     position: str | None = None,
 ) -> dict:
-    """Set data labels on all series of a chart identified by title."""
+    """Configure data labels for all series on a named chart (matched by title).
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet containing the chart.
+        chart_title (str): Title text used to locate the chart.
+        show_value/show_category/show_series_name/show_percentage (bool): Which label parts to show.
+        position (str|None): Optional label position code.
+
+    Returns:
+        dict: Status and applied label options.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -473,7 +610,21 @@ def set_chart_legend(
     show: bool = True,
     position: str | None = None,
 ) -> dict:
-    """Show or hide the legend on a chart identified by title."""
+    """Show, hide or reposition the legend on a chart identified by title.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet containing the chart.
+        chart_title (str): Chart title used for lookup.
+        show (bool): Show (True) or hide (False) the legend.
+        position (str|None): Optional legend position code.
+
+    Returns:
+        dict: Status and legend position.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -501,13 +652,24 @@ def update_chart(
     height: float | None = None,
     anchor_cell: str | None = None,
 ) -> str:
-    """Update an existing chart's title, dimensions, or anchor position.
+    """Update basic properties of an existing chart: title, size, or anchor cell.
 
-    chart_index: 0-based index of the chart on the sheet (default 0).
-    title: new chart title. Pass empty string "" to clear the title.
-    width: new width in cm (e.g. 15.0).
-    height: new height in cm (e.g. 10.0).
-    anchor_cell: new top-left anchor cell (e.g. "H1"). Moves the chart.
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet containing the chart.
+        chart_index (int): 0-based index of chart to update.
+        title (str|None): New title (empty string clears title).
+        width/height (float|None): New size values.
+        anchor_cell (str|None): New anchor cell to reposition the chart.
+
+    Returns:
+        str: Confirmation message.
+
+    Raises:
+        ValueError: if chart missing or index invalid.
+
+    Remarks:
+        - Mutates workbook and saves.
     """
     wb = load_workbook_safe(file_path)
     try:

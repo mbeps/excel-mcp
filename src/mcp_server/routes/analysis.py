@@ -26,12 +26,40 @@ def sort_data(
     ascending: bool = True,
     has_header: bool = True,
 ) -> str:
-    """Sort sheet data by one or more columns and write back."""
+    """Sort worksheet rows by one or more columns and write back the result.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet to sort.
+        sort_by: Optional explicit sort descriptor list (e.g. [{"column": "A", "ascending": True}]).
+        column: Convenience single-column sort (deprecated in favour of `sort_by`).
+        ascending: Boolean default sort order when `column` is used.
+        has_header: Whether the sheet has a header row.
+
+    Returns:
+        str: Result message.
+
+    Notes:
+        - Destructive: overwrites sheet rows.
+    """
     return _analysis.sort_data(file_path, sheet_name, sort_by, column, ascending, has_header)
 
 
 def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> ColumnStats:
-    """Compute descriptive statistics (mean, median, std, min, max, sum) for a numeric column."""
+    """Compute descriptive statistics for a numeric column (mean, median, std, min, max, sum).
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        column: Column name or letter to analyse.
+        has_header: Whether the sheet has a header row.
+
+    Returns:
+        ColumnStats: Pydantic model with statistical measures.
+
+    Notes:
+        - Read-only.
+    """
     return _analysis.column_statistics(file_path, sheet_name, column, has_header)
 
 
@@ -44,12 +72,35 @@ def aggregate_data(
     has_header: bool = True,
     aggfunc: str | dict | None = None,
 ) -> dict:
-    """Group by one or more columns and aggregate (sum, mean, count, min, max, median, std)."""
+    """Group rows by column(s) and aggregate values using the specified operation.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        group_by: Column or list of columns to group by.
+        value_column: Column to aggregate.
+        operation: Aggregation operation (e.g. 'sum', 'mean', 'count').
+        has_header: Whether the sheet has a header row.
+        aggfunc: Optional pandas-style aggfunc or mapping.
+
+    Returns:
+        dict: Aggregated results (may be written to sheet if underlying tool provides an option).
+    """
     return _analysis.aggregate_data(file_path, sheet_name, group_by, value_column, operation, has_header, aggfunc)
 
 
 def find_duplicates(file_path: str, sheet_name: str, columns: list[str], has_header: bool = True) -> dict:
-    """Find duplicate rows based on specified columns."""
+    """Identify duplicate rows based on a list of columns.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        columns: Columns used to determine duplicates.
+        has_header: Whether the sheet has a header row.
+
+    Returns:
+        dict: Duplicate groups and row indices.
+    """
     return _analysis.find_duplicates(file_path, sheet_name, columns, has_header)
 
 
@@ -66,7 +117,26 @@ def vlookup_helper(
     output_file: str | None = None,
     header_row: int = 1,
 ) -> dict:
-    """Cross-file VLOOKUP with optional fuzzy string matching."""
+    """Perform cross-file lookup akin to VLOOKUP with optional fuzzy matching.
+
+    Args:
+        lookup_file: Workbook containing keys to look up.
+        data_file: Workbook containing reference data.
+        lookup_column: Column in `lookup_file` to match.
+        data_key_column: Column in `data_file` to join on.
+        data_return_columns: Columns from `data_file` to return.
+        lookup_sheet, data_sheet: Sheet names.
+        fuzzy: If True, perform fuzzy matching.
+        fuzzy_threshold: Threshold for fuzzy confidence.
+        output_file: Optional path to write augmented lookup results.
+        header_row: 1-based header row index.
+
+    Returns:
+        dict: Mapping rows to matched results and match scores.
+
+    Notes:
+        - Read-only on inputs unless `output_file` is provided.
+    """
     return _analysis.vlookup_helper(
         lookup_file,
         data_file,
@@ -90,7 +160,19 @@ def filter_data_advanced(
     output_sheet: str | None = None,
     header_row: int = 1,
 ) -> dict:
-    """Multi-condition AND/OR filtering. Each condition: {column, operator, value}."""
+    """Filter rows using multiple conditions combined with AND/OR logic.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        conditions: List of condition dicts (each: {column, operator, value}).
+        logic: "AND" or "OR" to combine conditions.
+        output_sheet: Optional sheet to write filtered output.
+        header_row: 1-based header row index.
+
+    Returns:
+        dict: Filtered rows or summary.
+    """
     return _analysis.filter_data_advanced(file_path, sheet_name, conditions, logic, output_sheet, header_row)
 
 
@@ -104,7 +186,19 @@ def insert_subtotals(
 ) -> dict:
     """Insert SUBTOTAL formula rows after each group in a sorted sheet.
 
-    subtotal_func: 1=AVERAGE, 2=COUNT, 3=COUNTA, 4=MAX, 5=MIN, 9=SUM.
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        group_col: Column used to group rows.
+        value_col: Column to subtotal.
+        subtotal_func: Excel subtotal function code (9=SUM by default).
+        include_grand_total: Whether to append a grand total row.
+
+    Returns:
+        dict: Summary including ranges where subtotals were inserted.
+
+    Notes:
+        - Destructive: modifies the sheet structure and inserts new rows.
     """
     return _analysis.insert_subtotals(file_path, sheet_name, group_col, value_col, subtotal_func, include_grand_total)
 
@@ -114,7 +208,19 @@ def profile_data(
     sheet: str | None = None,
     data_range: str | None = None,
 ) -> dict:
-    """Profile data in a worksheet, returning column statistics, types, null counts, and sample values."""
+    """Produce a data profile for a sheet or range listing types, null counts, unique counts and samples.
+
+    Args:
+        file_path: Workbook path.
+        sheet: Optional sheet name.
+        data_range: Optional range to restrict profiling.
+
+    Returns:
+        dict: Per-column profile metadata.
+
+    Notes:
+        - Read-only.
+    """
     return _analysis.profile_data(file_path, sheet, data_range)
 
 
@@ -127,13 +233,19 @@ def value_counts(
     dropna: bool = True,
     has_header: bool = True,
 ) -> dict:
-    """Return a full value-frequency table for a column.
+    """Return frequency counts for a column as counts or normalized proportions.
 
-    column: header name of the column to count.
-    normalize: if True, return proportions (0-1) instead of raw counts.
-    top_n: if given, return only the top N most-frequent values.
-    dropna: if True (default), exclude null values from counts.
-    Returns: {"column", "total_rows", "normalize", "counts": [{"value", "count"}, ...]}.
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        column: Column name to analyse.
+        normalize: If True return proportions instead of raw counts.
+        top_n: If provided, return only the top N values.
+        dropna: Exclude nulls when True.
+        has_header: Whether the sheet has a header row.
+
+    Returns:
+        dict: {"column", "total_rows", "normalize", "counts": [{"value", "count"}, ...]}.
     """
     return _analysis.value_counts(file_path, sheet_name, column, normalize, top_n, dropna, has_header)
 

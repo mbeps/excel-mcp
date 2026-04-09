@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+"""Formatting and conditional-formatting option models.
+
+Used by formatting tools to accept styling requests and describe conditional formatting rules.
+"""
+
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -8,7 +13,24 @@ from .common import BorderStyle, HorizontalAlignment, VerticalAlignment
 
 
 class FormatOptions(BaseModel):
-    """Cell formatting options for styling spreadsheet cells."""
+    """Cell formatting options for styling spreadsheet cells.
+
+    Attributes:
+        bold (bool): Apply bold font weight. Default False.
+        italic (bool): Apply italic font style. Default False.
+        font_size (int | None): Font size in points.
+        font_color (str | None): Font color as hex string, e.g. 'FF0000'.
+        bg_color (str | None): Background fill color as hex string.
+        number_format (str | None): Excel number format code.
+        horizontal_alignment (HorizontalAlignment | None): Optional horizontal alignment.
+        vertical_alignment (VerticalAlignment | None): Optional vertical alignment.
+        wrap_text (bool): Enable text wrapping. Default False.
+        border_style (BorderStyle | None): Optional border style.
+        border_color (str | None): Border color as hex string.
+
+    Notes:
+        - Color strings should be hex without a leading '#', matching openpyxl conventions.
+    """
 
     bold: bool = Field(False, description="Apply bold font weight.")
     italic: bool = Field(False, description="Apply italic font style.")
@@ -26,7 +48,13 @@ class FormatOptions(BaseModel):
 
 
 class ConditionalFormatRule(BaseModel):
-    """Rule definition for conditional formatting."""
+    """Rule definition for conditional formatting.
+
+    Attributes:
+        format_type (Literal): One of 'color_scale', 'data_bar', 'icon_set'. Required.
+        start_color, mid_color, end_color (str): Hex color strings used for gradients.
+        icon_style (str): Icon set style name used when `format_type == 'icon_set'`.
+    """
 
     format_type: Literal["color_scale", "data_bar", "icon_set"] = Field(
         ..., description="Type of conditional format to apply."
@@ -38,7 +66,12 @@ class ConditionalFormatRule(BaseModel):
 
 
 class SortCriteria(BaseModel):
-    """Sorting specification for a single column."""
+    """Sorting specification for a single column.
+
+    Attributes:
+        column (str): Column letter or header name to sort by. Required.
+        ascending (bool): True = ascending, False = descending. Default True.
+    """
 
     column: str = Field(..., description="Column letter or header name to sort by.")
     ascending: bool = Field(True, description="Sort in ascending order when True, descending when False.")

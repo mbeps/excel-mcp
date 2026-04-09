@@ -24,9 +24,22 @@ def run_regression(
     output_sheet: str = "Regression Output",
     output_file: str | None = None,
 ) -> RegressionResult:
-    """Run OLS linear regression and return coefficients, R-squared, and residuals.
+    """Run an OLS linear regression and optionally write results to a sheet/file.
 
-    If output_file is provided, results are written to that file instead of file_path.
+    Args:
+        file_path: Input workbook path.
+        sheet_name: Worksheet containing data.
+        y_column: Dependent variable column name.
+        x_columns: List of independent variable column names.
+        header_row: 1-based header row index.
+        output_sheet: Optional sheet name for regression output.
+        output_file: Optional path to write results to a separate file.
+
+    Returns:
+        RegressionResult: Contains coefficients, R-squared, residuals and diagnostics.
+
+    Notes:
+        - Read-only unless `output_file`/`output_sheet` is provided (then mutates workbook/creates file).
     """
     return _statistical.run_regression(
         file_path,
@@ -53,13 +66,26 @@ def run_exponential_smoothing(
     smoothing_trend: float | None = None,
     smoothing_seasonal: float | None = None,
 ) -> dict:
-    """Apply exponential smoothing to a time series and write the result to a new column.
+    """Apply exponential smoothing (simple/Holt/Holt-Winters) to a time series column.
 
-    method: "simple" (pandas EWM), "holt" (Holt linear trend), "holt_winters" (Holt-Winters seasonal).
-    seasonal_periods: required for holt_winters (e.g. 12 for monthly data).
-    forecast_steps: number of out-of-sample steps to forecast.
-    smoothing_trend: trend smoothing factor for holt/holt_winters (0 < value <= 1). If omitted, statsmodels optimizes it.
-    smoothing_seasonal: seasonal smoothing factor for holt_winters (0 < value <= 1). If omitted, statsmodels optimizes it.
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        column: Column to smooth.
+        alpha: Smoothing factor for simple smoothing.
+        new_column_name: Optional name for output column; if omitted, a generated name is used.
+        header_row: 1-based header index.
+        output_file: Optional file to write output.
+        method: One of "simple", "holt", "holt_winters".
+        seasonal_periods: Required for Holt-Winters.
+        forecast_steps: Number of out-of-sample forecast steps to produce.
+        smoothing_trend, smoothing_seasonal: Optional fixed smoothing parameters.
+
+    Returns:
+        dict: Summary and references to output column/sheet.
+
+    Notes:
+        - May modify workbook if `output_file`/`new_column_name` provided.
     """
     return _statistical.run_exponential_smoothing(
         file_path,
@@ -87,12 +113,23 @@ def run_solver(
     tolerance: float = 1e-6,
     max_iterations: int = 1000,
 ) -> SolverResult:
-    """Multi-variable constrained optimization using scipy.
+    """Run constrained optimisation using scipy to minimise (or maximise) an objective built from cell references.
 
-    objective_expression: arithmetic expression using cell refs (e.g. "B2 * B3 - B4").
-    variable_cells: {cell_ref: [lower_bound, upper_bound]} dict.
-    constraints: list of {"expression": str, "type": "ineq"|"eq"} dicts.
-    maximize: True to maximise instead of minimise.
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet providing objective or referenced cells.
+        objective_expression: Arithmetic expression using cell refs (e.g. "B2 * B3 - B4").
+        variable_cells: Mapping {cell_ref: [lower_bound, upper_bound]} for optimisation variables.
+        constraints: Optional list of {"expression": str, "type": "ineq"|"eq"} constraints.
+        maximize: If True, the objective is maximised instead of minimised.
+        tolerance: Convergence tolerance.
+        max_iterations: Maximum solver iterations.
+
+    Returns:
+        SolverResult: Contains solution, status, and diagnostics.
+
+    Notes:
+        - May write back solution values into the workbook depending on implementation — document write semantics.
     """
     normalised_cells: dict[str, tuple[float, float]] = {k: (v[0], v[1]) for k, v in variable_cells.items()}
     return _solver.run_solver(
@@ -117,10 +154,19 @@ def correlation_matrix(
 ) -> dict:
     """Compute a Pearson correlation matrix for numeric columns.
 
-    columns: list of column names to include. If None, all numeric columns are used.
-    output_sheet: if given, writes the matrix to this sheet (created if absent).
-    output_file: target file for output; defaults to file_path.
-    Returns: {"columns": [...], "matrix": [[float, ...], ...]}.
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        columns: Optional list of column names to include. If None, all numeric columns are used.
+        output_sheet: Optional sheet name to write the matrix.
+        output_file: Optional file path to write results.
+        header_row: 1-based header index.
+
+    Returns:
+        dict: {"columns": [...], "matrix": [[float, ...], ...]}.
+
+    Notes:
+        - Read-only unless `output_sheet`/`output_file` is set.
     """
     return _statistical.correlation_matrix(file_path, sheet_name, columns, output_sheet, output_file, header_row)
 

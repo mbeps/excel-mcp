@@ -44,7 +44,25 @@ def format_cells(
     number_format_preset: str | None = None,
     preserve_existing: bool = False,
 ) -> str:
-    """Apply formatting (font, fill, alignment, borders, number format) to a cell range."""
+    """Apply font, fill, alignment, borders and number formats to a cell range.
+
+    Args:
+        file_path, sheet_name: Target workbook and sheet.
+        cell_range: Range to format.
+        bold, italic, font_size, font_color, bg_color: Font and fill controls.
+        number_format: Custom number format string.
+        horizontal_alignment, vertical_alignment: Alignment enums.
+        wrap_text, border_style, border_color, font_name, underline, strikethrough, text_rotation, indent, shrink_to_fit: Formatting options.
+        top_border_style, bottom_border_style, left_border_style, right_border_style: Per-side border overrides.
+        number_format_preset: Named preset from `NUMBER_FORMAT_PRESETS`.
+        preserve_existing: If True, do not overwrite unspecified style attributes.
+
+    Returns:
+        str: Result message.
+
+    Notes:
+        - Mutates formatting in workbook; recommend documenting idempotency when called multiple times with same args.
+    """
     return _formatting.format_cells(
         file_path,
         sheet_name,
@@ -76,7 +94,18 @@ def format_cells(
 
 
 def auto_fit_columns(file_path: str, sheet_name: str) -> str:
-    """Auto-fit all column widths based on content length."""
+    """Auto-fit column widths to their contents for a worksheet.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+
+    Returns:
+        str: Success message.
+
+    Notes:
+        - Mutates column widths and may be expensive on large sheets.
+    """
     return _formatting.auto_fit_columns(file_path, sheet_name)
 
 
@@ -86,7 +115,20 @@ def copy_cell_format(
     source_cell: str,
     target_range: str,
 ) -> dict:
-    """Copy all formatting from source_cell and apply it to every cell in target_range."""
+    """Copy formatting from a single source cell to every cell in a target range.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        source_cell: Reference of the cell to copy formatting from.
+        target_range: Range to apply the copied format.
+
+    Returns:
+        dict: Summary of changed cells.
+
+    Notes:
+        - Mutates formatting; does not touch values.
+    """
     return _formatting.copy_cell_format(file_path, sheet_name, source_cell, target_range)
 
 
@@ -95,7 +137,19 @@ def clear_cell_format(
     sheet_name: str,
     range_str: str,
 ) -> dict:
-    """Reset all formatting on cells in range_str without touching values."""
+    """Clear formatting from cells in `range_str` without altering cell values.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        range_str: Range whose formatting should be reset.
+
+    Returns:
+        dict: Summary of cleared cells.
+
+    Notes:
+        - Non-destructive to cell values but destructive to formatting state.
+    """
     return _formatting.clear_cell_format(file_path, sheet_name, range_str)
 
 
@@ -105,7 +159,20 @@ def apply_named_style(
     range_str: str,
     style_name: str,
 ) -> dict:
-    """Apply a named built-in Excel style (e.g. 'Good', 'Bad', 'Neutral', 'Heading 1') to a cell range."""
+    """Apply a named built-in Excel style to a range (e.g. 'Good', 'Heading 1').
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        range_str: Target range.
+        style_name: Name of the named style to apply.
+
+    Returns:
+        dict: Result metadata.
+
+    Notes:
+        - Mutates formatting and depends on openpyxl named style availability.
+    """
     return _formatting.apply_named_style(file_path, sheet_name, range_str, style_name)
 
 

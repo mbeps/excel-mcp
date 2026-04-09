@@ -1,3 +1,8 @@
+"""Central import/export surface for model schemas used by the MCP server.
+
+This module re-exports the most commonly used model types for easy imports elsewhere in the codebase.
+"""
+
 from .analysis import (
     AggregateResult,
     ColumnStats,

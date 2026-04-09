@@ -25,12 +25,23 @@ def formula_write(
     formulas: dict[str, str] | None = None,
     source_range: str | None = None,
 ) -> str | dict:
-    """Write formulas to cells.
+    """Set, batch-set, fill or auto-sum formulas in cells.
 
-    action="set": Set a formula on a cell. Requires: cell_ref, formula. Optional: is_array, target_range.
-    action="batch": Set multiple formulas. Requires: formulas (dict of cell_ref -> formula).
-    action="fill": Drag-fill a formula. Requires: cell_ref (source), target_range.
-    action="auto_sum": Insert =SUM() formula. Requires: cell_ref (destination). Optional: source_range.
+    Args:
+        action: "set", "batch", "fill", or "auto_sum".
+            - "set": requires `cell_ref` and `formula` (is_array optional, target_range optional).
+            - "batch": requires `formulas` dict mapping cell_ref→formula.
+            - "fill": requires `cell_ref` (source) and `target_range`.
+            - "auto_sum": requires `cell_ref` (destination) and optional `source_range`.
+        file_path, sheet_name: Workbook and sheet to modify.
+        is_array: Whether the formula is an array formula.
+        target_range, formulas, source_range: Operation-specific params.
+
+    Returns:
+        str | dict: Success message or batch result.
+
+    Notes:
+        - Writing formulas mutates the workbook. `fill` uses formula translation utilities; verify absolute/relative reference behaviour.
     """
     if action == "set":
         if cell_ref is None:
@@ -62,13 +73,19 @@ def formula_audit(
     cell_ref: str | None = None,
     cell_range: str | None = None,
 ) -> dict | list[FormulaErrorInfo] | list[str] | list[FormulaInfo]:
-    """Audit and inspect formulas. All actions are read-only.
+    """Inspect formulas: get cached value, list errors, find precedents/dependents, or list all formulas.
 
-    action="value": Get cached display value. Requires: cell_ref.
-    action="errors": Find error cells (#VALUE!, #REF!, etc.). Optional: cell_range to limit scope.
-    action="precedents": Cells feeding into cell_ref. Requires: cell_ref.
-    action="dependents": Cells referencing cell_ref. Requires: cell_ref.
-    action="list": List all formulas in the sheet.
+    Args:
+        action: "value", "errors", "precedents", "dependents", or "list".
+        file_path, sheet_name: Workbook and sheet.
+        cell_ref: Required for "value", "precedents", and "dependents".
+        cell_range: Optional range filter for "errors".
+
+    Returns:
+        dict or list: Action-dependent payload (e.g. value, list of FormulaErrorInfo, list of cell refs).
+
+    Notes:
+        - Read-only.
     """
     if action == "value":
         if not cell_ref:

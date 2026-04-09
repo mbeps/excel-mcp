@@ -36,10 +36,34 @@ def read_cells(
 ) -> dict | ChunkReadResult:
     """Read cell data from a worksheet.
 
-    mode="single": Read one cell. Requires: cell_ref. Optional: include_formula, include_metadata.
-    mode="range": Read rectangular range. Requires: start_cell, end_cell.
-        Optional: show_formula, show_style, output_format, max_cells.
-    mode="chunked": Read large sheets in chunks. Optional: start_row, chunk_size.
+    Args:
+        mode: One of "single", "range", or "chunked". Determines the behaviour and required parameters.
+            - "single": returns a single cell value. Requires `cell_ref`.
+            - "range": returns a rectangular range. Requires `start_cell` and `end_cell`.
+            - "chunked": returns a chunked reader result for large sheets. Optional: `start_row`, `chunk_size`.
+        file_path: Path to the workbook (validated by utils).
+        sheet_name: Worksheet name.
+        cell_ref: Cell reference for single-cell reads (e.g. "A1").
+        start_cell: Top-left cell for range reads.
+        end_cell: Bottom-right cell for range reads.
+        include_formula: If True, include formula text when available.
+        include_metadata: If True, include additional metadata (styles, comment presence, etc.).
+        show_formula: For range reads, include formulas instead of values when True.
+        show_style: For range reads, include style information when True.
+        output_format: Format for range output; typically "json".
+        max_cells: Maximum cells to return for range reads (to avoid huge payloads).
+        start_row: For chunked reads, starting row index (0-based).
+        chunk_size: Number of rows per chunk for chunked reads.
+
+    Returns:
+        dict or ChunkReadResult: Single value, range payload, or chunked reader object depending on `mode`.
+
+    Raises:
+        ValueError: If required parameters for the chosen `mode` are missing or `mode` is unknown.
+
+    Notes:
+        - Read-only: this function only reads workbook data and should not mutate files.
+        - Dispatch mapping: "single"→`tools.cell_ops.read_cell`, "range"→`tools.cell_ops.read_range`, "chunked"→`tools.cell_ops.read_file_chunked`.
     """
     if mode == "single":
         if cell_ref is None:
@@ -80,13 +104,39 @@ def write_cells(
     start_value: float | int | None = None,
     range_string: str | None = None,
 ) -> str | dict:
-    """Write data to cells.
+    """Write data or operations to worksheet cells.
 
-    mode="single": Write one cell. Requires: cell_ref, value.
-    mode="range": Write 2D array. Requires: start_cell, data.
-    mode="series": Fill series. Requires: start_cell, count. Optional: series_type, step, direction, start_value.
-    mode="merge": Merge cells. Requires: range_string (e.g. 'A1:D1').
-    mode="unmerge": Unmerge cells. Requires: range_string (e.g. 'A1:D1').
+    Args:
+        mode: One of "single", "range", "series", "merge", or "unmerge".
+            - "single": write a single cell. Requires `cell_ref` and `value`.
+            - "range": write a 2D array starting at `start_cell`. Requires `start_cell` and `data`.
+            - "series": fill a series from `start_cell`. Requires `start_cell` and `count`.
+            - "merge": merge a cell range. Requires `range_string`.
+            - "unmerge": unmerge a cell range. Requires `range_string`.
+        file_path: Path to workbook to mutate.
+        sheet_name: Target worksheet name.
+        cell_ref: Single-cell reference for "single" and some formula operations.
+        value: Value to write for single-cell writes.
+        start_cell: Top-left cell for range/series writes.
+        data: 2D array of values for "range" mode.
+        series_type: Series type for "series" (e.g. "number").
+        count: Number of series entries to write (required for "series").
+        step: Increment for numeric series or string step expression.
+        direction: "down" or "right" for series growth.
+        start_value: Optional starting value for series.
+        range_string: Range string for merge/unmerge (e.g. "A1:D1").
+
+    Returns:
+        str or dict: Success message or structured result depending on operation.
+
+    Raises:
+        ValueError: If required parameters for the chosen `mode` are missing or `mode` is unknown.
+
+    Notes:
+        - This route mutates workbook files (destructive operations).
+        - Dispatch mapping: "single"→`tools.cell_ops.write_cell`, "range"→`tools.cell_ops.write_range`,
+          "series"→`tools.cell_ops.fill_series`, "merge"→`tools.cell_ops.merge_cells`, "unmerge"→`tools.cell_ops.unmerge_cells`.
+        - Recommend adding short examples in the underlying tools for common series patterns.
     """
     if mode == "single":
         if cell_ref is None:
@@ -118,7 +168,23 @@ def write_cells(
 
 
 def clear_range(file_path: str, sheet_name: str, start_cell: str, end_cell: str) -> str:
-    """Clear all values in a rectangular cell range."""
+    """Clear values from a rectangular range of cells.
+
+    Args:
+        file_path: Path to workbook.
+        sheet_name: Worksheet name.
+        start_cell: Top-left cell of range to clear.
+        end_cell: Bottom-right cell of range to clear.
+
+    Returns:
+        str: Success message.
+
+    Raises:
+        (Propagates exceptions from the underlying tools on I/O or invalid ranges.)
+
+    Notes:
+        - Destructive: clears cell values (but not necessarily styles) — mention in API docs.
+    """
     return _cell_ops.clear_range(file_path, sheet_name, start_cell, end_cell)
 
 
@@ -132,7 +198,24 @@ def copy_range(
     copy_styles: bool = True,
     paste_values_only: bool = False,
 ) -> str:
-    """Copy cells from source range to destination range within same or across sheets."""
+    """Copy a range of cells to a destination range (same workbook or across sheets).
+
+    Args:
+        file_path: Source workbook path (when copying within same workbook).
+        source_sheet: Source worksheet name.
+        source_range: Range to copy (e.g. "A1:B10").
+        dest_sheet: Destination worksheet name.
+        dest_range: Destination top-left target (e.g. "C1").
+        copy_values: If True, copy values.
+        copy_styles: If True, copy styles.
+        paste_values_only: If True, read resolved values and write values (not formulas).
+
+    Returns:
+        str: Success message.
+
+    Notes:
+        - May open the workbook twice if `paste_values_only` is True (read-only pass then write pass).
+    """
     return _cell_ops.copy_range(
         file_path, source_sheet, source_range, dest_sheet, dest_range, copy_values, copy_styles, paste_values_only
     )
@@ -147,7 +230,24 @@ def find_replace(
     match_entire_cell: bool = False,
     search_formulas: bool = False,
 ) -> dict:
-    """Find and replace text across a worksheet. Set match_case for case-sensitive search."""
+    """Find and replace text across a worksheet.
+
+    Args:
+        file_path: Path to workbook to modify.
+        sheet_name: Worksheet name.
+        find_text: Substring or pattern to find.
+        replace_text: Replacement text.
+        match_case: Case-sensitive search when True.
+        match_entire_cell: Match entire cell contents exactly when True.
+        search_formulas: Also search within formulas when True.
+
+    Returns:
+        dict: {"count": int, "cells": ["A1", ...]} detailing replacements.
+
+    Notes:
+        - Destructive: modifies cells in-place.
+        - Consider returning per-cell before/after pairs for audit logging in high-risk contexts.
+    """
     return _cell_ops.find_replace(
         file_path,
         sheet_name,
@@ -167,7 +267,22 @@ def transpose_range(
     source_sheet: str | None = None,
     paste_values_only: bool = False,
 ) -> dict:
-    """Transpose (swap rows and columns) of source_range and write starting at target_cell."""
+    """Transpose a source range (rows↔columns) and write starting at `target_cell`.
+
+    Args:
+        file_path: Path to workbook.
+        sheet_name: Target worksheet name (destination for transposed data).
+        source_range: Range to transpose (on `sheet_name` by default).
+        target_cell: Top-left cell for the transposed output.
+        source_sheet: Optional source sheet name if different from `sheet_name`.
+        paste_values_only: If True, paste only resolved values (no formulas).
+
+    Returns:
+        dict: Summary including target range written and number of cells.
+
+    Notes:
+        - Destructive: overwrites destination cells.
+    """
     return _cell_ops.transpose_range(
         file_path,
         sheet_name,

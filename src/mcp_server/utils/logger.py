@@ -1,3 +1,10 @@
+"""Helpers for creating a stderr-only logger suitable for stdio MCP servers.
+
+This module provides a convenience function to produce a configured
+`logging.Logger` instance that writes only to stderr so stdout remains
+available for JSON-RPC or other protocol traffic.
+"""
+
 from __future__ import annotations
 
 import logging

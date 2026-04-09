@@ -1,4 +1,8 @@
-"""Data analysis operations: filter, sort, statistics, aggregation, and search/replace."""
+"""Data analysis helpers: read sheets with pandas, filtering, sorting, descriptive
+statistics, simple aggregations and cross-file lookups. Functions typically read
+via ``read_sheet_df()`` and may write results back using ``load_workbook_safe()``/
+``save_workbook_safe()`` when an output sheet/file is requested.
+"""
 
 from __future__ import annotations
 
@@ -54,7 +58,29 @@ def filter_data_advanced(
     output_sheet: str | None = None,
     header_row: int = 1,
 ) -> dict[str, int | list[list[CellScalar]]]:
-    """Multi-condition AND/OR filtering."""
+    """Filter rows in a worksheet using multiple conditions combined by AND/OR.
+
+    Args:
+        file_path (str): Path to the Excel/CSV file. Should be validated with ``validate_file_path()``.
+        sheet_name (str): Worksheet name to read.
+        conditions (list[dict]): Sequence of condition dicts with keys: 'column', 'operator', 'value'.
+        logic (str): 'AND' or 'OR' to combine conditions. Defaults to 'AND'.
+        output_sheet (str | None): Optional sheet name to write matched rows; if provided this function opens and mutates the workbook.
+        header_row (int): 1-based header row index (defaults to 1).
+
+    Returns:
+        dict: {"rows": int, "data": list[list]} with row count and up to first 100 matching rows.
+
+    Raises:
+        ValueError: if invalid logic, operators, or column names are supplied.
+        FileNotFoundError, PermissionError: on I/O problems when writing output sheet.
+
+    Remarks:
+        - Reads data with pandas via ``read_sheet_df()`` (calamine/openpyxl fallback). If ``output_sheet`` is provided the function uses
+          ``load_workbook_safe()`` and ``save_workbook_safe()`` to write results.
+        - Ensure ``validate_file_path(file_path)`` is called by the caller for user-provided paths or allow the function's underlying helpers
+          to raise on invalid paths.
+    """
     if logic not in ("AND", "OR"):
         raise ValueError(f"Logic must be 'AND' or 'OR', got '{logic}'")
     if not conditions:
@@ -130,7 +156,26 @@ def sort_data(
     ascending: bool = True,
     has_header: bool = True,
 ) -> str:
-    """Sort sheet data by one or more columns and write back."""
+    """Sort sheet data by one or more columns and write the sorted rows back to the sheet.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to sort.
+        sort_by (list[dict] | None): [{'column': str, 'ascending': bool}, ...] for multi-column sorts.
+        column (str | None): Single-column name if ``sort_by`` is not provided.
+        ascending (bool): Default ascending order when using ``column`` param.
+        has_header (bool): Whether the sheet has a header row (defaults True).
+
+    Returns:
+        str: Human-readable summary message.
+
+    Raises:
+        ValueError: for missing/unknown columns or if neither ``sort_by`` nor ``column`` is provided.
+
+    Remarks:
+        - This function mutates the workbook and uses ``load_workbook_safe()`` and ``save_workbook_safe()`` to persist changes.
+        - Expect openpyxl I/O errors (or permission errors) on save; callers should handle or propagate.
+    """
     df = _read_sheet_df(file_path, sheet_name, has_header)
 
     if sort_by:
@@ -166,7 +211,23 @@ def sort_data(
 
 
 def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> ColumnStats:
-    """Compute descriptive statistics for a numeric column."""
+    """Compute descriptive statistics for a numeric column in a sheet.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet name.
+        column (str): Column name or Excel letter to inspect.
+        has_header (bool): Whether the sheet uses a header row.
+
+    Returns:
+        ColumnStats: Typed dict with count, mean, median, min/max, std, sum and optional skew/kurtosis.
+
+    Raises:
+        ValueError: if the specified column cannot be resolved.
+
+    Remarks:
+        - Uses pandas via ``read_sheet_df()``; no workbook mutation.
+    """
     df = _read_sheet_df(file_path, sheet_name, has_header)
     column = _resolve_col(df, column)
     if column not in df.columns:
@@ -211,7 +272,26 @@ def aggregate_data(
     has_header: bool = True,
     aggfunc: str | dict | None = None,
 ) -> dict[str, list[dict[str, CellScalar]] | str | list[str]]:
-    """Group by one or more columns and apply an aggregation operation."""
+    """Group by one or more columns and aggregate a value column using a named operation or custom agg dict.
+
+    Args:
+        file_path (str): Excel file path.
+        sheet_name (str): Worksheet to read.
+        group_by (str | list[str]): Column(s) to group by.
+        value_column (str): Column to aggregate (ignored if aggfunc dict provided).
+        operation (str): One of 'sum','mean','count','min','max','median','std'. Defaults to 'sum'.
+        has_header (bool): Whether the sheet has headers.
+        aggfunc (str | dict | None): Optional pandas-style aggfunc or dict to apply.
+
+    Returns:
+        dict: {'groups': list[dict], 'group_by': ..., 'operation': ...}.
+
+    Raises:
+        ValueError: for missing columns or unsupported operations.
+
+    Remarks:
+        - Pure data processing using pandas; does not mutate workbooks unless caller writes results separately.
+    """
     group_cols = [group_by] if isinstance(group_by, str) else list(group_by)
     df = _read_sheet_df(file_path, sheet_name, has_header)
     for col_name in group_cols:
@@ -246,7 +326,20 @@ def aggregate_data(
 def find_duplicates(
     file_path: str, sheet_name: str, columns: list[str], has_header: bool = True
 ) -> dict[str, list[list[CellScalar]] | int | list[str]]:
-    """Find duplicate rows based on specified columns."""
+    """Find duplicate rows in a sheet based on a list of columns.
+
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to inspect.
+        columns (list[str]): Column names to consider for duplication.
+        has_header (bool): Whether the sheet has a header row.
+
+    Returns:
+        dict: {'duplicates': list[list], 'count': int, 'headers': list[str]}.
+
+    Raises:
+        ValueError: if any column is not found.
+    """
     df = _read_sheet_df(file_path, sheet_name, has_header)
     for c in columns:
         if c not in df.columns:
@@ -300,7 +393,31 @@ def vlookup_helper(
     output_file: str | None = None,
     header_row: int = 1,
 ) -> dict[str, int | list[dict[str, object]] | str | None]:
-    """Cross-file VLOOKUP-like join with optional fuzzy string matching."""
+    """Perform a VLOOKUP-style cross-file join with optional fuzzy matching and optional output file writing.
+
+    Args:
+        lookup_file (str): File path for lookup values.
+        data_file (str): File path for data file.
+        lookup_column (str): Column/letter to lookup in the lookup file.
+        data_key_column (str): Key column in data file to match.
+        data_return_columns (list[str]): Columns to return from data file.
+        lookup_sheet (str): Sheet name in lookup file (default 'Sheet1').
+        data_sheet (str): Sheet name in data file.
+        fuzzy (bool): Whether to perform fuzzy matching using SequenceMatcher.
+        fuzzy_threshold (float): Minimum similarity to accept.
+        output_file (str | None): Optional path to write a results workbook.
+        header_row (int): Header row index.
+
+    Returns:
+        dict: summary with counts and matched rows; includes 'output_file' if written.
+
+    Raises:
+        ValueError: for missing columns or invalid sheet names.
+        FileNotFoundError / PermissionError: when writing ``output_file``.
+
+    Remarks:
+        - This function reads workbooks in read-only mode where possible, builds in-memory indices and optionally writes an output workbook with ``save_workbook_safe()``.
+    """
 
     # Load lookup workbook
     lookup_wb = load_workbook_safe(lookup_file, read_only=True)
@@ -437,11 +554,21 @@ def profile_data(
     sheet: str | None = None,
     data_range: str | None = None,
 ) -> dict:
-    """Generate a comprehensive profile of all columns in a sheet.
+    """Produce a column-by-column profile for a sheet (dtype, counts, nulls, sample values, numeric statistics or text statistics).
 
-    For each column computes dtype, count, null_count, unique_count, sample values,
-    and type-specific statistics (numeric: min/max/mean/median/std;
-    string/object: min_length/max_length/most_common top 3).
+    Args:
+        file_path (str): Path to workbook.
+        sheet (str | None): Sheet name (defaults to 'Sheet1').
+        data_range (str | None): Optional A1 range to limit the profiling.
+
+    Returns:
+        dict: status, row_count, column_count, and a list of per-column profile dicts.
+
+    Raises:
+        ValueError: on invalid ranges parsed by openpyxl utilities.
+
+    Remarks:
+        - Uses ``read_sheet_df()`` and pandas for computations; read-only.
     """
     validate_file_path(file_path)
     sheet_name = sheet or "Sheet1"
@@ -513,9 +640,24 @@ def insert_subtotals(
     subtotal_func: int = 9,
     include_grand_total: bool = True,
 ) -> dict:
-    """Insert SUBTOTAL formula rows after each group in a sorted sheet.
+    """Insert Excel ``SUBTOTAL`` formula rows after each group for a sorted sheet.
 
-    Supported subtotal_func values: 1=AVERAGE, 2=COUNT, 3=COUNTA, 4=MAX, 5=MIN, 9=SUM.
+    Args:
+        file_path (str): Path to workbook.
+        sheet_name (str): Worksheet to mutate.
+        group_col (str): Column name to group by.
+        value_col (str): Column to subtotal.
+        subtotal_func (int): SUBTOTAL function id (e.g. 9 for SUM). Defaults to 9.
+        include_grand_total (bool): Whether to append a grand total.
+
+    Returns:
+        dict: status and counts of groups/subtotals inserted.
+
+    Raises:
+        ValueError: for missing columns or invalid subtotal_func.
+
+    Remarks:
+        - Mutates workbook; uses ``load_workbook_safe()``/``save_workbook_safe()`` and always closes the workbook in a finally block.
     """
     from openpyxl.utils import get_column_letter as _get_col_letter
 
@@ -594,13 +736,25 @@ def value_counts(
     dropna: bool = True,
     has_header: bool = True,
 ) -> dict:
-    """Return a full value-frequency table for a column.
+    """Return frequency counts for a column in a sheet.
 
-    column: the column header name (or letter if has_header=False).
-    normalize: if True, return proportions (0-1) instead of raw counts.
-    top_n: if given, return only the top N most frequent values.
-    dropna: if True (default), exclude null/NaN values from counts.
-    Returns: {"column": str, "total_rows": int, "counts": [{"value": ..., "count": ...}, ...]}
+    Args:
+        file_path (str): Path to workbook (validated within function).
+        sheet_name (str): Worksheet name.
+        column (str): Column name to count.
+        normalize (bool): If True return proportions instead of raw counts.
+        top_n (int | None): Limit to top N values.
+        dropna (bool): Whether to exclude nulls.
+        has_header (bool): Whether header is present.
+
+    Returns:
+        dict: column, total_rows, normalize, counts (list of value/count dicts).
+
+    Raises:
+        ValueError: for invalid inputs or empty sheet.
+
+    Remarks:
+        - Uses ``validate_file_path()`` and ``read_sheet_df()``; read-only.
     """
     validate_file_path(file_path, must_exist=True)
     df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)

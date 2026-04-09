@@ -29,7 +29,25 @@ def goal_seek(
     tolerance: float = 1e-6,
     max_iterations: int = 1000,
 ) -> dict:
-    """Find the variable_cell value that makes expression equal target_value, then write it to the workbook."""
+    """Find a variable cell value that makes an expression evaluate to a target and write the result.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet containing the expression.
+        variable_cell: Cell reference to adjust (e.g. "B2").
+        expression: Arithmetic expression referencing worksheet cells (string).
+        target_value: Numeric target value for the expression.
+        initial_value: Starting guess for the solver.
+        tolerance: Convergence tolerance.
+        max_iterations: Maximum solver iterations.
+
+    Returns:
+        dict: Result with solved value, status, and iterations used.
+
+    Notes:
+        - Destructive: writes the solved value back to the workbook.
+        - Recommend adding a short example expression in docs.
+    """
     return _financial.goal_seek(
         file_path,
         sheet_name,
@@ -48,7 +66,17 @@ def loan_amortization(
     years: int,
     payments_per_year: int = 12,
 ) -> dict:
-    """Generate a loan amortization schedule with payment breakdown."""
+    """Generate a loan amortization schedule for given principal, rate and term.
+
+    Args:
+        principal: Loan principal amount.
+        annual_rate: Annual interest rate (fractional, e.g. 0.05 for 5%).
+        years: Term in years.
+        payments_per_year: Payment frequency (default 12).
+
+    Returns:
+        dict: Schedule rows and totals including payment amount, interest, principal breakdown.
+    """
     return _financial.loan_amortization(principal, annual_rate, years, payments_per_year)
 
 
@@ -58,7 +86,17 @@ def dcf_analysis(
     terminal_growth_rate: float = 0.02,
     initial_investment: float = 0.0,
 ) -> dict:
-    """Discounted Cash Flow valuation with Gordon Growth Model terminal value."""
+    """Compute Discounted Cash Flow valuation with a Gordon Growth Model terminal value.
+
+    Args:
+        cash_flows: List of cash flows (period-ordered), first item normally year 0 investment (negative).
+        discount_rate: Discount rate as decimal.
+        terminal_growth_rate: Perpetuity growth for terminal value.
+        initial_investment: Optional initial outlay to include in NPV.
+
+    Returns:
+        dict: NPV, terminal value, IRR and breakdowns.
+    """
     return _financial.dcf_analysis(cash_flows, discount_rate, terminal_growth_rate, initial_investment)
 
 
@@ -71,7 +109,21 @@ def budget_variance_analysis(
     header_row: int = 1,
     output_file: str | None = None,
 ) -> dict:
-    """Analyze budget vs actual spending. Returns variance per category with status."""
+    """Compare budget vs actual values in a sheet and return variances per category.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        category_column, budget_column, actual_column: Column identifiers for the analysis.
+        header_row: 1-based header row index.
+        output_file: Optional path to write results.
+
+    Returns:
+        dict: Per-category variance and status.
+
+    Notes:
+        - Mutates workbook only if `output_file` provided.
+    """
     return _financial.budget_variance_analysis(
         file_path,
         sheet_name,
@@ -84,20 +136,32 @@ def budget_variance_analysis(
 
 
 def financial_ratio_analysis(financial_data: dict, industry_benchmarks: dict | None = None) -> dict:
-    """Compute financial ratios from raw financial metric values with optional benchmark comparison.
+    """Compute common financial ratios from raw financial metric inputs and compare them to benchmarks.
 
-    ``financial_data`` is a dict of raw financial metric values (NOT computed ratio names).
-    Valid keys: current_assets, current_liabilities, total_debt, total_equity, net_income,
-    total_assets, revenue, gross_profit, ebitda, interest_expense.
+    Args:
+        financial_data: Dict of raw metric values (e.g. current_assets, total_liabilities, net_income, revenue).
+        industry_benchmarks: Optional dict of benchmark ratios to compare.
 
-    Example: {"current_assets": 500000, "current_liabilities": 250000, "net_income": 100000,
-              "revenue": 1000000, "total_equity": 400000, "gross_profit": 600000}
+    Returns:
+        dict: Computed ratios and optional benchmark comparisons.
+
+    Notes:
+        - This function is pure math and does not touch files.
     """
     return _financial.financial_ratio_analysis(financial_data, industry_benchmarks)
 
 
 def break_even_analysis(fixed_costs: float, price_per_unit: float, variable_cost_per_unit: float) -> dict:
-    """Calculate break-even point in units and revenue."""
+    """Calculate break-even units and revenue given fixed and variable costs.
+
+    Args:
+        fixed_costs: Total fixed costs.
+        price_per_unit: Selling price per unit.
+        variable_cost_per_unit: Variable cost per unit.
+
+    Returns:
+        dict: break_even_units and break_even_revenue.
+    """
     return _financial.break_even_analysis(fixed_costs, price_per_unit, variable_cost_per_unit)
 
 
@@ -111,7 +175,22 @@ def create_sensitivity_table(
     var2_name: str | None = None,
     var2_values: list[float] | None = None,
 ) -> dict:
-    """Create a one- or two-variable sensitivity/what-if table in the workbook."""
+    """Create a 1- or 2-variable sensitivity table in the workbook by evaluating `expression` over supplied value grids.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet containing the base formula or output cell.
+        output_cell: Cell that contains or references the expression to evaluate.
+        expression: Expression that will be evaluated relative to variable names.
+        var1_name, var1_values: Name and values for variable 1.
+        var2_name, var2_values: Optional name/values for a second variable (two-way table).
+
+    Returns:
+        dict: Summary including output range and written values.
+
+    Notes:
+        - Mutates workbook by inserting the table; confirm overwrite semantics when the target output area overlaps data.
+    """
     return _financial.create_sensitivity_table(
         file_path,
         sheet_name,
@@ -140,17 +219,22 @@ def time_value_calc(
     period: int | None = None,
     cash_flows: list[float] | None = None,
 ) -> dict:
-    """Time value of money and depreciation calculations.
+    """Perform a variety of time-value-of-money calculations and depreciation methods.
 
-    operation="fv": Future value. Requires: rate, nper, pmt. Optional: pv, when.
-    operation="pv": Present value. Requires: rate, nper, pmt. Optional: fv, when.
-    operation="nper": Number of periods. Requires: rate, pmt, pv. Optional: fv, when.
-    operation="rate": Interest rate. Requires: nper, pmt, pv. Optional: fv, when, guess.
-    operation="depreciation": Asset depreciation. Requires: cost, salvage, life. Optional: method, period.
-      method values: "sln" / "straight_line", "syd" / "sum_of_years" / "sum_of_years_digits",
-                     "ddb" / "double_declining" / "double_declining_balance". Default: "sln".
-    operation="irr": Internal Rate of Return. Requires: cash_flows (list of floats,
-      first value typically negative as initial investment). Returns irr and irr_percent.
+    Args:
+        operation: One of "fv", "pv", "nper", "rate", "depreciation", "irr".
+        rate, nper, pmt, pv, fv, when, guess: Parameters depending on operation.
+        cost, salvage, life, method, period: Parameters for depreciation operations.
+        cash_flows: For IRR, list of floats.
+
+    Returns:
+        dict: Operation-specific outputs (e.g. numeric answer, schedule, irr value).
+
+    Raises:
+        ValueError: If required args for the selected operation are missing.
+
+    Notes:
+        - Pure calculations except for methods that may write results when integrated into workbook workflows.
     """
     if operation == "fv":
         if rate is None:

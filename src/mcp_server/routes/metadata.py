@@ -31,12 +31,25 @@ def comment(
     text: str | None = None,
     author: str = "Excel MCP",
 ) -> str | CommentInfo | list[CommentInfo] | None:
-    """Comment operations on cells.
+    """Add, read, delete or list cell comments on a sheet.
 
-    action="add": Add a comment. Requires: cell_ref, text. Optional: author.
-    action="read": Read a comment. Read-only. Requires: cell_ref. Returns None if no comment.
-    action="delete": DESTRUCTIVE. Delete a comment. Requires: cell_ref.
-    action="list": List all comments in sheet. Read-only.
+    Args:
+        action: "add", "read", "delete", or "list".
+            - "add": requires `cell_ref` and `text`; optional `author`.
+            - "read": requires `cell_ref`; returns CommentInfo or None.
+            - "delete": requires `cell_ref`; destructive.
+            - "list": returns list of CommentInfo for the sheet.
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        cell_ref: Cell reference for single-cell operations.
+        text: Comment text for "add".
+        author: Optional author string.
+
+    Returns:
+        str | CommentInfo | list[CommentInfo] | None: Depends on action.
+
+    Notes:
+        - Deletions mutate the workbook.
     """
     if action == "add":
         if cell_ref is None:
@@ -66,12 +79,21 @@ def hyperlink(
     display_text: str | None = None,
     tooltip: str | None = None,
 ) -> str | HyperlinkReadResult | list[HyperlinkInfo] | None:
-    """Hyperlink operations.
+    """Add, read, delete, or list hyperlinks attached to cells.
 
-    action="add": Add hyperlink. Requires: cell_ref, url. Optional: display_text, tooltip.
-    action="read": Read hyperlink. Read-only. Requires: cell_ref. Returns None if none.
-    action="delete": DESTRUCTIVE. Delete hyperlink. Requires: cell_ref.
-    action="list": List all hyperlinks. Read-only.
+    Args:
+        action: One of "add", "read", "delete", "list".
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        cell_ref: Cell reference (required for single-cell ops).
+        url: URL for "add".
+        display_text, tooltip: Optional display and tooltip text.
+
+    Returns:
+        str | HyperlinkReadResult | list[HyperlinkInfo] | None
+
+    Notes:
+        - Deleting hyperlinks modifies the workbook.
     """
     if action == "add":
         if cell_ref is None:
@@ -99,11 +121,23 @@ def scenario(
     cell_values: dict[str, dict[str, ScenarioCellValue]] | None = None,
     description: str = "",
 ) -> str | list[ScenarioInfo] | ScenarioApplyResult:
-    """Scenario management for what-if analysis.
+    """Manage saved scenarios (what-if value sets) persisted in a hidden sheet.
 
-    action="add": Save a scenario. Requires: name, cell_values ({sheet: {cell: value}}). Optional: description.
-    action="list": List all scenarios. Read-only.
-    action="apply": DESTRUCTIVE. Apply scenario values to sheet. Requires: name.
+    Args:
+        action: "add", "list", or "apply".
+            - "add": requires `name` and `cell_values` (mapping of sheet->{cell: value}).
+            - "list": returns available scenarios.
+            - "apply": requires `name` and will write stored cell values into the workbook (destructive).
+        file_path: Workbook path.
+        name: Scenario name for add/apply.
+        cell_values: Nested dict of values to save for "add".
+        description: Optional free-text description.
+
+    Returns:
+        str | list[ScenarioInfo] | ScenarioApplyResult
+
+    Notes:
+        - Scenarios are stored in a hidden `_mcp_scenarios` sheet — mention potential user-visible side-effects when users open the workbook.
     """
     if action == "add":
         if not name:
@@ -128,12 +162,21 @@ def named_range(
     scope: str = "workbook",
     new_destination: str | None = None,
 ) -> list[NamedRangeInfo] | str:
-    """Manage named ranges.
+    """List, create, delete, or update named ranges within a workbook.
 
-    action="list": List all named ranges. Read-only. Requires: file_path only.
-    action="create": Create a named range. Requires: name, destination. Optional: scope.
-    action="delete": DESTRUCTIVE. Delete a named range. Requires: name.
-    action="update": Update destination. Requires: name, new_destination.
+    Args:
+        action: "list", "create", "delete", or "update".
+        file_path: Workbook path.
+        name: Named range name for create/delete/update.
+        destination: Destination range string for create.
+        scope: "workbook" or sheet-scoped identifier.
+        new_destination: New range for update.
+
+    Returns:
+        list[NamedRangeInfo] | str
+
+    Notes:
+        - Creating/updating named ranges mutates workbook metadata but typically does not alter cell values.
     """
     if action == "list":
         return _named_ranges.list_named_ranges(file_path)
@@ -167,13 +210,24 @@ def table(
     show_totals: bool | None = None,
     column_totals: dict[str, str] | None = None,
 ) -> str | list[TableInfo] | dict:
-    """Excel table (ListObject) operations.
+    """Create, list, resize, toggle totals, read data, or convert tables to ranges.
 
-    action="create": Create a table. Requires: data_range, table_name. Optional: style_name.
-    action="list": List all tables. Read-only.
-    action="resize": Resize a table. Requires: table_name, new_range.
-    action="totals": Toggle totals row. Requires: table_name, show_totals. Optional: column_totals.
-    action="data": Read table data. Read-only. Requires: table_name.
+    Args:
+        action: "create", "list", "resize", "totals", "data", or "convert_to_range".
+        file_path: Workbook path.
+        sheet_name: Worksheet containing the table.
+        table_name: Table name for operations that require it.
+        data_range: Range to use when creating a table.
+        style_name: Named table style for creation.
+        new_range: New range for resize.
+        show_totals: Bool for toggling totals row.
+        column_totals: Optional dict mapping column->aggregation for totals.
+
+    Returns:
+        str | list[TableInfo] | dict
+
+    Notes:
+        - Table creation/resizing mutates workbook structure.
     """
     if action == "create":
         if not data_range:

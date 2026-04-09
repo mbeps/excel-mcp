@@ -1,4 +1,11 @@
-"""Shared helpers for Excel file operations."""
+"""Utilities for safe and convenient Excel/CSV file operations.
+
+This module provides small, focused helpers used across the MCP server to
+validate file paths, safely load and save workbooks, convert Excel column
+notations, and read worksheets into pandas DataFrames. Functions here enforce
+whitelisted file extensions and conservative defaults to avoid excessive memory
+use in typical server environments.
+"""
 
 from __future__ import annotations
 
@@ -18,13 +25,58 @@ from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
 
+"""
+ALLOWED_EXTENSIONS (set[str]): Whitelisted file extensions accepted by helpers in this module.
+
+Purpose:
+    Restrict accepted workbook and CSV file formats so callers and downstream libraries
+    (openpyxl / pandas / calamine) can rely on predictable parsing behaviour.
+
+Typical values:
+    {'.xlsx', '.xls', '.csv', '.xlsm'}
+"""
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".xlsm"}
+
+"""
+MAX_ROWS_DEFAULT (int): Default maximum number of rows used for read operations when
+no explicit limit is provided by the caller.
+
+Purpose:
+    Guard memory/CPU usage for convenience functions that may read large sheets.
+
+Typical value:
+    10000
+"""
 MAX_ROWS_DEFAULT = 10000
+
+"""
+MAX_ROWS_WRITE (int): Safety cap for write operations to prevent very large writes
+that may impact performance or memory.
+
+Typical value:
+    50000
+"""
 MAX_ROWS_WRITE = 50000
 
 
 def validate_file_path(file_path: str, must_exist: bool = True) -> Path:
-    """Validate and resolve a file path. Raises ValueError for invalid paths."""
+    """
+    Validate and resolve a filesystem path to an allowed Excel/CSV file.
+
+    Args:
+        file_path (str): The path (absolute or relative) to validate.
+        must_exist (bool): If True (default), the function requires the file to exist.
+            If False, the parent directory will be created if necessary and no exist check
+            is performed.
+
+    Returns:
+        pathlib.Path: Resolved Path object pointing to the validated file.
+
+    Raises:
+        ValueError: If the file does not exist (when must_exist=True), the path is not a
+            regular file, the file extension is not in `ALLOWED_EXTENSIONS`, or the path is
+            outside directories permitted by the `EXCEL_MCP_ALLOWED_DIRS` environment variable.
+    """
     path = Path(file_path).resolve()
     if must_exist and not path.exists():
         raise ValueError(f"File not found: {file_path}")
@@ -50,7 +102,23 @@ def load_workbook_safe(
     data_only: bool = False,
     keep_vba: bool | None = None,
 ) -> Workbook:
-    """Load an Excel workbook with validation and error handling."""
+    """
+    Load an Excel workbook with validation and robust error handling.
+
+    Args:
+        file_path (str): Path to the workbook to open.
+        read_only (bool): If True, openpyxl will open the workbook in read-only mode.
+        data_only (bool): If True, formulas will not be evaluated; cell values are the cached
+            results saved in the file.
+        keep_vba (bool | None): If True, preserve VBA content; if None the function will
+            preserve VBA for `.xlsm` files and not for others.
+
+    Returns:
+        openpyxl.workbook.Workbook: Loaded workbook instance.
+
+    Raises:
+        ValueError: If `validate_file_path` fails or openpyxl fails to open the workbook.
+    """
     path = validate_file_path(file_path)
     effective_keep_vba = keep_vba if keep_vba is not None else (path.suffix.lower() == ".xlsm")
     try:
@@ -60,7 +128,19 @@ def load_workbook_safe(
 
 
 def save_workbook_safe(wb: Workbook, file_path: str) -> None:
-    """Save a workbook with error handling."""
+    """
+    Save an openpyxl `Workbook` to disk with validation and error wrapping.
+
+    Args:
+        wb (openpyxl.workbook.Workbook): Workbook instance to save.
+        file_path (str): Target path. Parent directories will be created if necessary.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the path validation fails or saving raises an exception.
+    """
     path = validate_file_path(file_path, must_exist=False)
     try:
         wb.save(str(path))
@@ -69,27 +149,74 @@ def save_workbook_safe(wb: Workbook, file_path: str) -> None:
 
 
 def get_sheet(wb: Workbook, sheet_name: str) -> Worksheet:
-    """Get a worksheet by name, raising ValueError if not found."""
+    """
+    Return a worksheet by name from a loaded `Workbook`.
+
+    Args:
+        wb (openpyxl.workbook.Workbook): Open workbook.
+        sheet_name (str): Name of the worksheet to retrieve.
+
+    Returns:
+        openpyxl.worksheet.worksheet.Worksheet: The requested worksheet object.
+
+    Raises:
+        ValueError: If the sheet name is not present; the error message should include
+            the available sheet names.
+    """
     if sheet_name not in wb.sheetnames:
         raise ValueError(f"Sheet '{sheet_name}' not found. Available: {wb.sheetnames}")
     return wb[sheet_name]
 
 
 def col_letter_to_index(letter: str) -> int:
-    """Convert column letter(s) to 1-based index. A=1, B=2, ..., Z=26, AA=27."""
+    """
+    Convert Excel column letter(s) to a 1-based column index.
+
+    Examples:
+        'A' -> 1, 'Z' -> 26, 'AA' -> 27
+
+    Args:
+        letter (str): Column letters in A1 notation.
+
+    Returns:
+        int: 1-based column index.
+    """
     return int(column_index_from_string(letter))
 
 
 def index_to_col_letter(index: int) -> str:
-    """Convert 1-based column index to letter(s). 1=A, 2=B, ..., 26=Z, 27=AA."""
+    """
+    Convert a 1-based column index to Excel column letters.
+
+    Args:
+        index (int): 1-based column index (1 -> 'A').
+
+    Returns:
+        str: Column letters for the provided index.
+    """
     return str(get_column_letter(index))
 
 
 def read_sheet_df(file_path: str, sheet_name: str, header_row: int = 1) -> pd.DataFrame:
-    """Read a sheet into a pandas DataFrame.
+    """
+    Read a worksheet into a pandas DataFrame, preferring the 'calamine' engine for speed
+    and falling back to 'openpyxl' when needed.
 
     Args:
-        header_row: 1-based row number of the header. 0 means no header.
+        file_path (str): Path to the workbook or CSV file.
+        sheet_name (str): Name of the worksheet to read.
+        header_row (int): 1-based row number containing headers. Use 0 to indicate there is
+            no header row.
+
+    Returns:
+        pandas.DataFrame: DataFrame containing the sheet's data.
+
+    Raises:
+        ValueError: If `validate_file_path` rejects the path.
+
+    Notes:
+        The function attempts to use the 'calamine' engine for Excel files, with an
+        OpenPyXL fallback for cases the first attempt fails.
     """
     path = validate_file_path(file_path)
     header = header_row - 1 if header_row >= 1 else None
@@ -102,7 +229,22 @@ def read_sheet_df(file_path: str, sheet_name: str, header_row: int = 1) -> pd.Da
 
 
 _CELL_REF_RE: re.Pattern[str] = re.compile(r"^([A-Z]{1,3})(\d+)$", re.IGNORECASE)
+
+"""
+MAX_COL_INDEX (int): Maximum supported Excel column index (1-based). Corresponds to
+column 'XFD'.
+
+Value:
+    16384
+"""
 MAX_COL_INDEX: int = 16384  # XFD
+
+"""
+MAX_ROW (int): Maximum supported Excel row index.
+
+Value:
+    1048576
+"""
 MAX_ROW: int = 1048576
 
 

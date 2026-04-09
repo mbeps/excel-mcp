@@ -35,13 +35,22 @@ def protection(
     lock_structure: bool = True,
     lock_windows: bool = False,
 ) -> str:
-    """Protection operations for sheets, cells, and workbooks.
+    """Sheet and workbook protection utilities.
 
-    action="protect_sheet": Enable sheet protection. Requires: sheet_name. Optional: password, allow_* flags.
-    action="unprotect_sheet": DESTRUCTIVE. Remove sheet protection. Requires: sheet_name.
-    action="protect_cells": Lock cells. Requires: sheet_name, locked_range. Optional: unlocked_ranges.
-    action="protect_workbook": Protect workbook structure. Optional: password, lock_structure, lock_windows.
-    action="unprotect_workbook": DESTRUCTIVE. Remove workbook protection.
+    Args:
+        action: One of "protect_sheet", "unprotect_sheet", "protect_cells", "protect_workbook", "unprotect_workbook".
+        file_path: Workbook path.
+        sheet_name: Sheet name for sheet-scoped operations.
+        password: Optional password string used for protection/unprotection.
+        locked_range: Range to lock for "protect_cells".
+        unlocked_ranges: List of ranges allowed for edits.
+        allow_*: Flags controlling allowed operations on protected sheets.
+
+    Returns:
+        str: Result message.
+
+    Notes:
+        - Protect/unprotect modify workbook security. Warn users about lost passwords.
     """
     if action == "protect_sheet":
         if sheet_name is None:
@@ -98,13 +107,24 @@ def data_validation(
     formula: str | None = None,
     show_error: bool = True,
 ) -> str | dict:
-    """Data validation operations.
+    """Add or remove data validation rules on a cell range.
 
-    action="dropdown": Add dropdown list. Requires: options or source_range.
-    action="numeric": Numeric validation. Requires: operator, value1. Optional: value2 for between.
-    action="date": Date validation. Optional: operator, date1, date2.
-    action="remove": DESTRUCTIVE. Remove validations from range.
-    action="formula": Custom formula validation. Requires: formula. Optional: error_title, error_message, show_error.
+    Args:
+        action: "dropdown", "numeric", "date", "remove", or "formula".
+        file_path, sheet_name: Target workbook and sheet.
+        cell_range: Range to apply validation.
+        options: For dropdown lists, list of allowed values.
+        source_range: Alternative dropdown source range.
+        operator, value1, value2: Numeric operator and bounds for numeric validation.
+        date1, date2: Date bounds for date validation.
+        allow_blank, error_style, error_title, error_message, prompt_title, prompt_message: UX controls.
+        formula: Custom formula when action=="formula".
+
+    Returns:
+        str or dict: Result or validation metadata.
+
+    Notes:
+        - "remove" is destructive for validation rules; this does not delete values, only rules.
     """
     if action == "dropdown":
         if options is None and source_range is None:
@@ -178,10 +198,18 @@ def doc_properties(
     file_path: str,
     calc_mode: str = "auto",
 ) -> dict | str:
-    """Document property and calculation operations.
+    """Read document properties or set calculation mode.
 
-    action="get": Read workbook properties. Read-only.
-    action="set_calc_mode": Set calculation mode. Requires: calc_mode ('auto', 'manual', or 'autoNoTable').
+    Args:
+        action: "get" or "set_calc_mode".
+        file_path: Workbook path.
+        calc_mode: "auto", "manual", or "autoNoTable" for setting calculation mode.
+
+    Returns:
+        dict or str: Properties dict for "get"; status message for "set_calc_mode".
+
+    Notes:
+        - Changing calc mode changes workbook behaviour for formula recalc; mention effect in docs.
     """
     if action == "get":
         return _doc_props.get_document_properties(file_path)
@@ -212,15 +240,22 @@ def conditional_format(
     is_above: bool = True,
     equal_average: bool = False,
 ) -> str | dict | list:
-    """Conditional formatting operations.
+    """Apply, list, or remove conditional formatting rules on a sheet.
 
-    action="apply": Apply color_scale/2_color_scale/data_bar/icon_set. Requires: cell_range, format_type.
-    action="highlight": Highlight rule based on operator. Requires: cell_range, operator, formula.
-    action="formula_rule": Custom formula-based rule. Requires: cell_range, formula.
-    action="remove": DESTRUCTIVE. Remove rules. Optional: cell_range (omit to clear all).
-    action="top_bottom": Top/bottom N rule. Requires: cell_range. Optional: is_top, rank, percent, bg_color, font_color.
-    action="above_below_average": Above/below average rule. Requires: cell_range. Optional: is_above, equal_average, bg_color, font_color.
-    action="list": List all conditional formatting rules on the sheet.
+    Args:
+        action: One of "apply", "highlight", "formula_rule", "remove", "top_bottom", "above_below_average", "list".
+        file_path, sheet_name: Target workbook and sheet.
+        cell_range: Range to apply/remove rules.
+        format_type, start_color, mid_color, end_color, bar_color, icon_style: Visual rule parameters.
+        operator, formula: Rule parameters for highlight/formula rules.
+        font_color, bg_color, is_top, rank, percent, is_above, equal_average: Additional rule params.
+
+    Returns:
+        str | dict | list: Depends on action.
+
+    Notes:
+        - Removing rules is destructive to formatting state.
+        - Consider documenting rule precedence and Excel-specific limitations.
     """
     if action == "apply":
         if cell_range is None:

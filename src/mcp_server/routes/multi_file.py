@@ -27,12 +27,23 @@ def multi_file(
     compare_formulas: bool = False,
     sheet_name_b: str | None = None,
 ) -> dict:
-    """Cross-file operations.
+    """Perform cross-workbook operations: aggregate, filter, validate schema consistency, compare two workbooks.
 
-    action="aggregate": Aggregate a column across files. Requires: file_paths, column. Optional: operation.
-    action="filter": Filter rows across files. Requires: file_paths, column, operator, value.
-    action="validate": Cross-file consistency check. Requires: file_paths, key_column.
-    action="compare": Compare two workbooks. Requires: file_a, file_b. Optional: sheet_name, sheet_name_b.
+    Args:
+        action: "aggregate", "filter", "validate", or "compare".
+            - "aggregate": requires `file_paths` and `column`; returns aggregated metric.
+            - "filter": requires `file_paths`, `column`, `operator`, `value`; returns filtered rows or writes to `output_file`.
+            - "validate": requires `file_paths` and `key_column`; checks schema/consistency across files.
+            - "compare": requires `file_a` and `file_b`; returns diff summary and optionally writes a report.
+        file_paths, file_a, file_b: File list / pair for relevant actions.
+        column, operation, operator, value: Parameters for aggregation/filtering.
+        output_file: Optional path to write the result.
+
+    Returns:
+        dict: Operation-specific result (e.g. aggregation numbers, diffs, validation errors).
+
+    Notes:
+        - When `output_file` is provided operations may write new files — document overwrite policy.
     """
     if action == "aggregate":
         if file_paths is None:

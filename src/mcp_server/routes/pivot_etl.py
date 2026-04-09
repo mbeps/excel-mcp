@@ -25,11 +25,24 @@ def create_pivot_table(
     column_field: str | None = None,
     date_freq: str | None = None,
 ) -> dict:
-    """Create a pivot table and optionally write results to a sheet or file.
+    """Build a pivot table from a source sheet and optionally write it to `output_sheet`/`output_file`.
 
-    date_freq: if set, groups datetime index columns by this period before pivoting.
-      Common values: 'ME' (month-end), 'QE' (quarter-end), 'YE' (year-end), 'W' (weekly).
-      Any valid pandas DateOffset alias is accepted.
+    Args:
+        file_path: Workbook path.
+        sheet_name: Source data sheet.
+        index_cols: List of column names to use as index (rows).
+        value_cols: Columns to aggregate.
+        aggfunc: Aggregation function or dict (e.g. "sum", "mean" or {col: "sum"}).
+        output_sheet: Optional destination sheet for pivot output.
+        output_file: Optional file to write the pivot output.
+        column_field: Optional field used for pivot columns.
+        date_freq: Optional date grouping alias (e.g. 'ME', 'YE', 'W').
+
+    Returns:
+        dict: Details about output including created sheet and saved pivot metadata.
+
+    Notes:
+        - Writes to workbook when `output_sheet`/`output_file` is provided. Stores pivot definitions in `_mcp_pivots` for refresh.
     """
     return _pivot_etl.create_pivot_table(
         file_path,
@@ -51,7 +64,19 @@ def refresh_pivot_table(
     source_file_path: str | None = None,
     source_sheet: str | None = None,
 ) -> dict:
-    """Refresh a previously-created pivot table by re-running its stored definition."""
+    """Refresh a previously created pivot table by re-running its stored definition.
+
+    Args:
+        file_path: Workbook path containing stored pivot definitions.
+        output_sheet: Name of the pivot output sheet to refresh.
+        source_file_path, source_sheet: Optional explicit sources to override stored sources.
+
+    Returns:
+        dict: Summary of refresh results.
+
+    Notes:
+        - Mutates the workbook by overwriting the pivot output area.
+    """
     return _pivot_etl.refresh_pivot_table(file_path, output_sheet, source_file_path, source_sheet)
 
 
@@ -63,7 +88,19 @@ def unpivot_data(
     var_name: str = "Variable",
     value_name: str = "Value",
 ) -> dict:
-    """Unpivot (melt) data from wide to long format."""
+    """Melt (unpivot) wide-form data to long-form using id_vars and value_vars.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Source sheet.
+        id_vars: Columns to keep as identifiers.
+        value_vars: Columns to melt into variable/value pairs.
+        var_name: Name for the variable column.
+        value_name: Name for the value column.
+
+    Returns:
+        dict: Result summary and destination range if written.
+    """
     return _pivot_etl.unpivot_data(file_path, sheet_name, id_vars, value_vars, var_name, value_name)
 
 
@@ -77,10 +114,18 @@ def merge_datasets(
     left_on: str | list[str] | None = None,
     right_on: str | list[str] | None = None,
 ) -> dict:
-    """Merge two sheets like a SQL join (left, right, inner, outer).
+    """Join two sheets within the workbook similar to SQL join semantics.
 
-    Use ``join_key`` when both sheets share the same column name(s).
-    Use ``left_on`` / ``right_on`` to join on differently-named columns.
+    Args:
+        file_path: Path to workbook.
+        sheet1, sheet2: Names of the two sheets to join.
+        join_key: Column name(s) common to both sheets (shorthand for left_on/right_on).
+        how: One of "left", "right", "inner", "outer".
+        output_sheet: Optional sheet name to write merged results.
+        left_on, right_on: Optional explicit join keys for differently named columns.
+
+    Returns:
+        dict: Key counts and output information.
     """
     return _pivot_etl.merge_datasets(
         file_path,
@@ -105,12 +150,24 @@ def add_computed_column(
     window: int | None = None,
     rolling_func: str = "mean",
 ) -> str:
-    """Add a computed column using a pandas-eval expression (e.g. 'Revenue - Cost').
+    """Add a computed column either via pandas-eval formula or as a cumsum/rolling operation.
 
-    column_type='formula' (default): evaluate expression via pandas eval.
-    column_type='cumsum': compute a running total of source_col. Requires: source_col.
-    column_type='rolling': compute a rolling window aggregation of source_col.
-      Requires: source_col, window (int). Optional: rolling_func ('mean' or 'sum', default 'mean').
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        new_column_name: Column name to add.
+        expression: Expression string for pandas.eval when column_type=='formula'.
+        has_header: Whether the sheet has a header row.
+        column_type: One of 'formula', 'cumsum', 'rolling'.
+        source_col: Required for 'cumsum' and 'rolling'.
+        window: Integer window for rolling operations.
+        rolling_func: Aggregation for rolling (default 'mean').
+
+    Returns:
+        str: Message indicating success and destination column.
+
+    Notes:
+        - Accepts user-provided expressions — underlying code performs AST checks; docstring should link to safety doc.
     """
     return _pivot_etl.add_computed_column(
         file_path,
@@ -131,7 +188,20 @@ def deduplicate_data(
     columns: list[str] | None = None,
     keep: str = "first",
 ) -> str:
-    """Remove duplicate rows from a sheet. keep: 'first', 'last', or False."""
+    """Remove duplicate rows from a sheet, optionally using a subset of columns.
+
+    Args:
+        file_path: Workbook path.
+        sheet_name: Worksheet name.
+        columns: Optional list of columns to consider for duplicates.
+        keep: Which duplicate to keep: 'first', 'last', or False (drop all duplicates).
+
+    Returns:
+        str: Summary message and number of rows removed.
+
+    Notes:
+        - Destructive: modifies the workbook unless an `output_file` variant is implemented upstream.
+    """
     return _pivot_etl.deduplicate_data(file_path, sheet_name, columns, keep)
 
 

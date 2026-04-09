@@ -1,4 +1,9 @@
-"""Cell and sheet formatting operations."""
+"""Cell and sheet formatting utilities: apply fonts, fills, borders, alignment and named styles.
+
+The helpers here perform in-place mutations of workbooks and persist changes using
+``load_workbook_safe()`` / ``save_workbook_safe()``. Common presets such as
+``NUMBER_FORMAT_PRESETS`` and a curated list of ``_VALID_NAMED_STYLES`` are exposed.
+"""
 
 from __future__ import annotations
 
@@ -123,7 +128,28 @@ def format_cells(
     right_border_style: BorderStyle | None = None,
     preserve_existing: bool = False,
 ) -> str:
-    """Apply formatting to a cell range (e.g. 'A1:C10' or 'A1')."""
+    """Apply rich formatting to every cell in ``cell_range``.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to modify.
+        cell_range (str): A1 range (e.g. 'A1:C10' or single cell 'B2').
+        bold/italic/font_size/font_color/bg_color: Font and fill options.
+        number_format/number_format_preset: Use a preset key or explicit number format string.
+        horizontal_alignment/vertical_alignment: Alignment keywords accepted by openpyxl.
+        wrap_text (bool): Wrap text in cell.
+        border_style/border_color: Apply borders uniformly or per-side overrides.
+        preserve_existing (bool): If True, merge provided attributes with existing cell styles rather than overwriting.
+
+    Returns:
+        str: Confirmation message.
+
+    Raises:
+        ValueError: for invalid number_format_preset.
+
+    Remarks:
+        - Mutates workbook and saves. When ``preserve_existing`` is True care is taken to preserve unspecified attributes.
+    """
     if number_format_preset is not None:
         if number_format_preset not in NUMBER_FORMAT_PRESETS:
             raise ValueError(
@@ -215,7 +241,18 @@ def format_cells(
 
 
 def auto_fit_columns(file_path: str, sheet_name: str) -> str:
-    """Auto-fit all column widths based on content length."""
+    """Auto-fit column widths on a worksheet based on the maximum textual length of cells.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to modify.
+
+    Returns:
+        str: Confirmation message.
+
+    Remarks:
+        - Mutates workbook and saves. Width calculation is heuristic and may need manual adjustment for fonts/styles.
+    """
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -241,7 +278,23 @@ def copy_cell_format(
     source_cell: str,
     target_range: str,
 ) -> dict:
-    """Copy all formatting from source_cell and apply it to every cell in target_range."""
+    """Copy concrete formatting (font/fill/border/alignment/number_format) from a source cell to a target range.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet containing the source and target.
+        source_cell (str): A1 reference of the donor cell.
+        target_range (str): A1 range to receive the formatting.
+
+    Returns:
+        dict: {'cells_formatted': int, 'source': str, 'target': str}.
+
+    Raises:
+        ValueError: if source_cell or target_range are invalid A1 ranges.
+
+    Remarks:
+        - Mutates workbook and saves. Only cell formatting is copied; values are preserved.
+    """
     src_valid = validate_excel_range(source_cell)
     if not src_valid["valid"]:
         raise ValueError(f"Invalid source_cell '{source_cell}': {src_valid['message']}")
@@ -285,7 +338,22 @@ def clear_cell_format(
     sheet_name: str,
     range_str: str,
 ) -> dict:
-    """Reset all formatting on every cell in range_str without touching values."""
+    """Reset formatting on every cell in ``range_str`` to spreadsheet defaults without altering cell values.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to modify.
+        range_str (str): A1 rectangular range.
+
+    Returns:
+        dict: {'cells_cleared': int}.
+
+    Raises:
+        ValueError: if range_str is invalid.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     result = validate_excel_range(range_str)
     if not result["valid"]:
         raise ValueError(f"Invalid range '{range_str}': {result['message']}")
@@ -320,7 +388,23 @@ def apply_named_style(
     range_str: str,
     style_name: str,
 ) -> dict:
-    """Apply a named built-in Excel style to all cells in range_str."""
+    """Apply a built-in named Excel style to every cell in the provided range.
+
+    Args:
+        file_path (str): Workbook path.
+        sheet_name (str): Worksheet to modify.
+        range_str (str): A1 range to style.
+        style_name (str): One of the supported named styles in ``_VALID_NAMED_STYLES``.
+
+    Returns:
+        dict: {'cells_styled': int, 'style_name': str}.
+
+    Raises:
+        ValueError: for unknown ``style_name`` or invalid range.
+
+    Remarks:
+        - Mutates workbook and saves.
+    """
     if style_name not in _VALID_NAMED_STYLES:
         raise ValueError(f"Unknown style_name '{style_name}'. Valid: {sorted(_VALID_NAMED_STYLES)!r}")
     result = validate_excel_range(range_str)
