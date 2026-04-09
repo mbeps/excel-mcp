@@ -210,26 +210,105 @@ The server ships 20 MCP prompts (`prompts.py`) for common workflows:
 | `excel-search-repair`             | Find and repair text or formula content                         |
 | `excel-safe-transform`            | Sandboxed custom transform via `execute_custom_code`            |
 
-## Tool Overview
-- **Workbook Management** (8 tools): Create workbooks; list, copy, rename, and delete sheets; extract metadata and summaries; write to multiple sheets.
-- **Cell Operations** (11 tools): Read and write individual cells and ranges; clear, copy, and delete ranges; chunked reading for large files; batch range reads; detailed cell metadata.
-- **Row/Column Operations** (6 tools): Insert and delete rows and columns by index or letter.
-- **Formatting** (5 tools): Font, fill, alignment, borders, and number formats; apply named Excel styles; number format presets; clear formatting; merge/unmerge cells; auto-fit columns; gradient fills; per-cell format arrays; copy formatting between ranges.
-- **Conditional Formatting** (8 tools): Colour scales, data bars, icon sets, highlight rules, formula rules, top/bottom rules, above/below average rules, duplicate highlighting.
-- **Formulas** (9 actions): Set single, array, and batch formulas; drag-fill formulas across a range; auto-sum; validate syntax; list formulas; convert formulas to values.
-- **Tables** (6 actions): Create, list, delete, rename, and resize native Excel tables; manage totals rows; read table data; convert tables to plain ranges.
-- **Data Validation** (7 tools): Dropdown lists, numeric constraints, date rules, text-length rules, and formula-based validation; list and remove rules.
-- **Protection** (3 tools): Protect and unprotect sheets; lock individual cells.
-- **Charts** (9 actions): Create charts (10 types), delete, list, configure axes, trendlines and combo charts, add and configure data labels, manage legends, and add or remove series.
-- **Data Analysis** (20 tools): Simple and advanced filtering, sorting, statistics, aggregation, duplicate detection, profiling (with percentiles and IQR), subtotals insertion, correlation, ranking, percentiles, sampling, histograms, transposition, unique values, VLOOKUP helper, format-based cell search, normalisation, search/replace (regex-capable), and analysis export.
-- **CSV Operations** (5 tools): Preview CSV files, detect dialect, validate CSV structure, and convert between CSV and XLSX.
-- **Pivot & ETL** (6 tools): Create and refresh pivot tables, unpivot data, merge datasets (SQL-style joins), add computed columns (expression-based or cumulative sum), deduplicate, append datasets, and find differences.
-- **Financial** (14 tools): NPV, IRR, PMT, XNPV, XIRR, DCF analysis, budget variance, financial ratios, scenario analysis, trend analysis, CAGR, break-even analysis, goal seek (AST-safe), and loan amortisation.
-- **Data Cleaning** (3 tools): Configurable cleaning pipeline (trim, remove empties, normalise, fix numbers, deduplication, fill missing values); split and combine columns; parse and normalise date columns; detect outliers.
-- **Comments** (7 tools): Add, update, read, delete, and list cell comments; bulk add and delete.
-- **Document Properties** (5 tools): Read and write workbook metadata; protect and unprotect workbooks; set calculation mode.
-- **Hyperlinks** (5 tools): Add, read, delete, and list external hyperlinks; add internal (intra-workbook) hyperlinks.
-- **Images** (3 tools): Insert, list, and delete images embedded in worksheets.
-- **Cross-file Operations** (3 tools): Bulk aggregate and filter across multiple files; validate data consistency across workbooks.
-- **Named Ranges** (5 tools): List, create, delete, update, and rename named ranges with scope preservation.
-- **Worksheet Operations** (19 actions): Freeze/unfreeze panes, auto-filter, hide/unhide rows and columns, grouping/ungrouping, set row heights and column widths, tab colours, zoom, gridlines, print area, page setup, margins, header/footer, page breaks, print titles, and stack sheets.
+
+## Tools
+
+This section merges the previous "Tool Overview" and the full grouped tool list. Each group includes a short description of its purpose and the individual tools provided by the server.
+
+- Workbook management (5) — Manage workbooks and sheets (create, inspect, rename, delete, copy, move)
+  - `get_workbook_metadata` — Return workbook metadata (sheets, active sheet, named ranges).
+  - `create_workbook` — Create a new workbook file with optional initial sheets.
+  - `get_sheet_summary` — Summarise a sheet (header detection, used range, dimensions).
+  - `write_multi_sheet` — Create/overwrite a workbook from multiple sheet definitions.
+  - `sheet_management` — Rename, delete, copy, hide/unhide, tab color, and move sheets.
+
+- Cell & range operations (6) — Read and write cells/ranges and perform range transforms
+  - `read_cells` — Read a single cell, a rectangular range, or stream large sheets in chunks.
+  - `write_cells` — Write a single cell, a 2D range, generate series, merge/unmerge ranges.
+  - `clear_range` — Clear values from a rectangular range.
+  - `copy_range` — Copy a range between sheets (values and/or styles, optional paste-values-only).
+  - `find_replace` — Find and replace text (optionally in formulas) across a sheet.
+  - `transpose_range` — Transpose rows↔columns and write the result at a target cell.
+
+- Formatting & styling (5) — Apply and manage cell formatting at scale
+  - `format_cells` — Apply fonts, fills, alignment, borders and number formats to a range.
+  - `auto_fit_columns` — Auto-fit column widths to their contents.
+  - `copy_cell_format` — Copy formatting from a source cell to every cell in a target range.
+  - `clear_cell_format` — Remove formatting from a range without changing values.
+  - `apply_named_style` — Apply built-in Excel named styles (e.g. Heading, Good, Bad).
+
+- Formulas (2) — Write and audit formulas
+  - `formula_write` — Set single formulas, batch-set, drag-fill, or insert AutoSum formulas.
+  - `formula_audit` — Inspect formula values, list errors, find precedents/dependents, or list formulas.
+
+- Charts (1) — Create and manage chart lifecycle and series
+  - `chart` — Create, list, delete, add series, configure axes/trendlines/legends/data labels.
+
+- Worksheet operations (4) — UI, structure, print and cross-workbook transfers
+  - `worksheet_view` — Freeze panes, set/remove auto-filter, toggle gridlines.
+  - `worksheet_structure` — Insert/delete rows/cols, group/ungroup, set sizes.
+  - `worksheet_print` — Set print area, page setup, print titles, and page breaks.
+  - `worksheet_transfer` — Copy ranges/sheets across workbooks, merge workbooks, stack sheets.
+
+- Data analysis (9) — Filtering, aggregation, profiling and helper utilities
+  - `sort_data` — Sort worksheet rows by one or more columns.
+  - `column_statistics` — Compute descriptive statistics for a numeric column.
+  - `aggregate_data` — Group rows and aggregate values using common operations.
+  - `find_duplicates` — Identify duplicate rows based on a set of columns.
+  - `vlookup_helper` — Cross-file lookup helper (exact or fuzzy matching) to enrich data.
+  - `filter_data_advanced` — Filter rows using multiple conditions combined with AND/OR logic.
+  - `insert_subtotals` — Insert SUBTOTAL formula rows after groups in a sorted sheet.
+  - `profile_data` — Produce a per-column data profile (types, nulls, unique counts, samples).
+  - `value_counts` — Frequency counts (optionally normalized, top-n) for a column.
+
+- Pivot & ETL (6) — Pivot tables and ETL-style transforms
+  - `create_pivot_table` — Build a pivot table and optionally write it to a sheet/file.
+  - `refresh_pivot_table` — Re-run a stored pivot definition to refresh output.
+  - `unpivot_data` — Melt wide-form data into long-form (id_vars/value_vars).
+  - `merge_datasets` — Join two sheets using SQL-style join semantics.
+  - `add_computed_column` — Add a computed column via safe expressions or cumsum/rolling operations.
+  - `deduplicate_data` — Remove duplicate rows (with keep strategy) from a sheet.
+
+- Financial (8) — Time-value calculations, DCF, goal-seek and scenario tools
+  - `goal_seek` — Solve for a variable cell value that makes an expression equal a target.
+  - `loan_amortization` — Generate an amortization schedule for a loan.
+  - `dcf_analysis` — Discounted cash flow valuation with terminal value calculation.
+  - `budget_variance_analysis` — Compare budget vs actual by category and report variances.
+  - `financial_ratio_analysis` — Compute common financial ratios and compare to benchmarks.
+  - `break_even_analysis` — Compute break-even units and revenue from cost structure.
+  - `create_sensitivity_table` — Build 1- or 2-variable sensitivity tables in the workbook.
+  - `time_value_calc` — FV/PV/NPER/RATE/depreciation/IRR operations and helpers.
+
+- Cleaning & CSV (4) — Data cleaning primitives and CSV helpers
+  - `split_column` — Split a delimited text column into multiple columns.
+  - `data_cleaner` — Run a configurable cleaning pipeline (trim, dedupe, fill, normalize).
+  - `parse_date_column` — Parse varied date formats and normalise output formatting.
+  - `csv_ops` — Preview CSVs and convert between CSV and XLSX.
+
+- Statistical & solver (4) — Regression, smoothing and optimisation
+  - `run_regression` — Run OLS regression and return coefficients and diagnostics.
+  - `run_exponential_smoothing` — Apply simple/Holt/Holt-Winters smoothing and optional forecasting.
+  - `run_solver` — Constrained optimisation using scipy for minimisation/maximisation objectives.
+  - `correlation_matrix` — Compute Pearson correlation matrix for numeric columns.
+
+- Governance (4) — Protection, validation, document properties and conditional formats
+  - `protection` — Protect/unprotect sheets or workbooks and lock cell ranges.
+  - `data_validation` — Add/remove dropdown, numeric, date, and formula-based validation rules.
+  - `doc_properties` — Read document properties or set calculation mode.
+  - `conditional_format` — Apply, list, or remove conditional formatting rules.
+
+- Metadata & tables (5) — Comments, hyperlinks, scenarios, named ranges and tables
+  - `comment` — Add, read, delete or list comments on cells.
+  - `hyperlink` — Add, read, delete or list hyperlinks attached to cells.
+  - `scenario` — Save, list and apply what-if scenarios persisted in a hidden sheet.
+  - `named_range` — List, create, delete or update named ranges.
+  - `table` — Create, list, resize, toggle totals, read, or convert Excel tables.
+
+- Multi-file operations (1) — Bulk and cross-workbook operations
+  - `multi_file` — Aggregate, filter, validate, or compare across multiple workbooks.
+
+- Custom code & images (2) — Sandboxed code execution and images
+  - `insert_image` — Insert an image into a worksheet anchored at a target cell.
+  - `execute_custom_code` — Run sandboxed Python/pandas code against a workbook and return results.
+
+ 
