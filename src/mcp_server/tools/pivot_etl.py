@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 from logging import Logger
 
@@ -16,6 +15,7 @@ from mcp_server.utils.excel_helpers import (
     save_workbook_safe,
     validate_file_path,
 )
+from mcp_server.utils.expression_validator import validate_expression
 from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
@@ -47,67 +47,6 @@ def _save_pivots(wb: Workbook, pivots: dict) -> None:  # type: ignore[type-arg]
         ws = wb.create_sheet(_PIVOTS_SHEET)
         ws.sheet_state = "hidden"
     ws["A1"] = json.dumps(pivots)
-
-
-_FORBIDDEN_NAMES: frozenset[str] = frozenset(
-    {
-        "__builtins__",
-        "__import__",
-        "exec",
-        "eval",
-        "open",
-        "system",
-        "getattr",
-        "setattr",
-        "delattr",
-        "globals",
-        "locals",
-        "compile",
-        "breakpoint",
-        "input",
-        "print",
-        "exit",
-        "quit",
-    }
-)
-
-_ALLOWED_AST_NODES = (
-    ast.Expression,
-    ast.BinOp,
-    ast.UnaryOp,
-    ast.Constant,
-    ast.Name,
-    ast.Load,
-    ast.Add,
-    ast.Sub,
-    ast.Mult,
-    ast.Div,
-    ast.Pow,
-    ast.Mod,
-    ast.FloorDiv,
-    ast.USub,
-    ast.UAdd,
-)
-
-
-def _validate_eval_expression(expression: str) -> None:
-    """Validate expression using AST whitelist — only arithmetic and column names allowed."""
-    try:
-        tree = ast.parse(expression, mode="eval")
-    except SyntaxError as e:
-        raise ValueError(f"Invalid expression syntax: {e}") from e
-
-    for node in ast.walk(tree):
-        if not isinstance(node, _ALLOWED_AST_NODES):
-            raise ValueError(
-                f"Expression contains disallowed operation '{type(node).__name__}'. "
-                "Only column references and basic arithmetic are allowed."
-            )
-        if isinstance(node, ast.Name) and node.id in _FORBIDDEN_NAMES:
-            raise ValueError(
-                f"Expression references forbidden name '{node.id}'. "
-                "Only column references and basic arithmetic are allowed."
-            )
 
 
 def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
@@ -387,7 +326,14 @@ def add_computed_column(
             logger.info(
                 "Added cumsum column '%s' from '%s' to %s!%s", new_column_name, source_col, sheet_name, file_path
             )
-            return f"Added cumsum column '{new_column_name}' from source column '{source_col}' to sheet '{sheet_name}' ({len(df)} rows written)."
+            return {
+                "status": "ok",
+                "column_type": "cumsum",
+                "new_column": new_column_name,
+                "source_col": source_col,
+                "rows_written": len(df),
+                "message": f"Added cumsum column '{new_column_name}' from source column '{source_col}' to sheet '{sheet_name}' ({len(df)} rows written).",
+            }
         finally:
             wb.close()
 
@@ -426,28 +372,33 @@ def add_computed_column(
 
     # column_type == "formula" (default path)
     df = _read_sheet_df(file_path, sheet_name, has_header)
-    _validate_eval_expression(expression)
+    validate_expression(expression)
 
     try:
+        df[new_column_name] = df.eval(expression, engine="numexpr")
+    except (ImportError, NotImplementedError):
         df[new_column_name] = df.eval(expression, engine="python")
     except Exception as e:
         raise ValueError(f"Failed to evaluate expression '{expression}': {e}") from e
 
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
+    try:
+        ws = get_sheet(wb, sheet_name)
 
-    # Write header for new column
-    new_col_idx = len(df.columns)
-    if has_header:
-        ws.cell(row=1, column=new_col_idx, value=new_column_name)
+        # Write header for new column
+        new_col_idx = len(df.columns)
+        if has_header:
+            ws.cell(row=1, column=new_col_idx, value=new_column_name)
 
-    start_row = 2 if has_header else 1
-    for r_idx, val in enumerate(df[new_column_name].tolist(), start=start_row):
-        ws.cell(row=r_idx, column=new_col_idx, value=val)
+        start_row = 2 if has_header else 1
+        for r_idx, val in enumerate(df[new_column_name].tolist(), start=start_row):
+            ws.cell(row=r_idx, column=new_col_idx, value=val)
 
-    save_workbook_safe(wb, file_path)
-    logger.info("Added column '%s' to %s!%s", new_column_name, sheet_name, file_path)
-    return f"Added column '{new_column_name}' ({expression}) to '{sheet_name}' ({len(df)} rows)."
+        save_workbook_safe(wb, file_path)
+        logger.info("Added column '%s' to %s!%s", new_column_name, sheet_name, file_path)
+        return f"Added column '{new_column_name}' ({expression}) to '{sheet_name}' ({len(df)} rows)."
+    finally:
+        wb.close()
 
 
 def deduplicate_data(

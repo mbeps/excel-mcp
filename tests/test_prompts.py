@@ -237,7 +237,7 @@ def test_workbook_maintenance_prompt_mentions_wiring_tools():
 
     assert isinstance(result, str) and len(result) > 50
     assert "wb.xlsx" in result and "Ops" in result and "print" in result
-    assert "sheet_management" in result and "worksheet_ops" in result and "auto_fit_columns" in result
+    assert "sheet_management" in result and "worksheet_structure" in result and "auto_fit_columns" in result
 
 
 def test_table_manager_prompt_mentions_table_actions():

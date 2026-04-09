@@ -87,8 +87,8 @@ def test_misc_standalone_ops(monkeypatch):
 
     assert main.clear_range("foo.xlsx", "Sheet1", "A1", "B2") == "CLEAR"
     assert main.copy_range("foo.xlsx", "Sheet1", "A1:B2", "Sheet1", "C1:D2") == "COPY"
-    assert json.loads(main.find_replace("foo.xlsx", "Sheet1", "a", "b"))["count"] == 1
-    assert json.loads(main.transpose_range("foo.xlsx", "Sheet1", "A1:B2", "C1"))["status"] == "ok"
+    assert main.find_replace("foo.xlsx", "Sheet1", "a", "b")["count"] == 1
+    assert main.transpose_range("foo.xlsx", "Sheet1", "A1:B2", "C1")["status"] == "ok"
 
 
 def test_formatting_wrappers(monkeypatch):
@@ -100,9 +100,9 @@ def test_formatting_wrappers(monkeypatch):
 
     assert main.format_cells("foo.xlsx", "Sheet1", "A1").startswith("FMT")
     assert main.auto_fit_columns("foo.xlsx", "Sheet1") == "AF"
-    assert json.loads(main.copy_cell_format("foo.xlsx", "Sheet1", "A1", "A1"))["ok"]
-    assert json.loads(main.clear_cell_format("foo.xlsx", "Sheet1", "A1"))["ok"]
-    assert json.loads(main.apply_named_style("foo.xlsx", "Sheet1", "A1", "Good"))["ok"]
+    assert main.copy_cell_format("foo.xlsx", "Sheet1", "A1", "A1")["ok"]
+    assert main.clear_cell_format("foo.xlsx", "Sheet1", "A1")["ok"]
+    assert main.apply_named_style("foo.xlsx", "Sheet1", "A1", "Good")["ok"]
 
 
 def test_formula_write_and_audit(monkeypatch):
@@ -118,8 +118,8 @@ def test_formula_write_and_audit(monkeypatch):
 
     assert main.formula_write("set", "foo.xlsx", "Sheet1", cell_ref="A1", formula="=1+1") == "FSET"
     assert main.formula_write("batch", "foo.xlsx", "Sheet1", formulas={"A1": "=1"}) == "FBATCH"
-    assert json.loads(main.formula_write("fill", "foo.xlsx", "Sheet1", cell_ref="A1", target_range="A1:A2"))["filled"]
-    assert json.loads(main.formula_write("auto_sum", "foo.xlsx", "Sheet1", cell_ref="B1"))["sum"] == 5
+    assert main.formula_write("fill", "foo.xlsx", "Sheet1", cell_ref="A1", target_range="A1:A2")["filled"]
+    assert main.formula_write("auto_sum", "foo.xlsx", "Sheet1", cell_ref="B1")["sum"] == 5
 
     assert main.formula_audit("value", "foo.xlsx", "Sheet1", cell_ref="A1") == "FVAL"
     assert main.formula_audit("errors", "foo.xlsx", "Sheet1") == []
@@ -165,8 +165,8 @@ def test_csv_conditional_table(monkeypatch, sample_csv):
         main.conditional_format("formula_rule", "foo.xlsx", "Sheet1", cell_range="A1:A2", formula="A1>1") == "FORMULA"
     )
     assert main.conditional_format("remove", "foo.xlsx", "Sheet1") == "REMOVED"
-    assert json.loads(main.conditional_format("top_bottom", "foo.xlsx", "Sheet1", cell_range="A1:A2"))["ok"]
-    assert json.loads(main.conditional_format("above_below_average", "foo.xlsx", "Sheet1", cell_range="A1:A2"))["ok"]
+    assert main.conditional_format("top_bottom", "foo.xlsx", "Sheet1", cell_range="A1:A2")["ok"]
+    assert main.conditional_format("above_below_average", "foo.xlsx", "Sheet1", cell_range="A1:A2")["ok"]
 
     with pytest.raises(ValueError, match="Unknown action"):
         main.conditional_format("bad", "foo.xlsx", "Sheet1")
@@ -200,7 +200,7 @@ def test_data_validation_protection_chart(monkeypatch):
     )
     assert main.data_validation("date", "foo.xlsx", "Sheet1", "A1:A2") == "DDATE"
     assert main.data_validation("remove", "foo.xlsx", "Sheet1", "A1:A2") == "DREM"
-    assert json.loads(main.data_validation("formula", "foo.xlsx", "Sheet1", "A1:A2", formula="A1>0"))["ok"]
+    assert main.data_validation("formula", "foo.xlsx", "Sheet1", "A1:A2", formula="A1>0")["ok"]
 
     monkeypatch.setattr(main._protection, "protect_sheet", lambda *args, **kwargs: "PS")
     monkeypatch.setattr(main._protection, "unprotect_sheet", lambda *args, **kwargs: "UPS")
@@ -312,13 +312,13 @@ def test_multi_file_and_worksheet_ops(monkeypatch):
     monkeypatch.setattr(main._ws_ops, "add_page_break", lambda *args, **kwargs: "APB")
     monkeypatch.setattr(main._ws_ops, "remove_page_break", lambda *args, **kwargs: "RPB")
 
-    assert main.worksheet_ops("freeze", file_path="foo.xlsx", sheet_name="Sheet1") == "FROZEN"
+    assert main.worksheet_view("freeze", file_path="foo.xlsx", sheet_name="Sheet1") == "FROZEN"
     assert (
-        main.worksheet_ops("auto_filter", file_path="foo.xlsx", sheet_name="Sheet1", cell_range="A1:A2", remove=False)
+        main.worksheet_view("auto_filter", file_path="foo.xlsx", sheet_name="Sheet1", cell_range="A1:A2", remove=False)
         == "FILTERED"
     )
     assert (
-        main.worksheet_ops(
+        main.worksheet_transfer(
             "copy_range_across",
             file_path="foo.xlsx",
             source_sheet="Sheet1",
@@ -328,39 +328,56 @@ def test_multi_file_and_worksheet_ops(monkeypatch):
         == "CRANGE"
     )
     assert (
-        main.worksheet_ops("copy_sheet_across", source_file="foo.xlsx", source_sheet="Sheet1", dest_file="foo2.xlsx")
+        main.worksheet_transfer(
+            "copy_sheet_across", source_file="foo.xlsx", source_sheet="Sheet1", dest_file="foo2.xlsx"
+        )
         == "CSHEET"
     )
-    assert main.worksheet_ops("merge_workbooks", source_files=["foo.xlsx"], output_file="out.xlsx") == "MERGED"
-    assert main.worksheet_ops("insert_rows", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "IR"
-    assert main.worksheet_ops("delete_rows", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "DR"
-    assert main.worksheet_ops("insert_cols", file_path="foo.xlsx", sheet_name="Sheet1", col=2) == "IC"
-    assert main.worksheet_ops("delete_cols", file_path="foo.xlsx", sheet_name="Sheet1", col=2) == "DC"
-    assert main.worksheet_ops("set_print_area", file_path="foo.xlsx", sheet_name="Sheet1", print_area="A1:B2") == "SPA"
-    assert main.worksheet_ops("set_page_setup", file_path="foo.xlsx", sheet_name="Sheet1") == "SPS"
-    assert main.worksheet_ops("group_rows", file_path="foo.xlsx", sheet_name="Sheet1", start_row=1, end_row=2) == "GR"
-    assert main.worksheet_ops("group_cols", file_path="foo.xlsx", sheet_name="Sheet1", start_col=1, end_col=2) == "GC"
+    assert main.worksheet_transfer("merge_workbooks", source_files=["foo.xlsx"], output_file="out.xlsx") == "MERGED"
+    assert main.worksheet_structure("insert_rows", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "IR"
+    assert main.worksheet_structure("delete_rows", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "DR"
+    assert main.worksheet_structure("insert_cols", file_path="foo.xlsx", sheet_name="Sheet1", col=2) == "IC"
+    assert main.worksheet_structure("delete_cols", file_path="foo.xlsx", sheet_name="Sheet1", col=2) == "DC"
     assert (
-        main.worksheet_ops("ungroup_rows", file_path="foo.xlsx", sheet_name="Sheet1", start_row=1, end_row=2) == "UGR"
+        main.worksheet_print("set_print_area", file_path="foo.xlsx", sheet_name="Sheet1", print_area="A1:B2") == "SPA"
+    )
+    assert main.worksheet_print("set_page_setup", file_path="foo.xlsx", sheet_name="Sheet1") == "SPS"
+    assert (
+        main.worksheet_structure("group_rows", file_path="foo.xlsx", sheet_name="Sheet1", start_row=1, end_row=2)
+        == "GR"
     )
     assert (
-        main.worksheet_ops("ungroup_cols", file_path="foo.xlsx", sheet_name="Sheet1", start_col=1, end_col=2) == "UGC"
+        main.worksheet_structure("group_cols", file_path="foo.xlsx", sheet_name="Sheet1", start_col=1, end_col=2)
+        == "GC"
     )
-    assert main.worksheet_ops("set_print_titles", file_path="foo.xlsx", sheet_name="Sheet1", title_rows="1:1") == "SPT"
-    assert main.worksheet_ops("set_row_height", file_path="foo.xlsx", sheet_name="Sheet1", rows=[1], height=20) == "SRH"
     assert (
-        main.worksheet_ops("set_col_width", file_path="foo.xlsx", sheet_name="Sheet1", cols_list=["A"], width=20)
+        main.worksheet_structure("ungroup_rows", file_path="foo.xlsx", sheet_name="Sheet1", start_row=1, end_row=2)
+        == "UGR"
+    )
+    assert (
+        main.worksheet_structure("ungroup_cols", file_path="foo.xlsx", sheet_name="Sheet1", start_col=1, end_col=2)
+        == "UGC"
+    )
+    assert (
+        main.worksheet_print("set_print_titles", file_path="foo.xlsx", sheet_name="Sheet1", title_rows="1:1") == "SPT"
+    )
+    assert (
+        main.worksheet_structure("set_row_height", file_path="foo.xlsx", sheet_name="Sheet1", rows=[1], height=20)
+        == "SRH"
+    )
+    assert (
+        main.worksheet_structure("set_col_width", file_path="foo.xlsx", sheet_name="Sheet1", cols_list=["A"], width=20)
         == "SCW"
     )
-    assert main.worksheet_ops("set_gridlines", file_path="foo.xlsx", sheet_name="Sheet1", show=True) == "SGL"
+    assert main.worksheet_view("set_gridlines", file_path="foo.xlsx", sheet_name="Sheet1", show=True) == "SGL"
     assert (
-        main.worksheet_ops(
+        main.worksheet_transfer(
             "stack_sheets", file_path="foo.xlsx", sheet_names=["Sheet1"], dest_sheet="Stacked", output_path="out.xlsx"
         )
         == "STACK"
     )
-    assert main.worksheet_ops("add_page_break", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "APB"
-    assert main.worksheet_ops("remove_page_break", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "RPB"
+    assert main.worksheet_print("add_page_break", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "APB"
+    assert main.worksheet_print("remove_page_break", file_path="foo.xlsx", sheet_name="Sheet1", row=2) == "RPB"
 
 
 def test_analysis_pivot_financial_shortcuts(monkeypatch):
@@ -388,7 +405,7 @@ def test_analysis_pivot_financial_shortcuts(monkeypatch):
     monkeypatch.setattr(main._pivot_etl, "deduplicate_data", lambda *args, **kwargs: "DD")
 
     assert main.create_pivot_table("foo.xlsx", "Sheet1", ["A"], ["B"]) == "CPT"
-    assert main.refresh_pivot_table("foo.xlsx", "OutSheet") == json.dumps("RPT")
+    assert main.refresh_pivot_table("foo.xlsx", "OutSheet") == "RPT"
     assert main.unpivot_data("foo.xlsx", "Sheet1", ["A"], ["B"]) == "UP"
     assert main.merge_datasets("foo.xlsx", "Sheet1", "Sheet1") == "MD"
     assert main.add_computed_column("foo.xlsx", "Sheet1", "C", "A+B") == "AC"

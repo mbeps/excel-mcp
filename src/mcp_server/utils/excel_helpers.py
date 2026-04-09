@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from logging import Logger
 from pathlib import Path
@@ -31,6 +32,13 @@ def validate_file_path(file_path: str, must_exist: bool = True) -> Path:
         raise ValueError(f"Unsupported file type: {path.suffix}. Allowed: {ALLOWED_EXTENSIONS}")
     if must_exist and not path.is_file():
         raise ValueError(f"Path is not a file: {file_path}")
+
+    allowed_dirs_env = os.environ.get("EXCEL_MCP_ALLOWED_DIRS", "").strip()
+    if allowed_dirs_env:
+        allowed_dirs = [Path(d.strip()).resolve() for d in allowed_dirs_env.split(",") if d.strip()]
+        if not any(path == ad or ad in path.parents for ad in allowed_dirs):
+            raise ValueError("File path is outside allowed directories")
+
     if not must_exist:
         path.parent.mkdir(parents=True, exist_ok=True)
     return path

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import ast
-import math
 import os
 from logging import Logger
 
@@ -15,102 +13,24 @@ from mcp_server.utils.excel_helpers import (
     load_workbook_safe,
     save_workbook_safe,
 )
+from mcp_server.utils.expression_validator import SAFE_MATH_FUNCS, validate_expression
 from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
 
-# Safe AST nodes for goal_seek expression parsing
-_SAFE_NODES = (
-    ast.Expression,
-    ast.BinOp,
-    ast.UnaryOp,
-    ast.Constant,
-    ast.Name,
-    ast.Call,
-    ast.Add,
-    ast.Sub,
-    ast.Mult,
-    ast.Div,
-    ast.Pow,
-    ast.Mod,
-    ast.FloorDiv,
-    ast.USub,
-    ast.UAdd,
-    ast.Load,
-)
-
-_SAFE_MATH_FUNCS = {
-    "sqrt": math.sqrt,
-    "log": math.log,
-    "log10": math.log10,
-    "exp": math.exp,
-    "sin": math.sin,
-    "cos": math.cos,
-    "tan": math.tan,
-    "abs": abs,
-    "pow": pow,
-}
-
-
-def _validate_expression(expr: str) -> ast.Expression:
-    """Parse and validate a math expression, allowing only safe operations."""
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError as e:
-        raise ValueError(f"Invalid expression syntax: {e}") from e
-
-    for node in ast.walk(tree):
-        if not isinstance(node, _SAFE_NODES):
-            raise ValueError(
-                f"Unsafe expression node: {type(node).__name__}."
-                " Only arithmetic operations and basic math functions are allowed."
-            )
-        if isinstance(node, ast.Name) and node.id != "x" and node.id not in _SAFE_MATH_FUNCS:
-            raise ValueError(
-                f"Unknown variable '{node.id}'. Only 'x' and math functions ({list(_SAFE_MATH_FUNCS)}) are allowed."
-            )
-        if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name) or node.func.id not in _SAFE_MATH_FUNCS:
-                raise ValueError(f"Unsafe function call. Only these are allowed: {list(_SAFE_MATH_FUNCS)}")
-    return tree
-
-
-def _validate_expression_vars(expr: str, allowed_vars: set[str]) -> ast.Expression:
-    """Parse and validate a math expression, allowing specified variable names."""
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError as e:
-        raise ValueError(f"Invalid expression syntax: {e}") from e
-
-    for node in ast.walk(tree):
-        if not isinstance(node, _SAFE_NODES):
-            raise ValueError(
-                f"Unsafe expression node: {type(node).__name__}."
-                " Only arithmetic operations and basic math functions are allowed."
-            )
-        if isinstance(node, ast.Name) and node.id not in allowed_vars and node.id not in _SAFE_MATH_FUNCS:
-            raise ValueError(
-                f"Unknown variable '{node.id}'. Allowed variables: {sorted(allowed_vars)},"
-                f" math functions: {list(_SAFE_MATH_FUNCS)}"
-            )
-        if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name) or node.func.id not in _SAFE_MATH_FUNCS:
-                raise ValueError(f"Unsafe function call. Only these are allowed: {list(_SAFE_MATH_FUNCS)}")
-    return tree
-
 
 def _eval_expression(expr: str, x_val: float) -> float:
-    tree = _validate_expression(expr)
+    tree = validate_expression(expr, allowed_names=frozenset({"x"}))
     code = compile(tree, "<expression>", "eval")
-    namespace = {"x": x_val, **_SAFE_MATH_FUNCS}
+    namespace = {"x": x_val, **SAFE_MATH_FUNCS}
     return float(eval(code, {"__builtins__": {}}, namespace))
 
 
 def _eval_expression_vars(expr: str, variables: dict[str, float]) -> float:
     """Evaluate a validated expression with multiple named variables."""
-    tree = _validate_expression_vars(expr, set(variables.keys()))
+    tree = validate_expression(expr, allowed_names=frozenset(variables.keys()))
     code = compile(tree, "<expression>", "eval")
-    namespace = {**variables, **_SAFE_MATH_FUNCS}
+    namespace = {**variables, **SAFE_MATH_FUNCS}
     return float(eval(code, {"__builtins__": {}}, namespace))
 
 
@@ -131,7 +51,7 @@ def goal_seek(
     """
     from scipy.optimize import root_scalar
 
-    _validate_expression(expression)
+    validate_expression(expression, allowed_names=frozenset({"x"}))
 
     def objective(x_val: float) -> float:
         return _eval_expression(expression, x_val) - target_value
@@ -272,45 +192,46 @@ def budget_variance_analysis(
 ) -> dict:
     """Analyze budget vs actual spending from an Excel file."""
     wb = load_workbook_safe(file_path, data_only=True)
-    ws = get_sheet(wb, sheet_name)
+    try:
+        ws = get_sheet(wb, sheet_name)
 
-    cat_idx = col_letter_to_index(category_column)
-    bud_idx = col_letter_to_index(budget_column)
-    act_idx = col_letter_to_index(actual_column)
+        cat_idx = col_letter_to_index(category_column)
+        bud_idx = col_letter_to_index(budget_column)
+        act_idx = col_letter_to_index(actual_column)
 
-    items: list[dict] = []
-    for row in range(header_row + 1, ws.max_row + 1):
-        cat_val = ws.cell(row=row, column=cat_idx).value
-        bud_val = ws.cell(row=row, column=bud_idx).value
-        act_val = ws.cell(row=row, column=act_idx).value
+        items: list[dict] = []
+        for row in range(header_row + 1, ws.max_row + 1):
+            cat_val = ws.cell(row=row, column=cat_idx).value
+            bud_val = ws.cell(row=row, column=bud_idx).value
+            act_val = ws.cell(row=row, column=act_idx).value
 
-        if cat_val is None or bud_val is None or act_val is None:
-            continue
+            if cat_val is None or bud_val is None or act_val is None:
+                continue
 
-        budget = float(bud_val)
-        actual = float(act_val)
-        variance = actual - budget
-        variance_pct = (variance / budget * 100) if budget != 0 else 0.0
+            budget = float(bud_val)
+            actual = float(act_val)
+            variance = actual - budget
+            variance_pct = (variance / budget * 100) if budget != 0 else 0.0
 
-        if abs(variance_pct) < 0.5:
-            status = "on_budget"
-        elif variance > 0:
-            status = "over_budget"
-        else:
-            status = "under_budget"
+            if abs(variance_pct) < 0.5:
+                status = "on_budget"
+            elif variance > 0:
+                status = "over_budget"
+            else:
+                status = "under_budget"
 
-        items.append(
-            {
-                "category": str(cat_val),
-                "budget": round(budget, 2),
-                "actual": round(actual, 2),
-                "variance": round(variance, 2),
-                "variance_pct": round(variance_pct, 2),
-                "status": status,
-            }
-        )
-
-    wb.close()
+            items.append(
+                {
+                    "category": str(cat_val),
+                    "budget": round(budget, 2),
+                    "actual": round(actual, 2),
+                    "variance": round(variance, 2),
+                    "variance_pct": round(variance_pct, 2),
+                    "status": status,
+                }
+            )
+    finally:
+        wb.close()
 
     total_budget = sum(i["budget"] for i in items)
     total_actual = sum(i["actual"] for i in items)
@@ -356,6 +277,7 @@ def budget_variance_analysis(
         out_ws.append(["TOTAL", total_budget, total_actual, total_variance, total_variance_pct])
         save_workbook_safe(out_wb, output_file)
         result["output_file"] = output_file
+        out_wb.close()
 
     logger.info("Budget variance analysis: %d categories processed", len(items))
     return result
@@ -686,7 +608,7 @@ def create_sensitivity_table(
     all_vars = {var1_name}
     if var2_name:
         all_vars.add(var2_name)
-    _validate_expression_vars(expression, all_vars)
+    validate_expression(expression, allowed_names=frozenset(all_vars))
 
     # Compute results
     table: list[list[float | str]] = []

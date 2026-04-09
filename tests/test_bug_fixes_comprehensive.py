@@ -401,11 +401,11 @@ class TestAutoFilterRangeValidation:
 
     def test_wrapper_raises_when_cell_range_none_and_not_removing(self, tmp_path: Path) -> None:
         """MCP worksheet_ops auto_filter raises ValueError when cell_range=None & remove=False."""
-        from mcp_server.main import worksheet_ops
+        from mcp_server.main import worksheet_view
 
         fp = _workbook_with_data(tmp_path)
         with pytest.raises(ValueError, match="cell_range is required"):
-            worksheet_ops(
+            worksheet_view(
                 action="auto_filter",
                 file_path=fp,
                 sheet_name="Sheet1",
@@ -414,13 +414,13 @@ class TestAutoFilterRangeValidation:
             )
 
     def test_wrapper_allows_remove_true_without_cell_range(self, tmp_path: Path) -> None:
-        """MCP worksheet_ops auto_filter accepts remove=True with cell_range=None."""
-        from mcp_server.main import worksheet_ops
+        """MCP worksheet_view auto_filter accepts remove=True with cell_range=None."""
+        from mcp_server.main import worksheet_view
 
         fp = _workbook_with_data(tmp_path)
         # First set a filter so removing makes sense
         set_auto_filter(fp, "Sheet1", "A1:B3")
-        result = worksheet_ops(
+        result = worksheet_view(
             action="auto_filter",
             file_path=fp,
             sheet_name="Sheet1",
@@ -433,11 +433,11 @@ class TestAutoFilterRangeValidation:
         wb.close()
 
     def test_wrapper_sets_filter_when_valid_range_provided(self, tmp_path: Path) -> None:
-        """MCP worksheet_ops auto_filter sets the filter correctly when cell_range is given."""
-        from mcp_server.main import worksheet_ops
+        """MCP worksheet_view auto_filter sets the filter correctly when cell_range is given."""
+        from mcp_server.main import worksheet_view
 
         fp = _workbook_with_data(tmp_path)
-        result = worksheet_ops(
+        result = worksheet_view(
             action="auto_filter",
             file_path=fp,
             sheet_name="Sheet1",
@@ -533,8 +533,8 @@ class TestCopyRangeAcrossTargetCell:
         wb.close()
 
     def test_worksheet_ops_wrapper_passes_target_start_cell(self, tmp_path: Path) -> None:
-        """MCP worksheet_ops copy_range_across forwards target_start_cell to the function."""
-        from mcp_server.main import worksheet_ops
+        """MCP worksheet_transfer copy_range_across forwards target_start_cell to the function."""
+        from mcp_server.main import worksheet_transfer
 
         fp = str(tmp_path / "wscopy.xlsx")
         wb = Workbook()
@@ -546,7 +546,7 @@ class TestCopyRangeAcrossTargetCell:
         wb.save(fp)
         wb.close()
 
-        result = worksheet_ops(
+        result = worksheet_transfer(
             action="copy_range_across",
             file_path=fp,
             source_sheet="Src",
@@ -564,8 +564,8 @@ class TestCopyRangeAcrossTargetCell:
         wb.close()
 
     def test_worksheet_ops_wrapper_default_target_is_a1(self, tmp_path: Path) -> None:
-        """MCP worksheet_ops copy_range_across defaults target to A1 when not specified."""
-        from mcp_server.main import worksheet_ops
+        """MCP worksheet_transfer copy_range_across defaults target to A1 when not specified."""
+        from mcp_server.main import worksheet_transfer
 
         fp = str(tmp_path / "wsdef.xlsx")
         wb = Workbook()
@@ -576,7 +576,7 @@ class TestCopyRangeAcrossTargetCell:
         wb.save(fp)
         wb.close()
 
-        worksheet_ops(
+        worksheet_transfer(
             action="copy_range_across",
             file_path=fp,
             source_sheet="Src",

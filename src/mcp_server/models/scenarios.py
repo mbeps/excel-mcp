@@ -19,3 +19,11 @@ class ScenarioChangeInfo(TypedDict):
     sheet: str
     cell: str
     new_value: ScenarioCellValue
+
+
+class ScenarioApplyResult(TypedDict):
+    """Result returned by apply_scenario."""
+
+    scenario: str
+    cells_updated: int
+    changes: list[ScenarioChangeInfo]

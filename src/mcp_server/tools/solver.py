@@ -2,58 +2,15 @@
 
 from __future__ import annotations
 
-import ast
-import math
 import re
 from logging import Logger
 
 from mcp_server.models.solver import SolverResult
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
+from mcp_server.utils.expression_validator import SAFE_MATH_FUNCS, validate_expression
 from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
-
-# Safe AST nodes — arithmetic, comparisons, and basic math calls
-_SAFE_NODES = (
-    ast.Expression,
-    ast.BinOp,
-    ast.UnaryOp,
-    ast.Constant,
-    ast.Name,
-    ast.Call,
-    ast.Add,
-    ast.Sub,
-    ast.Mult,
-    ast.Div,
-    ast.Pow,
-    ast.Mod,
-    ast.FloorDiv,
-    ast.USub,
-    ast.UAdd,
-    ast.Load,
-    ast.Compare,
-    ast.BoolOp,
-    ast.And,
-    ast.Or,
-    ast.Gt,
-    ast.Lt,
-    ast.GtE,
-    ast.LtE,
-    ast.Eq,
-    ast.NotEq,
-)
-
-_SAFE_MATH_FUNCS: dict[str, object] = {
-    "sqrt": math.sqrt,
-    "log": math.log,
-    "log10": math.log10,
-    "exp": math.exp,
-    "sin": math.sin,
-    "cos": math.cos,
-    "tan": math.tan,
-    "abs": abs,
-    "pow": pow,
-}
 
 _CMP_SPLIT = re.compile(r"(<=|>=|==|!=|<|>)")
 
@@ -66,35 +23,16 @@ def _sanitize_var_name(cell_ref: str) -> str:
     return name
 
 
-def _validate_expr_vars(expr: str, allowed_vars: set[str]) -> ast.Expression:
+def _validate_expr_vars(expr: str, allowed_vars: set[str]) -> None:
     """Parse and validate an arithmetic expression, allowing only specified variable names."""
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError as e:
-        raise ValueError(f"Invalid expression syntax: {e}") from e
-
-    for node in ast.walk(tree):
-        if not isinstance(node, _SAFE_NODES):
-            raise ValueError(
-                f"Unsafe expression node: {type(node).__name__}. "
-                "Only arithmetic operations and basic math functions are allowed."
-            )
-        if isinstance(node, ast.Name) and node.id not in allowed_vars and node.id not in _SAFE_MATH_FUNCS:
-            raise ValueError(
-                f"Unknown variable '{node.id}'. Allowed: {sorted(allowed_vars)}, "
-                f"math functions: {list(_SAFE_MATH_FUNCS)}"
-            )
-        if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name) or node.func.id not in _SAFE_MATH_FUNCS:
-                raise ValueError(f"Unsafe function call. Only these are allowed: {list(_SAFE_MATH_FUNCS)}")
-    return tree
+    validate_expression(expr, allowed_names=frozenset(allowed_vars | set(SAFE_MATH_FUNCS.keys())))
 
 
 def _eval_expr_vars(expr: str, variables: dict[str, float]) -> float:
     """Evaluate a validated arithmetic expression with named variables."""
-    tree = _validate_expr_vars(expr, set(variables.keys()))
+    tree = validate_expression(expr, allowed_names=frozenset(set(variables.keys()) | set(SAFE_MATH_FUNCS.keys())))
     code = compile(tree, "<solver_expression>", "eval")
-    namespace = {**variables, **_SAFE_MATH_FUNCS}
+    namespace = {**variables, **SAFE_MATH_FUNCS}
     return float(eval(code, {"__builtins__": {}}, namespace))  # noqa: S307
 
 

@@ -42,6 +42,54 @@ _BLOCKED_MODULE_ATTRS: frozenset[str] = frozenset(
     }
 )
 
+_BLOCKED_IO_ATTRS: frozenset[str] = frozenset(
+    {
+        # pandas I/O
+        "read_csv",
+        "to_csv",
+        "read_excel",
+        "to_excel",
+        "read_parquet",
+        "to_parquet",
+        "read_sql",
+        "to_sql",
+        "read_json",
+        "to_json",
+        "read_html",
+        "to_html",
+        "read_pickle",
+        "to_pickle",
+        "read_clipboard",
+        "to_clipboard",
+        "read_feather",
+        "to_feather",
+        "read_hdf",
+        "to_hdf",
+        "read_orc",
+        "to_orc",
+        "read_sas",
+        "read_spss",
+        "read_stata",
+        "to_stata",
+        "read_gbq",
+        "to_gbq",
+        "read_fwf",
+        "read_table",
+        "ExcelFile",
+        "ExcelWriter",
+        "HDFStore",
+        # numpy I/O
+        "load",
+        "save",
+        "savez",
+        "savetxt",
+        "loadtxt",
+        "genfromtxt",
+        "fromfile",
+        "tofile",
+    }
+)
+
 _SAFE_BUILTINS: dict[str, Any] = {
     "len": len,
     "range": range,
@@ -92,6 +140,8 @@ def _validate_code(code: str) -> None:
                 raise ValueError(f"Blocked: dunder attribute access '{node.attr}' is not allowed")
             if isinstance(node.value, ast.Name) and node.value.id in _BLOCKED_MODULE_ATTRS:
                 raise ValueError(f"Blocked: attribute access on '{node.value.id}' is not allowed")
+            if node.attr in _BLOCKED_IO_ATTRS:
+                raise ValueError(f"Blocked: I/O method '{node.attr}' is not allowed in sandbox")
 
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in _BLOCKED_FUNC_NAMES:

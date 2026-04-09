@@ -113,7 +113,7 @@ def test_add_computed_column_unsafe(sample_xlsx: str) -> None:
     with pytest.raises(ValueError, match="Invalid expression syntax"):
         add_computed_column(sample_xlsx, "Sheet1", "Fail", "import os")
 
-    with pytest.raises(ValueError, match="Only column references and basic arithmetic are allowed"):
+    with pytest.raises(ValueError, match="Unsafe function call"):
         add_computed_column(sample_xlsx, "Sheet1", "Fail", "print(1)")
 
 

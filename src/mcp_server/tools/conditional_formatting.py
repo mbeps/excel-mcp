@@ -12,6 +12,7 @@ from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
     save_workbook_safe,
+    validate_file_path,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -238,5 +239,29 @@ def add_above_below_average_rule(
             file_path,
         )
         return {"range": range_str, "type": "aboveAverage", "is_above": is_above, "equal_average": equal_average}
+    finally:
+        wb.close()
+
+
+def list_conditional_formatting(file_path: str, sheet_name: str | None = None) -> list[dict]:
+    """List all conditional formatting rules on a sheet."""
+    file_path = validate_file_path(file_path)
+    wb = load_workbook_safe(file_path)
+    try:
+        ws = get_sheet(wb, sheet_name)
+        rules = []
+        for cf_rule in ws.conditional_formatting:
+            for rule in cf_rule.rules:
+                rules.append(
+                    {
+                        "range": str(cf_rule),
+                        "type": rule.type,
+                        "priority": rule.priority,
+                        "formula": list(rule.formula) if rule.formula else [],
+                        "operator": rule.operator,
+                        "stopIfTrue": rule.stopIfTrue,
+                    }
+                )
+        return rules
     finally:
         wb.close()

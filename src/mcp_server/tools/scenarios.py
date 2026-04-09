@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 from logging import Logger
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, cast
 
 from mcp_server.models.common import ScenarioCellValue
-from mcp_server.models.scenarios import ScenarioChangeInfo, ScenarioInfo
+from mcp_server.models.scenarios import ScenarioApplyResult, ScenarioChangeInfo, ScenarioInfo
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
 from mcp_server.utils.logger import configure_logging
 
@@ -17,14 +17,6 @@ if TYPE_CHECKING:
 logger: Logger = configure_logging(__name__)
 
 _SCENARIOS_SHEET = "_mcp_scenarios"
-
-
-class ScenarioApplyResult(TypedDict):
-    """Result returned by apply_scenario."""
-
-    scenario: str
-    cells_updated: int
-    changes: list[ScenarioChangeInfo]
 
 
 def _load_scenarios(wb: Workbook) -> dict[str, ScenarioInfo]:

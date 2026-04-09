@@ -437,7 +437,7 @@ def set_chart_data_labels(
     show_series_name: bool = False,
     show_percentage: bool = False,
     position: str | None = None,
-) -> str:
+) -> dict:
     """Set data labels on all series of a chart identified by title."""
     wb = load_workbook_safe(file_path)
     try:
@@ -454,7 +454,14 @@ def set_chart_data_labels(
         chart.dLbls = dLbls
         save_workbook_safe(wb, file_path)
         logger.info("Set data labels on chart '%s' in %s", chart_title, sheet_name)
-        return f"Data labels configured for chart '{chart_title}' in sheet '{sheet_name}'."
+        return {
+            "status": "ok",
+            "chart_title": chart_title,
+            "show_value": show_value,
+            "show_category": show_category,
+            "show_series_name": show_series_name,
+            "show_percentage": show_percentage,
+        }
     finally:
         wb.close()
 
@@ -465,7 +472,7 @@ def set_chart_legend(
     chart_title: str,
     show: bool = True,
     position: str | None = None,
-) -> str:
+) -> dict:
     """Show or hide the legend on a chart identified by title."""
     wb = load_workbook_safe(file_path)
     try:
@@ -480,7 +487,7 @@ def set_chart_legend(
             chart.legend = legend
         save_workbook_safe(wb, file_path)
         logger.info("Set legend show=%s on chart '%s' in %s", show, chart_title, sheet_name)
-        return f"Legend {'shown' if show else 'hidden'} for chart '{chart_title}' in sheet '{sheet_name}'."
+        return {"status": "ok", "chart_title": chart_title, "show": show, "position": position}
     finally:
         wb.close()
 

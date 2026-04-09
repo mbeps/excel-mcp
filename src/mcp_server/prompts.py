@@ -40,7 +40,7 @@ Follow these steps in order:
    font_color="FFFFFF", horizontal_alignment="center".
 4. Call `format_cells` on numeric or date data columns with appropriate number
    formats (e.g. "#,##0.00" for currency).
-5. Call `worksheet_ops` (action="freeze") with cell_ref="A2" to lock the headers.
+5. Call `worksheet_view` (action="freeze") with cell_ref="A2" to lock the headers.
 6. Call `auto_fit_columns` to size every column to its content.
 
 Constraints:
@@ -184,8 +184,8 @@ Steps:
    with chart (action="set_axes") and legend with chart (action="legend").
 7. Apply consistent header styling across every sheet: bold=true, uniform bg_color
    (NO "#" prefix), font_color="FFFFFF".
-8. Call worksheet_ops (action="freeze") on each data and summary sheet to freeze row 1.
-9. Call worksheet_ops (action="set_print_area") and worksheet_ops (action="set_page_setup")
+8. Call worksheet_view (action="freeze") on each data and summary sheet to freeze row 1.
+9. Call worksheet_print (action="set_print_area") and worksheet_print (action="set_page_setup")
    on all non-Cover sheets for print-ready output.
 10. Call auto_fit_columns on all sheets.
 
@@ -285,7 +285,7 @@ Steps:
    - For running totals: column_type="cumsum", supply source_col.
 
 6. Call sheet_management (action="rename") if the output sheet needs a better name.
-7. Call worksheet_ops (action="freeze") on the output sheet to freeze row 1.
+7. Call worksheet_view (action="freeze") on the output sheet to freeze row 1.
 
 Constraints:
 - Do NOT write pivot results manually with write_cells — use create_pivot_table with output_sheet.
@@ -331,7 +331,7 @@ Steps:
      and changed rows.
 
 5. Write output to "{output_path}": call format_cells on the header row (bold, bg_color,
-   no "#" prefix), then auto_fit_columns, then worksheet_ops (action="freeze") row 1.
+   no "#" prefix), then auto_fit_columns, then worksheet_view (action="freeze") row 1.
 
 Constraints:
 - NEVER use merge_datasets for cross-file operations — multi_file is purpose-built.
@@ -592,7 +592,7 @@ Steps:
 
 Constraints:
 - Never call `write_cells`, `formula_write`, `sheet_management`,
-  `worksheet_ops`, `protection`, or any other mutating tool.
+  `worksheet_view`, `worksheet_structure`, `worksheet_print`, `worksheet_transfer`, `protection`, or any other mutating tool.
 - Prefer metadata and summaries before raw cell reads.
 - If `scope` is `range` without a `target_range`, ask for the range rather than guessing.
 """
@@ -652,10 +652,10 @@ Steps:
 1. Call `get_workbook_metadata` first, then `get_sheet_summary` for the target sheet(s).
 2. If action includes `sheets`, use `sheet_management` for rename/copy/hide/
    unhide only after confirming the structural change.
-3. If action includes `layout` or `rows_cols`, use `worksheet_ops` for
-   insert/delete rows or columns, row heights, column widths, gridlines,
-   grouping, and freeze panes as needed.
-4. If action includes `print`, use `worksheet_ops` for `set_print_area`, `set_page_setup`, and `set_print_titles`.
+3. If action includes `layout` or `rows_cols`, use `worksheet_structure` for
+   insert/delete rows or columns, row heights, column widths, grouping;
+   use `worksheet_view` for gridlines and freeze panes as needed.
+4. If action includes `print`, use `worksheet_print` for `set_print_area`, `set_page_setup`, and `set_print_titles`.
 5. If visible sheets need presentation polish, call `format_cells` on headers
    and `auto_fit_columns` on the relevant sheets.
 6. Summarise every change and call out any destructive operation explicitly.
