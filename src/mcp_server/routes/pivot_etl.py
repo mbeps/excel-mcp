@@ -149,7 +149,7 @@ def add_computed_column(
     source_col: str | None = None,
     window: int | None = None,
     rolling_func: str = "mean",
-) -> str:
+) -> str | dict:
     """Add a computed column either via pandas-eval formula or as a cumsum/rolling operation.
 
     Args:

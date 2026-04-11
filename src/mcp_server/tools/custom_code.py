@@ -244,7 +244,10 @@ def execute_custom_code(
         if user_result is not None:
             if isinstance(user_result, pd.DataFrame):
                 dest = validate_file_path(write_path, must_exist=False)
-                user_result.to_excel(str(dest), index=False, engine="openpyxl")
+                if str(dest).lower().endswith(".csv"):
+                    user_result.to_csv(str(dest), index=False)
+                else:
+                    user_result.to_excel(str(dest), index=False, engine="openpyxl")
                 logger.info("Wrote DataFrame result to %s", dest)
                 return {
                     "status": "success",
@@ -267,7 +270,10 @@ def execute_custom_code(
         )
         if isinstance(modified_df, pd.DataFrame) and df_changed:
             dest = validate_file_path(write_path, must_exist=False)
-            modified_df.to_excel(str(dest), index=False, engine="openpyxl")
+            if str(dest).lower().endswith(".csv"):
+                modified_df.to_csv(str(dest), index=False)
+            else:
+                modified_df.to_excel(str(dest), index=False, engine="openpyxl")
             logger.info("Wrote modified df to %s", dest)
             return {
                 "status": "success",

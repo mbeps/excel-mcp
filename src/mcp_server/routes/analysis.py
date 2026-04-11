@@ -3,7 +3,7 @@ from __future__ import annotations
 from mcp.types import ToolAnnotations
 
 import mcp_server.tools.analysis as _analysis
-from mcp_server.models.analysis import ColumnStats
+from mcp_server.models.analysis import ColumnStats, FilterCondition, SortDescriptor
 
 __all__ = [
     "sort_data",
@@ -21,7 +21,7 @@ __all__ = [
 def sort_data(
     file_path: str,
     sheet_name: str,
-    sort_by: list[dict] | None = None,
+    sort_by: list[SortDescriptor] | None = None,
     column: str | None = None,
     ascending: bool = True,
     has_header: bool = True,
@@ -31,7 +31,7 @@ def sort_data(
     Args:
         file_path: Workbook path.
         sheet_name: Worksheet to sort.
-        sort_by: Optional explicit sort descriptor list (e.g. [{"column": "A", "ascending": True}]).
+        sort_by: List of sort descriptors, each with 'column' (str) and optional 'ascending' (bool, default True).
         column: Convenience single-column sort (deprecated in favour of `sort_by`).
         ascending: Boolean default sort order when `column` is used.
         has_header: Whether the sheet has a header row.
@@ -42,7 +42,8 @@ def sort_data(
     Notes:
         - Destructive: overwrites sheet rows.
     """
-    return _analysis.sort_data(file_path, sheet_name, sort_by, column, ascending, has_header)
+    raw = [s.model_dump() for s in sort_by] if sort_by else None
+    return _analysis.sort_data(file_path, sheet_name, raw, column, ascending, has_header)
 
 
 def column_statistics(file_path: str, sheet_name: str, column: str, has_header: bool = True) -> ColumnStats:
@@ -155,7 +156,7 @@ def vlookup_helper(
 def filter_data_advanced(
     file_path: str,
     sheet_name: str,
-    conditions: list[dict],
+    conditions: list[FilterCondition],
     logic: str = "AND",
     output_sheet: str | None = None,
     header_row: int = 1,
@@ -165,7 +166,7 @@ def filter_data_advanced(
     Args:
         file_path: Workbook path.
         sheet_name: Worksheet name.
-        conditions: List of condition dicts (each: {column, operator, value}).
+        conditions: List of filter conditions, each with 'column' (str), 'operator' (str), and 'value'.
         logic: "AND" or "OR" to combine conditions.
         output_sheet: Optional sheet to write filtered output.
         header_row: 1-based header row index.
@@ -173,7 +174,8 @@ def filter_data_advanced(
     Returns:
         dict: Filtered rows or summary.
     """
-    return _analysis.filter_data_advanced(file_path, sheet_name, conditions, logic, output_sheet, header_row)
+    raw = [c.model_dump() for c in conditions]
+    return _analysis.filter_data_advanced(file_path, sheet_name, raw, logic, output_sheet, header_row)
 
 
 def insert_subtotals(

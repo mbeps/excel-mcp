@@ -30,7 +30,7 @@ def formula_write(
     Args:
         action: "set", "batch", "fill", or "auto_sum".
             - "set": requires `cell_ref` and `formula` (is_array optional, target_range optional).
-            - "batch": requires `formulas` dict mapping cell_ref→formula.
+            - "batch": requires `formulas` dict mapping cell_ref to formula string, e.g. {"A1": "=SUM(B1:B10)", "A2": "=AVERAGE(C1:C10)"}.
             - "fill": requires `cell_ref` (source) and `target_range`.
             - "auto_sum": requires `cell_ref` (destination) and optional `source_range`.
         file_path, sheet_name: Workbook and sheet to modify.

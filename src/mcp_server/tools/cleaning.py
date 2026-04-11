@@ -262,6 +262,8 @@ def data_cleaner(
     validate_file_path(file_path)
 
     ops = operations if operations is not None else list(ALL_OPERATIONS)
+    # Normalize aliases
+    ops = [("trim_whitespace" if o == "trim" else o) for o in ops]
     valid_ops = set(ALL_OPERATIONS)
     for op in ops:
         if op not in valid_ops:
@@ -488,7 +490,12 @@ def parse_date_column(
             parsed_values.append(val if isinstance(val, datetime) else val.to_pydatetime())
         else:
             try:
-                parsed_values.append(dateutil_parser.parse(str(val), dayfirst=dayfirst))
+                s = str(val).strip()
+                # ISO format (YYYY-MM-DD...) is unambiguous — parse without dayfirst
+                if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+                    parsed_values.append(dateutil_parser.parse(s))
+                else:
+                    parsed_values.append(dateutil_parser.parse(s, dayfirst=dayfirst))
             except (ValueError, OverflowError):
                 parsed_values.append(None)
 

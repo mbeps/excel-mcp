@@ -53,7 +53,7 @@ def chart(
     show_legend: bool = True,
     legend_position: str | None = None,
     categories_range: str | None = None,
-) -> str | list[ChartInfo]:
+) -> str | list[ChartInfo] | dict:
     """Perform chart lifecycle and series/configuration operations on a worksheet.
 
     Args:
@@ -104,7 +104,7 @@ def chart(
             categories_range=categories_range,
         )
     if action == "delete":
-        return _charts.delete_chart(file_path, sheet_name, chart_index or 0)
+        return _charts.delete_chart(file_path, sheet_name, chart_index or 0, chart_title=chart_title)
     if action == "list":
         return _charts.list_charts(file_path, sheet_name)
     if action == "add_series":
@@ -153,7 +153,7 @@ def chart(
             bar_columns,
             line_columns,
             title,
-            anchor_cell,
+            target_cell,
             x_axis_column,
             width,
             height,

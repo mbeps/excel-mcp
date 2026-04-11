@@ -147,8 +147,9 @@ def test_validate_consistency_mismatched_values(consistency_files: list[str]) ->
 
 
 def test_validate_consistency_invalid_column(consistency_files: list[str]) -> None:
-    with pytest.raises(ValueError, match="Key column.*not found"):
-        validate_data_consistency(consistency_files, key_column="NonExistent")
+    result = validate_data_consistency(consistency_files, key_column="NonExistent")
+    assert result["consistent"] is False
+    assert len(result["schema_mismatches"]) > 0
 
 
 from mcp_server.tools.multi_file import compare_workbooks

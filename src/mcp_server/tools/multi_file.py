@@ -198,39 +198,95 @@ def validate_data_consistency(
     sheet_name: str = "Sheet1",
     header_row: int = 1,
 ) -> dict[str, bool | int | dict[str, list[str]] | list[dict[str, str | dict[str, str]]]]:
-    """Cross-file referential integrity check on a key column."""
+    """Cross-file schema and referential integrity check.
+
+    Performs two layers of validation:
+    1. **Schema validation** — compares column names (and inferred dtypes) across files.
+       When ``check_columns`` is provided, verifies those columns exist in every file.
+       When omitted, verifies all files share the same column set.
+    2. **Referential integrity** — checks that every unique key value in ``key_column``
+       appears in all files, and that ``check_columns`` values agree across files for
+       matching keys.
+    """
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
 
-    # Load all DataFrames and collect keys
+    # --- Phase 1: Schema validation ---
     file_data: list[tuple[str, pd.DataFrame]] = []
-    all_keys: set = set()
+    file_schemas: dict[str, list[str]] = {}
+    schema_mismatches: list[dict] = []
 
     for fp in file_paths:
         df = read_sheet_df(fp, sheet_name, header_row)
-        if key_column not in df.columns:
-            raise ValueError(f"Key column '{key_column}' not found in '{fp}'. Available: {list(df.columns)}")
-        if check_columns:
-            for cc in check_columns:
-                if cc not in df.columns:
-                    raise ValueError(f"Check column '{cc}' not found in '{fp}'. Available: {list(df.columns)}")
         file_data.append((fp, df))
-        all_keys.update(df[key_column].dropna().unique().tolist())
+        file_schemas[fp] = list(df.columns)
 
-    # Find missing keys per file
-    missing_keys: dict[str, list] = {}
+    # Check that key_column exists in every file
     for fp, df in file_data:
-        file_keys = set(df[key_column].dropna().unique().tolist())
-        missing = sorted(str(k) for k in all_keys - file_keys)
-        if missing:
-            missing_keys[fp] = missing
+        if key_column not in df.columns:
+            schema_mismatches.append(
+                {
+                    "file": fp,
+                    "issue": "missing_key_column",
+                    "columns": [key_column],
+                    "available": list(df.columns),
+                }
+            )
+
+    # Check that required columns exist in every file
+    if check_columns:
+        for fp, df in file_data:
+            missing_cols = [c for c in check_columns if c not in df.columns]
+            if missing_cols:
+                schema_mismatches.append(
+                    {
+                        "file": fp,
+                        "issue": "missing_columns",
+                        "columns": missing_cols,
+                        "available": list(df.columns),
+                    }
+                )
+    else:
+        # Compare all files against the union of columns
+        all_columns: set[str] = set()
+        for cols in file_schemas.values():
+            all_columns.update(cols)
+        for fp, cols in file_schemas.items():
+            missing_cols = sorted(all_columns - set(cols))
+            if missing_cols:
+                schema_mismatches.append(
+                    {
+                        "file": fp,
+                        "issue": "missing_columns",
+                        "columns": missing_cols,
+                        "available": cols,
+                    }
+                )
+
+    # --- Phase 2: Referential integrity (only if key_column exists in all files) ---
+    all_keys: set = set()
+    key_valid_files = [(fp, df) for fp, df in file_data if key_column in df.columns]
+
+    if len(key_valid_files) < len(file_data):
+        # key_column missing from some files — already captured in schema_mismatches
+        missing_keys: dict[str, list] = {}
+    else:
+        for fp, df in key_valid_files:
+            all_keys.update(df[key_column].dropna().unique().tolist())
+
+        missing_keys = {}
+        for fp, df in key_valid_files:
+            file_keys = set(df[key_column].dropna().unique().tolist())
+            missing = sorted(str(k) for k in all_keys - file_keys)
+            if missing:
+                missing_keys[fp] = missing
 
     # Check value consistency across files for matching keys
     mismatched_values: list[dict] = []
-    if check_columns:
-        # Build a lookup: key -> {file -> {col: value}}
+    effective_check_cols = check_columns or []
+    if effective_check_cols and key_valid_files:
         key_values: dict[str, dict[str, dict[str, object]]] = {}
-        for fp, df in file_data:
+        for fp, df in key_valid_files:
             for _, row in df.iterrows():
                 key = row[key_column]
                 if pd.isna(key):
@@ -239,16 +295,17 @@ def validate_data_consistency(
                 if key_str not in key_values:
                     key_values[key_str] = {}
                 vals = {}
-                for cc in check_columns:
-                    v = row[cc]
-                    vals[cc] = v if not pd.isna(v) else None
+                for cc in effective_check_cols:
+                    if cc in df.columns:
+                        v = row[cc]
+                        vals[cc] = v if not pd.isna(v) else None
                 key_values[key_str][fp] = vals
 
         for key_str, file_vals in key_values.items():
             if len(file_vals) < 2:
                 continue
             files_list = list(file_vals.keys())
-            for cc in check_columns:
+            for cc in effective_check_cols:
                 seen_values = {}
                 for fp in files_list:
                     v = file_vals[fp].get(cc)
@@ -264,12 +321,13 @@ def validate_data_consistency(
                         }
                     )
 
-    consistent = len(missing_keys) == 0 and len(mismatched_values) == 0
+    consistent = len(missing_keys) == 0 and len(mismatched_values) == 0 and len(schema_mismatches) == 0
 
     return {
         "consistent": consistent,
         "total_keys": len(all_keys),
         "total_files": len(file_paths),
+        "schema_mismatches": schema_mismatches,
         "missing_keys": missing_keys,
         "mismatched_values": mismatched_values,
     }

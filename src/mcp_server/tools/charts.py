@@ -21,10 +21,9 @@ from openpyxl.chart import (
     ScatterChart,
     StockChart,
 )
-from openpyxl.utils import get_column_letter, range_boundaries
-
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.legend import Legend
+from openpyxl.utils import get_column_letter, range_boundaries
 
 from mcp_server.models.charts import ChartInfo
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
@@ -33,6 +32,13 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 CHART_TYPES = {"bar", "column", "line", "pie", "scatter", "area", "radar", "doughnut", "bubble", "stock"}
+
+
+def _strip_sheet_prefix(range_str: str) -> str:
+    """Strip optional sheet-qualified prefix (e.g. 'Sheet1!B1:B7' → 'B1:B7')."""
+    if "!" in range_str:
+        return range_str.split("!", 1)[1]
+    return range_str
 
 
 def _make_chart(
@@ -110,7 +116,7 @@ def create_chart(
     try:
         ws = get_sheet(wb, sheet_name)
 
-        min_col, min_row, max_col, max_row = range_boundaries(data_range)
+        min_col, min_row, max_col, max_row = range_boundaries(_strip_sheet_prefix(data_range))
 
         chart = _make_chart(chart_type)
         chart.title = title or None
@@ -120,7 +126,7 @@ def create_chart(
 
         if chart_type == "scatter":
             if categories_range is not None:
-                cat_bounds = range_boundaries(categories_range)
+                cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
                 x_values = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
                 for col_idx in range(min_col, max_col + 1):
                     y_values = Reference(ws, min_col=col_idx, min_row=min_row, max_row=max_row)
@@ -144,7 +150,7 @@ def create_chart(
             # Stock chart expects Open/High/Low/Close data in columns
             if categories_range is not None:
                 data = Reference(ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
-                cat_bounds = range_boundaries(categories_range)
+                cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
                 categories = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
             else:
                 data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
@@ -154,7 +160,7 @@ def create_chart(
         else:
             if categories_range is not None:
                 data = Reference(ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
-                cat_bounds = range_boundaries(categories_range)
+                cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
                 categories = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
             else:
                 data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
@@ -176,13 +182,14 @@ def create_chart(
         wb.close()
 
 
-def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0) -> str:
-    """Delete a chart object from a worksheet by 0-based index.
+def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0, chart_title: str | None = None) -> str:
+    """Delete a chart object from a worksheet by 0-based index or title.
 
     Args:
         file_path (str): Workbook path.
         sheet_name (str): Worksheet containing the chart.
-        chart_index (int): 0-based index of the chart to remove.
+        chart_index (int): 0-based index of the chart to remove (used when chart_title is not provided).
+        chart_title (str|None): Optional title to locate the chart. Overrides chart_index when provided.
 
     Returns:
         str: Confirmation message including the removed chart title (if available).
@@ -200,6 +207,11 @@ def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0) -> str:
         charts = ws._charts
         if not charts:
             raise ValueError(f"No charts found in sheet '{sheet_name}'.")
+
+        if chart_title is not None:
+            target = _find_chart_by_title(ws, chart_title)
+            chart_index = charts.index(target)
+
         if chart_index < 0 or chart_index >= len(charts):
             raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
 
@@ -321,7 +333,7 @@ def add_chart_series(
             raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
 
         chart = charts[chart_index]
-        min_col, min_row, max_col, max_row = range_boundaries(data_range)
+        min_col, min_row, max_col, max_row = range_boundaries(_strip_sheet_prefix(data_range))
         ref = Reference(ws, min_col=min_col, min_row=min_row, max_col=max_col, max_row=max_row)
         try:
             chart.add_data(ref, titles_from_data=title_from_data)
@@ -401,7 +413,7 @@ def set_chart_axes(
             if log_scale_y:
                 chart.y_axis.scaling.logBase = 10
         if categories_range is not None:
-            cat_bounds = range_boundaries(categories_range)
+            cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
             cat_ref = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
             chart.set_categories(cat_ref)
         save_workbook_safe(wb, file_path)
@@ -536,7 +548,7 @@ def create_combo_chart(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        min_col, min_row, max_col, max_row = range_boundaries(data_range)
+        min_col, min_row, max_col, max_row = range_boundaries(_strip_sheet_prefix(data_range))
         cat_col = min_col + x_axis_column
         categories = Reference(ws, min_col=cat_col, min_row=min_row + 1, max_row=max_row)
         bar_chart = BarChart()

@@ -4,15 +4,15 @@ from typing import Literal
 
 import mcp_server.tools.comments as _comments
 import mcp_server.tools.hyperlinks as _hyperlinks
-import mcp_server.tools.scenarios as _scenarios
 import mcp_server.tools.named_ranges as _named_ranges
+import mcp_server.tools.scenarios as _scenarios
 import mcp_server.tools.tables as _tables
 from mcp_server.models.comments import CommentInfo
-from mcp_server.models.hyperlinks import HyperlinkInfo, HyperlinkReadResult
-from mcp_server.models.scenarios import ScenarioInfo, ScenarioApplyResult
-from mcp_server.models.named_ranges import NamedRangeInfo
-from mcp_server.models.tables import TableInfo
 from mcp_server.models.common import ScenarioCellValue
+from mcp_server.models.hyperlinks import HyperlinkInfo, HyperlinkReadResult
+from mcp_server.models.named_ranges import NamedRangeInfo
+from mcp_server.models.scenarios import ScenarioApplyResult, ScenarioInfo
+from mcp_server.models.tables import TableInfo
 
 __all__ = [
     "comment",
@@ -125,19 +125,21 @@ def scenario(
 
     Args:
         action: "add", "list", or "apply".
-            - "add": requires `name` and `cell_values` (mapping of sheet->{cell: value}).
+            - "add": requires `name` and `cell_values` — a nested dict mapping sheet name to {cell_ref: value},
+              e.g. {"Sheet1": {"A1": 100, "B2": 200}, "Sheet2": {"C3": "hello"}}.
             - "list": returns available scenarios.
             - "apply": requires `name` and will write stored cell values into the workbook (destructive).
         file_path: Workbook path.
         name: Scenario name for add/apply.
-        cell_values: Nested dict of values to save for "add".
+        cell_values: Nested dict mapping sheet_name → {cell_ref: scalar_value} for "add".
         description: Optional free-text description.
 
     Returns:
         str | list[ScenarioInfo] | ScenarioApplyResult
 
     Notes:
-        - Scenarios are stored in a hidden `_mcp_scenarios` sheet — mention potential user-visible side-effects when users open the workbook.
+        - Scenarios are stored in a hidden `_mcp_scenarios` sheet — mention potential
+          user-visible side-effects when users open the workbook.
     """
     if action == "add":
         if not name:
@@ -221,7 +223,9 @@ def table(
         style_name: Named table style for creation.
         new_range: New range for resize.
         show_totals: Bool for toggling totals row.
-        column_totals: Optional dict mapping column->aggregation for totals.
+        column_totals: Dict mapping column name to aggregation function name
+            (e.g. {"Revenue": "sum", "Quantity": "count"}). Valid functions:
+            sum, count, average, max, min, countNums, stdDev, var, none.
 
     Returns:
         str | list[TableInfo] | dict

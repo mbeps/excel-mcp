@@ -165,16 +165,18 @@ class TestFinancialRatioAnalysisComprehensive:
         assert result["ratios"]["current_ratio"]["value"] == pytest.approx(2.0)
 
     def test_all_seven_ratios_present(self) -> None:
-        """All 7 ratios are computed when all input keys are supplied."""
+        """All 10 ratios are computed when all input keys are supplied."""
         data = {
             "current_assets": 400,
             "current_liabilities": 200,
+            "inventory": 50,
             "total_debt": 300,
             "total_equity": 600,
             "net_income": 90,
             "total_assets": 900,
             "revenue": 1000,
             "gross_profit": 500,
+            "operating_income": 200,
             "ebitda": 150,
             "interest_expense": 30,
         }
@@ -182,14 +184,17 @@ class TestFinancialRatioAnalysisComprehensive:
         r = result["ratios"]
         assert set(r.keys()) == {
             "current_ratio",
+            "quick_ratio",
             "debt_to_equity",
             "roe",
             "roa",
             "gross_margin",
+            "operating_margin",
             "net_margin",
+            "asset_turnover",
             "interest_coverage",
         }
-        assert len(r) == 7
+        assert len(r) == 10
 
     def test_all_seven_ratio_values_correct(self) -> None:
         """Verify numerical accuracy of all 7 ratios simultaneously."""
