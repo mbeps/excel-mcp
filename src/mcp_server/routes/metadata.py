@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import mcp_server.tools.comments as _comments
 import mcp_server.tools.hyperlinks as _hyperlinks
@@ -264,7 +264,7 @@ def table(
     raise ValueError(f"Unknown action: {action}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool()(comment)
     mcp.tool()(hyperlink)

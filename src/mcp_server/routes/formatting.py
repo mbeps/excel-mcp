@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import mcp_server.tools.formatting as _formatting
 from mcp_server.models.common import (
     BorderStyle,
@@ -176,7 +178,7 @@ def apply_named_style(
     return _formatting.apply_named_style(file_path, sheet_name, range_str, style_name)
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool()(format_cells)
     mcp.tool()(auto_fit_columns)

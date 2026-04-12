@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Schemas for hyperlink listing and read operations."""
 
-"""Schemas for hyperlink listing and read operations.
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

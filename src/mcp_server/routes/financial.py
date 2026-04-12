@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 
@@ -288,7 +288,7 @@ def time_value_calc(
     raise ValueError(f"Unknown operation: {operation}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register financial tools on *mcp*."""
     mcp.tool()(goal_seek)
     mcp.tool()(loan_amortization)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 
@@ -188,7 +188,7 @@ def csv_ops(
     raise ValueError(f"Unknown action: {action}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register cleaning/CSV tools on *mcp*."""
     mcp.tool()(split_column)
     mcp.tool()(data_cleaner)

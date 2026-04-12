@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""TypedDict schemas for financial analysis results (amortization, budget variance, ratios, goal seek)."""
 
-"""TypedDict schemas for financial analysis results (amortization, budget variance, ratios, goal seek).
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

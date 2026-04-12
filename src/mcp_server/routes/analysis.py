@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.types import ToolAnnotations
 
 import mcp_server.tools.analysis as _analysis
@@ -252,7 +254,7 @@ def value_counts(
     return _analysis.value_counts(file_path, sheet_name, column, normalize, top_n, dropna, has_header)
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register analysis tools on *mcp*."""
     mcp.tool()(sort_data)
     mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(column_statistics)

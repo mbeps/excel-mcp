@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import mcp_server.tools.custom_code as _custom_code
 import mcp_server.tools.images as _images
 
@@ -63,7 +65,7 @@ def execute_custom_code(
     return _custom_code.execute_custom_code(file_path, code, sheet, output_file)
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool()(insert_image)
     mcp.tool()(execute_custom_code)

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-import mcp_server.tools.protection as _protection
+import mcp_server.tools.conditional_formatting as _cond_fmt
 import mcp_server.tools.data_validation as _data_val
 import mcp_server.tools.doc_properties as _doc_props
-import mcp_server.tools.conditional_formatting as _cond_fmt
+import mcp_server.tools.protection as _protection
 from mcp_server.models.common import ValidationOperator
 
 __all__ = [
@@ -329,7 +329,7 @@ def conditional_format(
     raise ValueError(f"Unknown action: {action}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool()(protection)
     mcp.tool()(data_validation)

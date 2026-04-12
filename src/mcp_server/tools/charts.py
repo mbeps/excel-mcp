@@ -8,6 +8,7 @@ using openpyxl native chart objects.
 from __future__ import annotations
 
 from logging import Logger
+from typing import Any
 
 from openpyxl.chart import (
     AreaChart,
@@ -583,7 +584,7 @@ _VALID_LABEL_POSITIONS = {"b", "t", "l", "r", "ctr", "inBase", "inEnd", "outEnd"
 _VALID_LEGEND_POSITIONS = {"b", "t", "l", "r", "tr"}
 
 
-def _find_chart_by_title(ws, chart_title: str):
+def _find_chart_by_title(ws: Any, chart_title: str) -> Any:
     """Return the first chart on ws whose title matches chart_title, or raise ValueError."""
     for chart in ws._charts:
         if _safe_chart_title(chart.title) == chart_title:

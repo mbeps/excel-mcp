@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,7 +15,7 @@ class PromptSpec:
     builder: Callable[..., str]
 
 
-def register_prompts(mcp: object) -> None:
+def register_prompts(mcp: Any) -> None:
     """Register all 20 Excel MCP prompts with the FastMCP instance."""
     for spec in PROMPT_CATALOGUE:
         mcp.prompt(name=spec.name, description=spec.description)(spec.builder)

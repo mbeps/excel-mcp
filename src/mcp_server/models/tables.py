@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Schemas for table metadata and data validation rule descriptions."""
 
-"""Schemas for table metadata and data validation rule descriptions.
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

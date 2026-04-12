@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import mcp_server.tools.charts as _charts
 from mcp_server.models.charts import ChartInfo
@@ -188,6 +188,6 @@ def chart(
     raise ValueError(f"Unknown action: {action}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool()(chart)

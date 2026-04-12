@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Chart configuration model and metadata types used by chart tools."""
 
-"""Chart configuration model and metadata types used by chart tools.
-"""
+from __future__ import annotations
 
 from typing import Literal, TypedDict
 

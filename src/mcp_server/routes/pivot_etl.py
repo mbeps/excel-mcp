@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.types import ToolAnnotations
 
 import mcp_server.tools.pivot_etl as _pivot_etl
@@ -205,7 +207,7 @@ def deduplicate_data(
     return _pivot_etl.deduplicate_data(file_path, sheet_name, columns, keep)
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register pivot/ETL tools on *mcp*."""
     mcp.tool()(create_pivot_table)
     mcp.tool()(refresh_pivot_table)

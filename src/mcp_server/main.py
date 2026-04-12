@@ -14,7 +14,9 @@ Usage:
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from logging import Logger
+from typing import Any
 
 from mcp_server.utils.logger import configure_logging
 
@@ -22,25 +24,29 @@ from mcp_server.utils.logger import configure_logging
 class _NoopMCP:
     """Stub used when tool registration is disabled (e.g. during tests)."""
 
-    def resource(self, *args, **kwargs):
-        def decorator(fn):
+    def resource(self, *args: Any, **kwargs: Any) -> Callable[..., Any]:
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             return fn
 
         return decorator
 
-    def tool(self, *args, **kwargs):
-        def decorator(fn):
+    def tool(self, *args: Any, **kwargs: Any) -> Callable[..., Any]:
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             return fn
 
         return decorator
 
-    def prompt(self, *args, **kwargs):
-        def decorator(fn):
+    def prompt(self, *args: Any, **kwargs: Any) -> Callable[..., Any]:
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             return fn
 
         return decorator
 
+    def run(self, *args: Any, **kwargs: Any) -> None:
+        pass
 
+
+mcp: Any
 if __import__("os").environ.get("MCP_SERVER_DISABLE_TOOL_REGISTRATION") == "1":
     mcp = _NoopMCP()
 else:

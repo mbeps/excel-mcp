@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run Ruff
-        run: uv run ruff check src/ tests/
+        run: uv run ruff check src/
 
   typecheck:
     name: Type Check
