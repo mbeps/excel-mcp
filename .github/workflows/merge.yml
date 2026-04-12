@@ -1,4 +1,4 @@
-name: CI/CD Merge
+name: Merge
 
 on:
   pull_request:
