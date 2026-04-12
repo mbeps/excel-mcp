@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Schemas for named ranges and discovered formulas/errors in a workbook."""
 
-"""Schemas for named ranges and discovered formulas/errors in a workbook.
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

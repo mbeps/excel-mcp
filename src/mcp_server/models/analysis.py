@@ -1,13 +1,42 @@
-from __future__ import annotations
-
 """Schemas for data analysis and profiling results.
 
 Used by analysis tools to return structured results (filter hits, aggregates, column stats).
 """
 
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
 
 from .common import CellScalar
+
+
+class SortDescriptor(BaseModel):
+    """A single sort criterion for multi-column sorting.
+
+    Attributes:
+        column (str): Column name or letter to sort by.
+        ascending (bool): Sort ascending (True) or descending (False). Defaults to True.
+    """
+
+    column: str = Field(..., description="Column name or letter to sort by.")
+    ascending: bool = Field(True, description="Sort ascending (True) or descending (False).")
+
+
+class FilterCondition(BaseModel):
+    """A single filter condition for advanced data filtering.
+
+    Attributes:
+        column (str): Column name to filter on.
+        operator (str): Comparison operator: '==', '!=', '>', '<', '>=', '<=', 'contains', 'startswith', 'endswith'.
+        value (str | int | float | bool): Value to compare against.
+    """
+
+    column: str = Field(..., description="Column name to filter on.")
+    operator: str = Field(
+        ...,
+        description="Comparison operator: '==', '!=', '>', '<', '>=', '<=', 'contains', 'startswith', 'endswith'.",
+    )
+    value: str | int | float | bool = Field(..., description="Value to compare against.")
 
 
 class FilterResult(BaseModel):

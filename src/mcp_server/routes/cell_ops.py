@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 
@@ -229,6 +229,7 @@ def find_replace(
     match_case: bool = False,
     match_entire_cell: bool = False,
     search_formulas: bool = False,
+    regex: bool = False,
 ) -> dict:
     """Find and replace text across a worksheet.
 
@@ -240,6 +241,7 @@ def find_replace(
         match_case: Case-sensitive search when True.
         match_entire_cell: Match entire cell contents exactly when True.
         search_formulas: Also search within formulas when True.
+        regex: Treat find_text as a regular expression when True.
 
     Returns:
         dict: {"count": int, "cells": ["A1", ...]} detailing replacements.
@@ -256,6 +258,7 @@ def find_replace(
         match_case,
         match_entire_cell,
         search_formulas,
+        regex,
     )
 
 
@@ -293,7 +296,7 @@ def transpose_range(
     )
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(read_cells)
     mcp.tool()(write_cells)

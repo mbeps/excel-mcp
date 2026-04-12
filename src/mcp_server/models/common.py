@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Shared type aliases and Literal constraints used across model schemas.
 
 This module centralises primitive union types and enumerated Literal values so model
@@ -12,9 +10,10 @@ Attributes:
         Literal types enumerating allowed string values for styles, alignments and validation ops.
 """
 
+from __future__ import annotations
+
 from datetime import date, datetime
 from typing import Literal, TypeAlias
-
 
 """Type alias for a spreadsheet cell scalar value.
 

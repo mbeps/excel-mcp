@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 from logging import Logger
+from typing import Any
 
 import openpyxl
 import pandas as pd
@@ -41,12 +42,11 @@ def _resolve_col(df: pd.DataFrame, col: str) -> str:
         idx = value - 1
         all_cols = list(df.columns)
         if 0 <= idx < len(all_cols):
-            return all_cols[idx]
+            return str(all_cols[idx])
     raise ValueError(f"Column '{col}' not found. Available: {list(df.columns)}")
 
 
 def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
-
     return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
 
@@ -354,7 +354,7 @@ def find_duplicates(
     }
 
 
-def _resolve_column_index(ws, header_row: int, col_ref: str) -> int:
+def _resolve_column_index(ws: Any, header_row: int, col_ref: str) -> int:
     """Resolve a column reference to a 1-based column index.
 
     Accepts Excel column letters (e.g. "A", "BC") or header names (e.g. "Name", "Amount").
@@ -364,7 +364,7 @@ def _resolve_column_index(ws, header_row: int, col_ref: str) -> int:
     # Try as Excel column letter if purely alphabetic and 1-3 chars
     if col_ref.isalpha() and len(col_ref) <= 3:
         try:
-            return column_index_from_string(col_ref.upper())
+            return int(column_index_from_string(col_ref.upper()))
         except ValueError:
             pass
 
@@ -376,7 +376,7 @@ def _resolve_column_index(ws, header_row: int, col_ref: str) -> int:
             header_name = str(cell.value)
             available.append(header_name)
             if header_name == col_ref:
-                return cell.column
+                return int(cell.column)
     raise ValueError(f"Column '{col_ref}' not found as a column letter or header name. Available headers: {available}")
 
 

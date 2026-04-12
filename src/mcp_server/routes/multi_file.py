@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import mcp_server.tools.multi_file as _multi_file
 
@@ -91,6 +91,6 @@ def multi_file(
     raise ValueError(f"Unknown action: {action}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool()(multi_file)

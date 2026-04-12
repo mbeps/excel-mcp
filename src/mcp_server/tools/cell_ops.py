@@ -685,6 +685,7 @@ def find_replace(
     match_case: bool = False,
     match_entire_cell: bool = False,
     search_formulas: bool = False,
+    regex: bool = False,
 ) -> dict[str, int | list[str]]:
     """Find and replace text in cell values (and optionally formulas) across a sheet.
 
@@ -696,6 +697,7 @@ def find_replace(
         match_case (bool): Case-sensitive matching.
         match_entire_cell (bool): Replace only when full cell equals needle.
         search_formulas (bool): If True search & replace inside formula strings.
+        regex (bool): If True, treat find_text as a regular expression pattern.
 
     Returns:
         dict: {'replacements_made': int, 'cells_modified': list[str]}.
@@ -709,8 +711,12 @@ def find_replace(
     try:
         ws = get_sheet(wb, sheet_name)
         modified: list[str] = []
-        needle = find_text if match_case else find_text.lower()
         flags = 0 if match_case else _re.IGNORECASE
+
+        if regex:
+            pattern = _re.compile(find_text, flags)
+        else:
+            needle = find_text if match_case else find_text.lower()
 
         for row in ws.iter_rows():
             for cell in row:
@@ -721,16 +727,27 @@ def find_replace(
                 if is_formula and not search_formulas:
                     continue
                 content = str(val)
-                compare = content if match_case else content.lower()
 
-                if match_entire_cell:
-                    if compare == needle:
-                        cell.value = replace_text
-                        modified.append(cell.coordinate)
+                if regex:
+                    if match_entire_cell:
+                        m = pattern.fullmatch(content)
+                        if m:
+                            cell.value = replace_text
+                            modified.append(cell.coordinate)
+                    else:
+                        if pattern.search(content):
+                            cell.value = pattern.sub(replace_text, content)
+                            modified.append(cell.coordinate)
                 else:
-                    if needle in compare:
-                        cell.value = _re.sub(_re.escape(find_text), replace_text, content, flags=flags)
-                        modified.append(cell.coordinate)
+                    compare = content if match_case else content.lower()
+                    if match_entire_cell:
+                        if compare == needle:
+                            cell.value = replace_text
+                            modified.append(cell.coordinate)
+                    else:
+                        if needle in compare:
+                            cell.value = _re.sub(_re.escape(find_text), replace_text, content, flags=flags)
+                            modified.append(cell.coordinate)
 
         if modified:
             save_workbook_safe(wb, file_path)

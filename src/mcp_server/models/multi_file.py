@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Per-file aggregated/filtering schemas and diff row shapes used by multi-file tools."""
 
-"""Per-file aggregated/filtering schemas and diff row shapes used by multi-file tools.
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

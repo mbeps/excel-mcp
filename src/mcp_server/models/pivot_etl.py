@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Schemas for pivot ETL operations: pivot results and paginated chunk reads."""
 
-"""Schemas for pivot ETL operations: pivot results and paginated chunk reads.
-"""
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 

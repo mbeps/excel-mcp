@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Schemas describing scenario storage and application results."""
 
-"""Schemas describing scenario storage and application results.
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

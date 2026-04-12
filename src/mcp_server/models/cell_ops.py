@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """Schemas for individual cell values and range reads/writes.
 
 Includes models used by read_cell/read_range and helpers that carry style/alignment metadata.
 """
+
+from __future__ import annotations
 
 from typing import TypedDict
 

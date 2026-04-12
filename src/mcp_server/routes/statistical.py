@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.types import ToolAnnotations
 
-import mcp_server.tools.statistical as _statistical
 import mcp_server.tools.solver as _solver
+import mcp_server.tools.statistical as _statistical
+from mcp_server.models.solver import SolverConstraint, SolverResult, VariableCellBounds
 from mcp_server.models.statistics import RegressionResult
-from mcp_server.models.solver import SolverResult
 
 __all__ = [
     "run_regression",
@@ -107,8 +109,8 @@ def run_solver(
     file_path: str,
     sheet_name: str,
     objective_expression: str,
-    variable_cells: dict[str, list[float]],
-    constraints: list[dict] | None = None,
+    variable_cells: dict[str, VariableCellBounds],
+    constraints: list[SolverConstraint] | None = None,
     maximize: bool = False,
     tolerance: float = 1e-6,
     max_iterations: int = 1000,
@@ -119,8 +121,8 @@ def run_solver(
         file_path: Workbook path.
         sheet_name: Worksheet providing objective or referenced cells.
         objective_expression: Arithmetic expression using cell refs (e.g. "B2 * B3 - B4").
-        variable_cells: Mapping {cell_ref: [lower_bound, upper_bound]} for optimisation variables.
-        constraints: Optional list of {"expression": str, "type": "ineq"|"eq"} constraints.
+        variable_cells: Mapping of cell_ref to bounds, e.g. {"B2": {"lower": 0, "upper": 100}}.
+        constraints: Optional list of solver constraints, each with 'expression' and 'type' ('ineq' or 'eq').
         maximize: If True, the objective is maximised instead of minimised.
         tolerance: Convergence tolerance.
         max_iterations: Maximum solver iterations.
@@ -131,13 +133,14 @@ def run_solver(
     Notes:
         - May write back solution values into the workbook depending on implementation — document write semantics.
     """
-    normalised_cells: dict[str, tuple[float, float]] = {k: (v[0], v[1]) for k, v in variable_cells.items()}
+    normalised_cells: dict[str, tuple[float, float]] = {k: (v.lower, v.upper) for k, v in variable_cells.items()}
+    raw_constraints = [c.model_dump() for c in constraints] if constraints else None
     return _solver.run_solver(
         file_path,
         sheet_name,
         objective_expression,
         normalised_cells,
-        constraints,
+        raw_constraints,
         maximize,
         tolerance,
         max_iterations,
@@ -171,7 +174,7 @@ def correlation_matrix(
     return _statistical.correlation_matrix(file_path, sheet_name, columns, output_sheet, output_file, header_row)
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(run_regression)
     mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(run_exponential_smoothing)

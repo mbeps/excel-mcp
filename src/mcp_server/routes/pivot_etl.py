@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.types import ToolAnnotations
 
 import mcp_server.tools.pivot_etl as _pivot_etl
@@ -149,7 +151,7 @@ def add_computed_column(
     source_col: str | None = None,
     window: int | None = None,
     rolling_func: str = "mean",
-) -> str:
+) -> str | dict:
     """Add a computed column either via pandas-eval formula or as a cumsum/rolling operation.
 
     Args:
@@ -205,7 +207,7 @@ def deduplicate_data(
     return _pivot_etl.deduplicate_data(file_path, sheet_name, columns, keep)
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register pivot/ETL tools on *mcp*."""
     mcp.tool()(create_pivot_table)
     mcp.tool()(refresh_pivot_table)

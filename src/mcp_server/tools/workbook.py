@@ -138,6 +138,15 @@ def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
             row_count = ws.max_row or 0
             col_count = ws.max_column or 0
 
+        if col_count == 0:
+            return SheetSummary(
+                name=ws.title,
+                row_count=0,
+                col_count=0,
+                headers=[],
+                used_range="",
+            )
+
         max_row = min_row + row_count - 1
         max_col = min_col + col_count - 1
 

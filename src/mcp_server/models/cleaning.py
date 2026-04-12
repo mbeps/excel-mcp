@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""CSV preview and dataset profiling schemas returned by CSV and cleaning tools."""
 
-"""CSV preview and dataset profiling schemas returned by CSV and cleaning tools.
-"""
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 

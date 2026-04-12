@@ -91,7 +91,9 @@ def protect_cells(
 
         if unlocked_ranges:
             for ur in unlocked_ranges:
-                for row in ws[ur]:
+                # Normalise single-cell refs to range format so ws[] returns a tuple
+                target = f"{ur}:{ur}" if ":" not in ur else ur
+                for row in ws[target]:
                     for cell in row:
                         cell.protection = Protection(locked=False)
 

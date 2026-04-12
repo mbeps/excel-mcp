@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """Formatting and conditional-formatting option models.
 
 Used by formatting tools to accept styling requests and describe conditional formatting rules.
 """
+
+from __future__ import annotations
 
 from typing import Literal
 

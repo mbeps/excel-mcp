@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 
@@ -22,7 +22,7 @@ def worksheet_view(
     cell_range: str | None = None,
     remove: bool = False,
     show: bool = True,
-) -> str:
+) -> str | dict:
     """Toggle view-related settings such as freeze panes, auto-filter and gridlines.
 
     Args:
@@ -79,7 +79,7 @@ def worksheet_structure(
     height: float | None = None,
     cols_list: list[str] | None = None,
     width: float | None = None,
-) -> str:
+) -> str | dict:
     """Perform row/column insert/delete, grouping, and size adjustments.
 
     Args:
@@ -163,7 +163,7 @@ def worksheet_print(
     title_cols: str | None = None,
     row: int | None = None,
     col: int | None = None,
-) -> str:
+) -> str | dict:
     """Configure print areas, page setup, print titles and manual page breaks.
 
     Args:
@@ -275,7 +275,7 @@ def worksheet_transfer(
     raise ValueError(f"Unknown action: {action}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register worksheet-operations tools on *mcp*."""
     mcp.tool()(worksheet_view)
     mcp.tool(annotations=ToolAnnotations(destructiveHint=True))(worksheet_structure)

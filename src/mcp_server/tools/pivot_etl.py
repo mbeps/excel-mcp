@@ -25,7 +25,7 @@ _PIVOTS_SHEET = "_mcp_pivots"
 VALID_KEEP = {"first", "last", False}
 
 
-def _load_pivots(wb: Workbook) -> dict:  # type: ignore[type-arg]
+def _load_pivots(wb: Workbook) -> dict:
     """Load pivot definitions from the hidden pivots sheet."""
     if _PIVOTS_SHEET not in wb.sheetnames:
         return {}
@@ -39,7 +39,7 @@ def _load_pivots(wb: Workbook) -> dict:  # type: ignore[type-arg]
         return {}
 
 
-def _save_pivots(wb: Workbook, pivots: dict) -> None:  # type: ignore[type-arg]
+def _save_pivots(wb: Workbook, pivots: dict) -> None:
     """Save pivot definitions dict to hidden sheet."""
     if _PIVOTS_SHEET in wb.sheetnames:
         ws = wb[_PIVOTS_SHEET]
@@ -160,7 +160,7 @@ def refresh_pivot_table(
     output_sheet: str,
     source_file_path: str | None = None,
     source_sheet: str | None = None,
-) -> dict:  # type: ignore[type-arg]
+) -> dict:
     """Refresh a pivot table by re-running its stored definition.
 
     Reads the pivot parameters persisted in the hidden '_mcp_pivots' sheet
@@ -296,7 +296,7 @@ def add_computed_column(
     source_col: str | None = None,
     window: int | None = None,
     rolling_func: str = "mean",
-) -> str:
+) -> str | dict:
     """Add a computed column using a pandas-eval expression or cumulative sum.
 
     column_type='formula' (default): evaluate ``expression`` via pandas eval.

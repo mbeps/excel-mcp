@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 
@@ -149,7 +149,7 @@ def sheet_management(
     raise ValueError(f"Unknown action: {action}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(get_workbook_metadata)
     mcp.tool()(create_workbook)

@@ -171,15 +171,55 @@ def get_table_data(
 
 
 def convert_table_to_range(file_path: str, sheet_name: str, table_name: str) -> dict:
-    """Remove a table definition while preserving all cell data and formatting."""
+    """Remove a table definition while preserving all cell data and formatting.
+
+    Cells containing structured references (e.g. ``=SUBTOTAL(109,[Amount])``)
+    are replaced with their cached computed values before the table is deleted,
+    because openpyxl cannot resolve structured references once the table
+    definition is removed.
+    """
+    import re as _re
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
         if table_name not in ws.tables:
             raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+
+        table_ref = ws.tables[table_name].ref
+        min_col, min_row, max_col, max_row = range_boundaries(table_ref)
+
+        # Collect cells with structured references before deleting the table
+        struct_ref_pattern = _re.compile(r"\[.*?\]")
+        converted_cells: list[str] = []
+
+        # Open a data_only copy to read cached values
+        from mcp_server.utils.excel_helpers import load_workbook_safe as _load_safe
+
+        wb_data = _load_safe(file_path, data_only=True)
+        try:
+            ws_data = get_sheet(wb_data, sheet_name)
+            for row in ws.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
+                for cell in row:
+                    val = cell.value
+                    if isinstance(val, str) and val.startswith("=") and struct_ref_pattern.search(val):
+                        cached = ws_data.cell(row=cell.row, column=cell.column).value
+                        cell.value = cached
+                        converted_cells.append(cell.coordinate)
+        finally:
+            wb_data.close()
+
         del ws.tables[table_name]
         save_workbook_safe(wb, file_path)
         logger.info("Converted table '%s' to range in %s", table_name, sheet_name)
-        return {"status": "ok", "sheet": sheet_name, "table": table_name}
+
+        result: dict = {"status": "ok", "sheet": sheet_name, "table": table_name}
+        if converted_cells:
+            result["structured_refs_converted"] = converted_cells
+            result["note"] = (
+                f"{len(converted_cells)} cell(s) contained structured references and were "
+                "replaced with their cached computed values."
+            )
+        return result
     finally:
         wb.close()

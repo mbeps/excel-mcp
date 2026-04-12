@@ -152,11 +152,35 @@ def get_formula_precedents(
         if not formula or not isinstance(formula, str) or not formula.startswith("="):
             return {"cell": cell_ref, "formula": formula, "precedents": []}
 
-        # Match optional sheet prefix + cell ref (e.g. Sheet1!A1, $A$1, B3)
-        pattern = r"(?:'[^']+'|[A-Za-z_][A-Za-z0-9_]*)!\$?[A-Z]{1,3}\$?\d+|\$?[A-Z]{1,3}\$?\d+"
-        raw_refs = re.findall(pattern, formula)
+        # Match optional sheet prefix + cell ref or range (e.g. Sheet1!A1, $A$1, B3, A1:A3)
+        range_pattern = r"(?:(?:'[^']+'|[A-Za-z_][A-Za-z0-9_]*)!)?\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?"
+        raw_refs = re.findall(range_pattern, formula)
         # Filter out false positives that are just numbers
-        precedents = [r for r in raw_refs if re.search(r"[A-Za-z]", r)]
+        raw_refs = [r for r in raw_refs if re.search(r"[A-Za-z]", r)]
+
+        # Expand ranges into individual cell references
+        from openpyxl.utils import column_index_from_string, get_column_letter
+        from openpyxl.utils.cell import coordinate_from_string
+
+        precedents = []
+        for ref in raw_refs:
+            if ":" in ref:
+                # Handle sheet prefix
+                prefix = ""
+                range_part = ref
+                if "!" in ref:
+                    prefix, range_part = ref.rsplit("!", 1)
+                    prefix += "!"
+                start, end = range_part.split(":")
+                start_col_str, start_row = coordinate_from_string(start.replace("$", ""))
+                end_col_str, end_row = coordinate_from_string(end.replace("$", ""))
+                start_col = column_index_from_string(start_col_str)
+                end_col = column_index_from_string(end_col_str)
+                for c in range(start_col, end_col + 1):
+                    for r in range(start_row, end_row + 1):
+                        precedents.append(f"{prefix}{get_column_letter(c)}{r}")
+            else:
+                precedents.append(ref)
 
         return {"cell": cell_ref, "formula": formula, "precedents": list(dict.fromkeys(precedents))}
     finally:

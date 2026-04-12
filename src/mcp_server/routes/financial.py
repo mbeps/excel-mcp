@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 
 import mcp_server.tools.financial as _financial
-from mcp_server.models.solver import SolverResult
 
 __all__ = [
     "goal_seek",
@@ -135,12 +134,19 @@ def budget_variance_analysis(
     )
 
 
-def financial_ratio_analysis(financial_data: dict, industry_benchmarks: dict | None = None) -> dict:
+def financial_ratio_analysis(
+    financial_data: dict[str, float],
+    industry_benchmarks: dict[str, float] | None = None,
+) -> dict:
     """Compute common financial ratios from raw financial metric inputs and compare them to benchmarks.
 
     Args:
-        financial_data: Dict of raw metric values (e.g. current_assets, total_liabilities, net_income, revenue).
-        industry_benchmarks: Optional dict of benchmark ratios to compare.
+        financial_data: Dict of raw metric values keyed by component name. Valid keys:
+            current_assets, current_liabilities, inventory, total_debt, total_equity,
+            net_income, total_assets, revenue, gross_profit, operating_income, ebitda,
+            interest_expense. E.g. {"current_assets": 500000, "current_liabilities": 250000}.
+        industry_benchmarks: Optional dict of benchmark ratio values to compare against,
+            e.g. {"current_ratio": 2.0, "roe": 0.15}.
 
     Returns:
         dict: Computed ratios and optional benchmark comparisons.
@@ -175,7 +181,9 @@ def create_sensitivity_table(
     var2_name: str | None = None,
     var2_values: list[float] | None = None,
 ) -> dict:
-    """Create a 1- or 2-variable sensitivity table in the workbook by evaluating `expression` over supplied value grids.
+    """Create a 1- or 2-variable sensitivity table in the workbook.
+
+    Evaluates `expression` over supplied value grids.
 
     Args:
         file_path: Workbook path.
@@ -189,7 +197,8 @@ def create_sensitivity_table(
         dict: Summary including output range and written values.
 
     Notes:
-        - Mutates workbook by inserting the table; confirm overwrite semantics when the target output area overlaps data.
+        - Mutates workbook by inserting the table; confirm overwrite semantics
+          when the target output area overlaps data.
     """
     return _financial.create_sensitivity_table(
         file_path,
@@ -279,7 +288,7 @@ def time_value_calc(
     raise ValueError(f"Unknown operation: {operation}")
 
 
-def register(mcp) -> None:
+def register(mcp: Any) -> None:
     """Register financial tools on *mcp*."""
     mcp.tool()(goal_seek)
     mcp.tool()(loan_amortization)

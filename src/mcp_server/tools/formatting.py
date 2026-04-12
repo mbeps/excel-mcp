@@ -99,6 +99,8 @@ _VALID_NAMED_STYLES: frozenset[str] = frozenset(
 
 logger: Logger = configure_logging(__name__)
 
+_NAMED_STYLE_LOOKUP: dict[str, str] = {s.lower(): s for s in _VALID_NAMED_STYLES}
+
 
 def format_cells(
     file_path: str,
@@ -405,7 +407,8 @@ def apply_named_style(
     Remarks:
         - Mutates workbook and saves.
     """
-    if style_name not in _VALID_NAMED_STYLES:
+    canonical_style = _NAMED_STYLE_LOOKUP.get(style_name.lower())
+    if canonical_style is None:
         raise ValueError(f"Unknown style_name '{style_name}'. Valid: {sorted(_VALID_NAMED_STYLES)!r}")
     result = validate_excel_range(range_str)
     if not result["valid"]:
@@ -421,11 +424,11 @@ def apply_named_style(
         for row in range_data:
             cells = row if isinstance(row, tuple) else (row,)
             for cell in cells:
-                cell.style = style_name
+                cell.style = canonical_style
                 count += 1
 
         save_workbook_safe(wb, file_path)
-        logger.info("apply_named_style: '%s' applied to %d cells in %s", style_name, count, range_str)
-        return {"cells_styled": count, "style_name": style_name}
+        logger.info("apply_named_style: '%s' applied to %d cells in %s", canonical_style, count, range_str)
+        return {"cells_styled": count, "style_name": canonical_style}
     finally:
         wb.close()

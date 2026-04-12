@@ -245,10 +245,10 @@ def add_above_below_average_rule(
 
 def list_conditional_formatting(file_path: str, sheet_name: str | None = None) -> list[dict]:
     """List all conditional formatting rules on a sheet."""
-    file_path = validate_file_path(file_path)
+    file_path = str(validate_file_path(file_path))
     wb = load_workbook_safe(file_path)
     try:
-        ws = get_sheet(wb, sheet_name)
+        ws = get_sheet(wb, sheet_name) if sheet_name is not None else wb.worksheets[0]
         rules = []
         for cf_rule in ws.conditional_formatting:
             for rule in cf_rule.rules:

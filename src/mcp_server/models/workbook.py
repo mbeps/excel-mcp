@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""Workbook- and sheet-level metadata models returned by workbook and worksheet tools."""
 
-"""Workbook- and sheet-level metadata models returned by workbook and worksheet tools.
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

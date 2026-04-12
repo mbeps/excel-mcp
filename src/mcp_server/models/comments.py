@@ -1,7 +1,6 @@
-from __future__ import annotations
+"""TypedDict for representing comments attached to cells."""
 
-"""TypedDict for representing comments attached to cells.
-"""
+from __future__ import annotations
 
 from typing import TypedDict
 

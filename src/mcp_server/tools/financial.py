@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from logging import Logger
 
@@ -46,12 +47,19 @@ def goal_seek(
 ) -> dict:
     """Find x such that expression(x) = target_value and write the result to variable_cell.
 
-    expression is a math expression in terms of 'x', e.g. '1000 * (1 + x)**10'.
+    expression is a math expression using 'x' as the variable name,
+    e.g. '1000 * (1 + x)**10' or 'x * 2 + 5'.
     Only basic arithmetic and basic math functions (sqrt, log, exp, sin, cos, etc.) are allowed.
     """
     from scipy.optimize import root_scalar
 
-    validate_expression(expression, allowed_names=frozenset({"x"}))
+    try:
+        validate_expression(expression, allowed_names=frozenset({"x"}))
+    except ValueError as e:
+        raise ValueError(
+            f"Invalid expression: {e}. Expression must use 'x' as the variable name. "
+            f"Example: 'x * 2 + 5' or '1000 * (1 + x)**10'"
+        ) from e
 
     def objective(x_val: float) -> float:
         return _eval_expression(expression, x_val) - target_value
@@ -170,6 +178,12 @@ def dcf_analysis(
     enterprise_value = total_pv + pv_terminal_value
     net_value = enterprise_value - initial_investment
 
+    all_cfs = [-initial_investment] + list(cash_flows)
+    try:
+        irr_value = float(npf.irr(all_cfs))
+    except Exception:
+        irr_value = None
+
     logger.info("DCF analysis: enterprise_value=%.2f, net_value=%.2f", enterprise_value, net_value)
     return {
         "pv_cash_flows": [round(pv, 2) for pv in pv_cash_flows],
@@ -178,6 +192,7 @@ def dcf_analysis(
         "pv_terminal_value": round(pv_terminal_value, 2),
         "enterprise_value": round(enterprise_value, 2),
         "net_value": round(net_value, 2),
+        "irr": round(irr_value, 6) if irr_value is not None else None,
     }
 
 
@@ -319,21 +334,29 @@ def financial_ratio_analysis(
 
     ratio_defs: list[tuple[str, str, str, str]] = [
         ("current_ratio", "current_assets", "current_liabilities", "divide"),
+        ("quick_ratio", "current_assets", "current_liabilities", "divide"),
         ("debt_to_equity", "total_debt", "total_equity", "divide"),
         ("roe", "net_income", "total_equity", "divide"),
         ("roa", "net_income", "total_assets", "divide"),
         ("gross_margin", "gross_profit", "revenue", "divide"),
+        ("operating_margin", "operating_income", "revenue", "divide"),
         ("net_margin", "net_income", "revenue", "divide"),
+        ("asset_turnover", "revenue", "total_assets", "divide"),
         ("interest_coverage", "ebitda", "interest_expense", "divide"),
     ]
 
     for ratio_name, numerator_key, denominator_key, _ in ratio_defs:
         if numerator_key in financial_data and denominator_key in financial_data:
+            numerator_val = float(financial_data[numerator_key])
             denominator = float(financial_data[denominator_key])
+            # quick_ratio: subtract inventory from numerator
+            if ratio_name == "quick_ratio":
+                inventory = float(financial_data.get("inventory", 0))
+                numerator_val = numerator_val - inventory
             if denominator == 0:
                 computed[ratio_name] = {"value": None, "error": "Division by zero"}
                 continue
-            value = round(float(financial_data[numerator_key]) / denominator, 4)
+            value = round(numerator_val / denominator, 4)
             entry: dict = {"value": value}
 
             if industry_benchmarks and ratio_name in industry_benchmarks:

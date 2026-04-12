@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from logging import Logger
 
+from openpyxl.utils.cell import coordinate_from_string
+
 from mcp_server.models.solver import SolverResult
 from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
 from mcp_server.utils.expression_validator import SAFE_MATH_FUNCS, validate_expression
@@ -145,6 +147,16 @@ def run_solver(
 
     # Build scipy constraints
     scipy_constraints = [_build_constraint(c, var_map, var_names_ordered, allowed_vars) for c in (constraints or [])]
+
+    # Validate that all variable_cells keys are single cell references (e.g. "B2"), not columns/rows
+    for ref in cell_refs:
+        try:
+            coordinate_from_string(ref)
+        except (ValueError, TypeError):
+            raise ValueError(
+                f"Invalid cell reference '{ref}' in variable_cells. "
+                f"Keys must be single cell references like 'A1' or 'B2', not column/row names."
+            )
 
     # Read initial values from workbook
     wb = load_workbook_safe(file_path)
