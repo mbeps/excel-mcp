@@ -1,214 +1,237 @@
 # Excel MCP Server
 
-A Python-based Model Context Protocol (MCP) server for Excel automation and data manipulation. Enables LLMs to interact with Excel files (`.xlsx`, `.xls`, `.csv`, `.xlsm`) through 66 structured tools, supporting workflows from basic spreadsheet operations to advanced financial modelling and data analysis.
+A Python-based Model Context Protocol (MCP) server for Excel and CSV automation. It enables LLMs to work with `.xlsx`, `.xlsm`, `.xls`, and `.csv` files through 66 structured tools, 2 JSON resources, and 20 prompts spanning workbook operations, formatting, charts, ETL, analysis, and financial/statistical workflows.
 
 # Features
 
-> NOTE: Custom actions are not supported as first-class tools. Use `execute_custom_code` as the sanctioned, sandboxed path for custom data transformations. This uses AST validation and blocks dangerous operations.
+> **NOTE:** Custom actions are not supported as first-class tools. Use `execute_custom_code` as the sanctioned, sandboxed path for custom data transformations. This uses AST validation and blocks dangerous operations.
 
 ## Workbook & Sheet Management
-- Create workbooks and list, rename, delete, copy, and move sheets.
-- Retrieve workbook metadata and per-sheet summaries.
+- Create workbooks; inspect workbook metadata and per-sheet summaries.
+- Rename, delete, copy, move, hide/unhide, and recolour sheet tabs.
 - Write data to multiple sheets in a single call.
 
 ## Cell & Range Operations
-- Read and write individual cells and contiguous ranges.
-- Read detailed cell metadata (type, style, formula, value).
-- Copy and delete ranges.
-- Read large files in chunks using the python-calamine engine.
-- Transpose data ranges (rows ↔ columns).
-- Search and replace values with regex support.
-- Retrieve workbook-level information (sheet count, metadata, etc.).
+- Read and write individual cells, contiguous ranges, and large sheets in chunks.
+- Include formulas and cell metadata when reading ranges.
+- Copy ranges, clear range values, transpose data, and search/replace with optional regex support.
 
 ## Row & Column Operations
-- Insert and delete rows and columns by index or letter.
+- Insert and delete rows and columns by index.
 
 ## Formatting & Styling
 - Apply fonts, colours, alignment, borders, and number formats to cells.
-- Apply named Excel styles (Normal, Good, Bad, Heading 1, etc.) to a range.
-- Use built-in number format presets (currency, percentage, date, accounting, etc.) via `format_cells`.
-- Clear all formatting from a range without affecting cell values.
-- Set column widths and row heights; auto-fit columns to content.
-- Merge and unmerge cells; list all merged ranges.
-- Apply per-cell format arrays across a range.
-- Set gradient fills.
-- Inspect existing cell formatting.
-- Copy formatting from one range to another.
+- Use built-in number format presets and named Excel styles.
+- Merge and unmerge cells, auto-fit columns, clear formatting, and copy cell formatting.
 
 ## Conditional Formatting
-- Apply colour scales, data bars, and icon sets.
-- Add highlight, formula, top/bottom, above/below-average, and duplicate rules.
-- List and remove conditional formatting rules.
+- Apply colour scales, data bars, icon sets, and targeted highlight rules.
+- Add formula, top/bottom, and above/below-average rules; list and remove rules.
 
 ## Formulas
-- Set single, array, and batch formulas.
-- Drag-fill a formula across a range (relative-reference translation via openpyxl Translator).
-- Insert AutoSum formulas for one or more ranges in a single call.
-- Validate formula syntax.
-- List all formulas in a sheet.
-- Convert formulas to static values.
+- Set single or batch formulas and drag-fill them across ranges with relative-reference translation.
+- Insert AutoSum formulas and audit formula values, errors, precedents, dependents, and sheet formulas.
 
 ## Tables
-- Create, list, rename, resize, and delete native Excel tables.
-- Toggle the totals row and read table data.
-- Convert a native Excel table back to a plain range.
+- Create, list, resize, and read native Excel tables.
+- Toggle totals rows and convert tables back to plain ranges.
 
 ## Data Validation
-- Add dropdown, numeric, date, text-length, and formula-based validation rules.
-- List and remove validation rules.
+- Add dropdown, numeric, date, and formula-based validation rules.
+- Remove validation rules.
 
 ## Protection
-- Protect and unprotect sheets.
+- Protect and unprotect sheets and workbooks.
 - Lock individual cells.
 
 ## Charts
-- Create 10 chart types: column, bar, line, pie, scatter, area, radar, doughnut, bubble, and stock.
-- Configure axes, trendlines, and combo (dual-axis) charts.
-- Add and configure data labels on chart series.
-- Show, hide, and position chart legends.
-- Add and remove chart series.
-- List and delete charts.
+- Create, list, delete, and update charts across 10 chart types: column, bar, line, pie, scatter, area, radar, doughnut, bubble, and stock.
+- Add series and configure axes, trendlines, combo charts, data labels, legends, and category ranges.
 
 ## Data Analysis
-- Filter data by single or multiple conditions (==, !=, >, <, contains, startswith, etc.).
-- Sort by one or more columns.
-- Compute column statistics (mean, median, min, max, std, sum).
-- Aggregate and group data.
-- Find and remove duplicate rows.
-- Profile a dataset comprehensively, including per-column percentile stats (p25, p75, p90, IQR).
-- Insert subtotal formula rows after each group in a dataset (SUM, AVG, COUNT, MAX, MIN), with optional grand total.
-- Count value frequencies for a column, with normalize, top-n, and dropna options.
-- Calculate a Pearson correlation matrix across numeric columns.
-- VLOOKUP-style lookup helper across ranges.
-- Export analysis results to a new file.
+- Filter and sort data by multiple conditions or columns.
+- Compute column statistics, grouped aggregates, value counts, and correlation matrices.
+- Find duplicates, profile datasets, insert subtotals, and perform VLOOKUP-style enrichment.
+- Run OLS regression and exponential smoothing with forecasting support.
 
 ## CSV Operations
 - Preview CSV content.
 - Convert between CSV and XLSX formats.
 
 ## Pivot & ETL
-- Create pivot tables.
-- Refresh an existing pivot table from updated source data.
-- Unpivot (melt) data from wide to long format.
-- Merge datasets using SQL-style joins.
-- Add computed columns with safe expression evaluation, or compute a running cumulative sum column.
-- Deduplicate rows.
-- Append datasets from multiple sources.
-- Find differences between two datasets.
+- Create pivot tables and refresh them from stored definitions.
+- Unpivot wide data, merge datasets with SQL-style joins, and deduplicate rows.
+- Add computed columns with safe expressions, cumulative sums, or rolling calculations.
 
 ## Financial Calculations
-- NPV, IRR, FV, PV, NPER, and RATE via time-value-of-money operations.
-- DCF (discounted cash flow) analysis.
-- Loan amortisation schedules.
-- Goal seek with AST-validated expressions.
-- Budget variance analysis.
-- Financial ratio analysis.
-- Scenario analysis.
-- Break-even analysis.
-- Sensitivity tables.
+- Run IRR, FV, PV, NPER, RATE, and depreciation time-value calculations.
+- Build DCF models, loan amortisation schedules, budget variance reports, financial ratio analysis, and break-even analysis.
+- Perform goal seek, constrained solver optimisation, sensitivity tables, and scenario analysis.
 
 ## Data Cleaning
-- Configurable cleaning pipeline: trim whitespace, remove empty rows/columns, fix number formats, deduplicate, and fill missing values.
-- Preview mode (dry run without saving).
-- Split a column into multiple columns.
-- Parse and normalise date columns into a standard format.
+- Run a configurable cleaning pipeline to trim whitespace, remove empty rows/columns, normalise text, fix number formats, deduplicate, and fill missing values.
+- Use preview mode before saving changes.
+- Split columns and parse/normalise date columns.
 
 ## Comments
-- Add, read, update, and delete comments.
-- List all comments in a sheet.
+- Add, read, delete, and list comments.
 
 ## Hyperlinks
-- Add external and internal (intra-workbook) hyperlinks.
+- Add internal or external hyperlinks.
 - Read, delete, and list hyperlinks.
 
 ## Images
-- Insert images into worksheets (`.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`).
+- Insert images into worksheets.
 
 ## Named Ranges
-- Create, list, rename, update, and delete named ranges with scope preservation.
+- Create, list, update, and delete named ranges.
 
 ## Worksheet Operations
 - Freeze and unfreeze panes.
-- Set and remove auto-filters.
-- Group and ungroup rows and columns; set row heights and column widths.
-- Set sheet tab colour; hide, unhide, and move sheets.
-- Toggle gridlines.
-- Configure print area, page setup, margins, header/footer, and print titles.
-- Add and remove page breaks.
-- Copy ranges and sheets across workbooks; stack sheets into a consolidated sheet.
+- Set/remove auto-filters, and toggle gridlines.
+- Group/ungroup rows and columns; set row heights and column widths.
+- Configure print area, page setup, print titles, and manual page breaks.
+- Copy ranges across sheets, copy sheets across workbooks, merge workbooks, and stack sheets into a consolidated sheet.
 
 ## Document Properties
-- Read and write workbook metadata (author, title, etc.).
-- Set calculation mode.
+- Read workbook metadata and set calculation mode.
 
 ## Cross-file Operations
-- Aggregate or filter data across multiple files in bulk.
-- Validate data consistency across multiple workbooks.
+- Aggregate, filter, validate, and compare data across multiple files.
 
 **66 Tools | 2 Resources | 20 Prompts**
 
 
 # Prerequisites
+Below are the requirements for running this MCP:
 - Python 3.12+
-- [uv](https://github.com/astral-sh/uv) for dependency management and execution.
+- [uv](https://github.com/astral-sh/uv) for dependency management and execution
+- Optional: Node.js (for running the MCP Inspector via `npx`)
 
-# Setup and run
+# Setup & Run
+Installing all project dependencies:
 ```sh
 uv sync
+```
+
+Running the MCP server:
+```sh
 uv run src/mcp_server/main.py   # or: uv run excel-mcp
 ```
 
+## Using with MCP clients:
+- ### GitHub Copilot (Visual Studio Code)
+In the `.vscode/mcp.json` add:
+```json
+"excel-mcp": {
+  "command": "uv",
+  "args": [
+    "run",
+    "--with",
+    "mcp[cli]",
+    "excel-mcp"
+  ],
+  "env": {
+    "PYTHONPATH": "src"
+  }
+}
+```
+
+- ### Anthropic Claude
+Expose the FastMCP server via the Streamable HTTP transport and register it with Claude/Claude Code for direct tool use. For development you can also use the MCP Inspector or run a small HTTP adapter that forwards Claude Messages to the MCP server.
+
+Example (from research spec):
+```sh
+claude mcp add --transport http my-excel-mcp http://localhost:8000/mcp
+```
+
+- ### Anthropic Claude Code
+Claude Code supports stdio, HTTP/SSE, and plugin-bundled MCP servers. For local development add a project-scoped `.mcp.json` or register a stdio command; for sharing use a plugin that bundles a `.mcp.json` entry.
+
+Example (project `.mcp.json` from research spec):
+```json
+{
+  "mcpServers": {
+    "excel-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "src/mcp_server/main.py"],
+      "env": { "PYTHONPATH": "src" }
+    }
+  }
+}
+```
+
+- ### OpenAI / ChatGPT
+OpenAI supports an `mcp` tool via the Responses API (remote MCP/SSE or streamable HTTP), ChatGPT plugins (OpenAPI + `ai-plugin.json`), or a local function-calling wrapper that mediates calls to the local MCP server. Protect public endpoints with TLS/auth or prefer the local wrapper for private data.
+
+Example (Responses API `mcp` tool from research spec):
+```py
+from openai import OpenAI
+client = OpenAI()
+
+resp = client.responses.create(
+    model="gpt-5",
+    tools=[{
+        "type": "mcp",
+        "server_label": "excel-mcp",
+        "server_description": "Excel MCP server",
+        "server_url": "https://your-public-host.example.com/sse",
+        "authorization": "Bearer YOUR_MCP_TOKEN",
+        "require_approval": "always",
+    }],
+    input="Read first 20 rows from /tmp/demo.xlsx"
+)
+print(resp.output_text)
+```
+
 ## Try it with the MCP Inspector
-Inspect tools and resources without an LLM in the loop:
+Inspect tools, resources, and prompts without an LLM in the loop:
 ```sh
 npx @modelcontextprotocol/inspector uv run --directory . src/mcp_server/main.py
 ```
 
-## Architecture
-- **Modular design**: 25 independent domain modules under `src/mcp_server/tools/`; 15 route modules under `src/mcp_server/routes/` handle parameter validation and action dispatch.
-- **Entry point**: `src/mcp_server/main.py` calls `register_all_routes(mcp)` to register 66 tools and 2 resources (`excel://workbook/{file_path}/sheets`, `excel://workbook/{file_path}/sheet/{sheet_name}/preview`). It contains no `@mcp.tool()` decorators directly.
-- **Data flow**: MCP Client → FastMCP (stdio/JSON-RPC) → `main.py` → `routes/*.py` (action dispatch, validation) → `tools/*.py` (pure domain logic) → Excel/CSV file operations → Pydantic response models → JSON response.
-- **Utilities**: `src/mcp_server/utils/excel_helpers.py` provides safe file handling; `logger.py` routes all logs to stderr only (MCP stdio-safe).
-- **Safety**: File paths validated against an extension whitelist (`.xlsx`, `.xls`, `.csv`, `.xlsm`); `goal_seek` and `scenario_analysis` use AST whitelist validation; `add_computed_column` uses a blocklist to block dangerous patterns; image paths are resolved and extension-checked.
-- **Workbook lifecycle**: All tools use `load_workbook_safe()` and `save_workbook_safe()` with `try/finally wb.close()` for reliable resource cleanup.
-
-## Extending
-- Add new tool functions under `src/mcp_server/tools/` (pure functions, no decorators).
-- Add a route wrapper in the appropriate `src/mcp_server/routes/` module, or create a new route module and register it in `src/mcp_server/routes/__init__.py`.
-- Add tests in `tests/` using pytest and `tmp_path` fixture.
-- Run `uv run ruff check src/ tests/` to lint and `uv run pytest -v` to test.
-
-## Tests and linting
+## Verifications
+Run tests with:
 ```sh
 uv run pytest -v
+```
+
+Run linting with:
+```sh
 uv run ruff check src/ tests/
 ```
 
-## Prompts
-The server ships 20 MCP prompts (`prompts.py`) for common workflows:
+Run MyPy type checks with:
+```sh
+uv run mypy src/mcp_server
+```
 
-| Prompt                            | Description                                                     |
-| --------------------------------- | --------------------------------------------------------------- |
-| `excel-quickstart`                | Create a new formatted workbook and auto-fit columns            |
-| `excel-data-analysis`             | Profile, filter, aggregate, sort, and find duplicates           |
-| `excel-data-cleaning`             | Full cleaning pipeline: profile, clean, deduplicate, export     |
-| `excel-chart-builder`             | Create and annotate charts with trendlines, labels, and legends |
-| `excel-report-builder`            | Multi-sheet formatted report with data, charts, and print setup |
-| `excel-financial-model`           | Loan amortisation, DCF, and financial ratio workbook            |
-| `excel-pivot-etl`                 | Pivot tables and ETL: merge, unpivot, computed columns          |
-| `excel-multi-file`                | Aggregate, filter, compare, and validate across multiple files  |
-| `excel-statistical-analysis`      | OLS regression and exponential smoothing with forecasting       |
-| `excel-formula-builder`           | Write, fill, auto-sum, and audit formulas                       |
-| `excel-data-governance`           | Data validation, protection, named ranges, and scenarios        |
-| `excel-csv-workflow`              | Preview CSV, convert to Excel, clean, analyse, export           |
-| `excel-readonly-audit`            | Inspect structure, formulas, tables, and data quality read-only |
-| `excel-formula-diagnosis`         | Diagnose formula errors and trace precedents/dependents         |
-| `excel-workbook-maintenance`      | Sheet layout, print setup, and sizing housekeeping              |
-| `excel-table-manager`             | Create, inspect, resize, total, and convert Excel tables        |
-| `excel-what-if-analysis`          | Goal seek, solver, sensitivity, and scenario analysis           |
-| `excel-multi-file-reconciliation` | Validate, compare, aggregate, and filter multiple files         |
-| `excel-search-repair`             | Find and repair text or formula content                         |
-| `excel-safe-transform`            | Sandboxed custom transform via `execute_custom_code`            |
+# Prompts
+The server ships 20 MCP prompts (`src/mcp_server/prompts.py`) for common workflows:
+
+| Prompt                            | Description                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------- |
+| `excel-quickstart`                | Create a new Excel workbook, populate it with formatted data, and auto-fit columns          |
+| `excel-data-analysis`             | Profile, filter, aggregate, sort, and find duplicates in an Excel dataset                   |
+| `excel-data-cleaning`             | Full data cleaning pipeline: profile, clean, validate, deduplicate, and export              |
+| `excel-chart-builder`             | Create, style, and annotate charts with trendlines, axis labels, data labels, and legends   |
+| `excel-report-builder`            | Assemble a multi-sheet formatted report with data, charts, statistics, and print setup      |
+| `excel-financial-model`           | Build a financial model workbook with loan amortisation, DCF analysis, and financial ratios |
+| `excel-pivot-etl`                 | Create pivot tables and run ETL transforms: merge, unpivot, add computed columns            |
+| `excel-multi-file`                | Aggregate, filter, compare, and validate schema consistency across multiple Excel files     |
+| `excel-statistical-analysis`      | Run OLS regression and exponential smoothing with forecasting on Excel data                 |
+| `excel-formula-builder`           | Write, fill, auto-sum, and audit Excel formulas across a sheet                              |
+| `excel-data-governance`           | Apply data validation, protection, named ranges, and scenario management to a workbook      |
+| `excel-csv-workflow`              | Preview a CSV, convert to Excel, clean, analyse, and export results                         |
+| `excel-readonly-audit`            | Inspect workbook structure, formulas, tables, and data quality without mutating the file    |
+| `excel-formula-diagnosis`         | Diagnose formula errors, trace precedents and dependents, and apply the smallest safe fix   |
+| `excel-workbook-maintenance`      | Perform conservative workbook housekeeping: sheets, layout, print setup, and sizing         |
+| `excel-table-manager`             | Create, inspect, resize, total, and convert native Excel tables                             |
+| `excel-what-if-analysis`          | Run goal seek, solver, sensitivity, and scenario analysis                                   |
+| `excel-multi-file-reconciliation` | Validate, compare, aggregate, and filter multiple files with schema checks                  |
+| `excel-search-repair`             | Find and repair text or formula content with a read-before-write workflow                   |
+| `excel-safe-transform`            | Apply a sandboxed custom transform only when built-in tools are not enough                  |
 
 
 ## Tools
@@ -242,13 +265,13 @@ This section merges the previous "Tool Overview" and the full grouped tool list.
   - `formula_audit` — Inspect formula values, list errors, find precedents/dependents, or list formulas.
 
 - Charts (1) — Create and manage chart lifecycle and series
-  - `chart` — Create, list, delete, add series, configure axes/trendlines/legends/data labels.
+  - `chart` — Create, list, delete, update, add series, and configure axes, trendlines, combo charts, legends, and data labels.
 
 - Worksheet operations (4) — UI, structure, print and cross-workbook transfers
   - `worksheet_view` — Freeze panes, set/remove auto-filter, toggle gridlines.
   - `worksheet_structure` — Insert/delete rows/cols, group/ungroup, set sizes.
   - `worksheet_print` — Set print area, page setup, print titles, and page breaks.
-  - `worksheet_transfer` — Copy ranges/sheets across workbooks, merge workbooks, stack sheets.
+  - `worksheet_transfer` — Copy ranges across sheets within a workbook, copy sheets across workbooks, merge workbooks, and stack sheets.
 
 - Data analysis (9) — Filtering, aggregation, profiling and helper utilities
   - `sort_data` — Sort worksheet rows by one or more columns.
@@ -269,7 +292,7 @@ This section merges the previous "Tool Overview" and the full grouped tool list.
   - `add_computed_column` — Add a computed column via safe expressions or cumsum/rolling operations.
   - `deduplicate_data` — Remove duplicate rows (with keep strategy) from a sheet.
 
-- Financial (8) — Time-value calculations, DCF, goal-seek and scenario tools
+- Financial (8) — Time-value calculations, DCF, goal-seek and financial modelling tools
   - `goal_seek` — Solve for a variable cell value that makes an expression equal a target.
   - `loan_amortization` — Generate an amortization schedule for a loan.
   - `dcf_analysis` — Discounted cash flow valuation with terminal value calculation.
@@ -312,3 +335,29 @@ This section merges the previous "Tool Overview" and the full grouped tool list.
   - `execute_custom_code` — Run sandboxed Python/pandas code against a workbook and return results.
 
  
+# Architecture
+- **Modular design**: `src/mcp_server/` is split into `tools/` (25 pure domain modules), `routes/` (15 registration/dispatch modules), `models/` (Pydantic response schemas), and `utils/` (shared workbook, logging, and expression-safety helpers).
+- **Entry point**: `src/mcp_server/main.py` creates the FastMCP server, registers 2 JSON resources directly (`excel://workbook/{file_path}/sheets`, `excel://workbook/{file_path}/sheet/{sheet_name}/preview`), calls `register_all_routes(mcp)` to register the tool surface, and calls `_register_prompts(mcp)` from `src/mcp_server/prompts.py` to register 20 prompts.
+- **Data flow**: MCP client → FastMCP (stdio/JSON-RPC) → `main.py` → `routes/*.py` (registration/dispatch) → `tools/*.py` (domain logic) → `openpyxl` / `pandas` / `scipy` and related libraries → Pydantic models → JSON-RPC response.
+- **Utilities**: `src/mcp_server/utils/excel_helpers.py` centralises safe workbook access and workbook path validation; `logger.py` keeps logs on stderr; `expression_validator.py` provides shared AST validation for user-supplied expressions.
+- **Safety**: Workbook paths are checked against an extension whitelist and optional `EXCEL_MCP_ALLOWED_DIRS` sandbox; AST validation is reused by `goal_seek`, `create_sensitivity_table`, and computed-column expressions; `execute_custom_code` uses a separate sandboxed validation path.
+- **Workbook lifecycle**: Openpyxl-backed workbook tools generally use `load_workbook_safe()` / `save_workbook_safe()` with explicit close handling, while pandas/CSV flows and hidden-sheet state (`_mcp_pivots`, `_mcp_scenarios`) follow separate storage paths.
+
+## Extending
+- Add new tool functions under `src/mcp_server/tools/` (pure functions, no decorators).
+- Expose that logic through an existing `src/mcp_server/routes/` module, or add a new route module with a `register(mcp)` function and include it in `register_all_routes()` in `src/mcp_server/routes/__init__.py`.
+- Add tests in `tests/` using pytest and the `tmp_path` fixture where appropriate.
+- Run `uv run ruff check src/ tests/` to lint and `uv run pytest -v` to test.
+
+## References
+- [Model Context Protocol specification](https://modelcontextprotocol.io/specification)
+- [FastMCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
+- [uv documentation](https://docs.astral.sh/uv/)
+- [openpyxl documentation](https://openpyxl.readthedocs.io/)
+- [pandas documentation](https://pandas.pydata.org/docs/)
+- [python-calamine](https://github.com/dimastbk/python-calamine)
+- [numpy-financial](https://numpy.org/numpy-financial/)
+- [SciPy documentation](https://docs.scipy.org/)
+- [statsmodels documentation](https://www.statsmodels.org/)
+- [Pydantic documentation](https://docs.pydantic.dev/)
+- [Pillow documentation](https://pillow.readthedocs.io/)
