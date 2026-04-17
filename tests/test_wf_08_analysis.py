@@ -11,7 +11,6 @@ from pathlib import Path
 import numpy as np
 import openpyxl
 import pandas as pd
-import pytest
 
 from mcp_server.tools.analysis import (
     aggregate_data,

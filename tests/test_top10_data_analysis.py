@@ -11,7 +11,6 @@ import pytest
 from mcp_server.tools.analysis import insert_subtotals, profile_data
 from mcp_server.tools.pivot_etl import add_computed_column
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

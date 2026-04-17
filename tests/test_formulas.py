@@ -42,10 +42,10 @@ def test_set_formula_array(sample_xlsx: str) -> None:
 
 
 from mcp_server.tools.formulas import (
-    get_formula_value,
+    get_formula_dependents,
     get_formula_errors,
     get_formula_precedents,
-    get_formula_dependents,
+    get_formula_value,
     list_formulas,
 )
 

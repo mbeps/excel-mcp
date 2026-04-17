@@ -30,7 +30,6 @@ from mcp_server.tools.cell_ops import (
 from mcp_server.tools.formulas import set_formula
 from mcp_server.tools.workbook import create_workbook
 
-
 # ---------------------------------------------------------------------------
 # 1. Write single cells with various types
 # ---------------------------------------------------------------------------
@@ -303,7 +302,7 @@ class TestFillSeriesDate:
         assert v1 is not None
         assert v7 is not None
         # Dates should span 6 days
-        from datetime import datetime, timedelta
+        from datetime import datetime
 
         if isinstance(v1, datetime) and isinstance(v7, datetime):
             assert (v7 - v1).days == 6
@@ -647,7 +646,7 @@ class TestAutoSum:
 
         # Also verify with data_only to check computed value
         wb2 = openpyxl.load_workbook(fp, data_only=True)
-        ws2 = wb2["S1"]
+        wb2["S1"]
         # openpyxl data_only may return None (not calculated), but formula string should be set
         wb2.close()
 

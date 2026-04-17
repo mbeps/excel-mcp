@@ -11,7 +11,6 @@ from openpyxl import Workbook
 from mcp_server.tools.charts import create_chart, set_chart_data_labels, set_chart_legend
 from mcp_server.tools.tables import convert_table_to_range, create_table, list_tables
 
-
 # ── helpers ───────────────────────────────────────────────────────────────
 
 

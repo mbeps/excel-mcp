@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from mcp_server.models.workbook import SheetInfo, WorkbookMetadata
+
 from mcp_server.main import (
-    mcp,
-    resource_list_sheets,
-    resource_sheet_preview,
-    get_workbook_metadata,
     create_workbook,
     get_sheet_summary,
-    write_multi_sheet,
-    sheet_management,
+    get_workbook_metadata,
     read_cells,
+    resource_list_sheets,
+    resource_sheet_preview,
+    sheet_management,
     write_cells,
+    write_multi_sheet,
 )
+from mcp_server.models.workbook import SheetInfo, WorkbookMetadata
 
 
 @patch("mcp_server.tools.workbook.get_workbook_metadata")

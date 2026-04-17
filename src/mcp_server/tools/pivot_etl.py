@@ -8,7 +8,6 @@ from logging import Logger
 
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.formula.translate import Translator
 from openpyxl.utils import get_column_letter
 
 from mcp_server.models.common import CellScalar

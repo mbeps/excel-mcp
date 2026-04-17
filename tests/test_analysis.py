@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mcp_server.tools.analysis import (
     aggregate_data,
     column_statistics,
@@ -144,7 +146,6 @@ def test_filter_data_advanced_or(tmp_path) -> None:
 # Additional comprehensive tests
 # ============================================================
 
-import pytest
 
 
 def test_sort_data_descending(sample_xlsx: str) -> None:
@@ -261,6 +262,7 @@ def test_find_duplicates_multi_column(tmp_path) -> None:
 def test_vlookup_helper_no_match(tmp_path) -> None:
     """vlookup_helper returns unmatched entry when lookup key is absent in data."""
     from openpyxl import Workbook as WB
+
     from mcp_server.tools.analysis import vlookup_helper
 
     lookup_path = str(tmp_path / "lookup_nm.xlsx")
@@ -295,6 +297,7 @@ def test_vlookup_helper_no_match(tmp_path) -> None:
 def test_vlookup_helper_partial_match(tmp_path) -> None:
     """vlookup_helper reports correct matched/unmatched counts for mixed results."""
     from openpyxl import Workbook as WB
+
     from mcp_server.tools.analysis import vlookup_helper
 
     lookup_path = str(tmp_path / "lookup_part.xlsx")

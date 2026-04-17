@@ -6,7 +6,6 @@ openpyxl, numpy-financial, or plain arithmetic — never via MCP tools.
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy_financial as npf
@@ -30,7 +29,6 @@ from mcp_server.tools.financial import (
 )
 from mcp_server.tools.solver import run_solver
 from mcp_server.tools.workbook import create_workbook
-
 
 # ---------------------------------------------------------------------------
 # Helpers

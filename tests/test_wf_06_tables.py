@@ -11,8 +11,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from mcp_server.tools.cell_ops import write_cell, write_range
-from mcp_server.tools.formulas import set_formula
+from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.tables import (
     convert_table_to_range,
     create_table,

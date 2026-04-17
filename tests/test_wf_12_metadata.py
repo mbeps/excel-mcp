@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
-import pytest
 
 from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.comments import add_comment, delete_comment, list_comments, read_comment
@@ -24,7 +23,6 @@ from mcp_server.tools.named_ranges import (
 )
 from mcp_server.tools.scenarios import add_scenario, apply_scenario, list_scenarios
 from mcp_server.tools.workbook import create_workbook
-
 
 # ---------------------------------------------------------------------------
 # Helpers

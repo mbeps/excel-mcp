@@ -10,7 +10,6 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
-import pytest
 
 from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.pivot_etl import (
@@ -127,7 +126,7 @@ class TestCreatePivotMultipleValues:
         fp = str(tmp_path / "pivot_multi.xlsx")
         _create_sales_data(fp)
 
-        result = create_pivot_table(
+        create_pivot_table(
             fp,
             "Sales",
             index_cols=["Region"],
@@ -242,7 +241,7 @@ class TestMergeDatasetsInner:
         fp = str(tmp_path / "merge_inner.xlsx")
         _create_two_sheets(fp)
 
-        result = merge_datasets(
+        merge_datasets(
             fp,
             "Employees",
             "Departments",
@@ -269,7 +268,7 @@ class TestMergeDatasetsLeft:
         fp = str(tmp_path / "merge_left.xlsx")
         _create_two_sheets(fp)
 
-        result = merge_datasets(
+        merge_datasets(
             fp,
             "Employees",
             "Departments",
@@ -316,7 +315,7 @@ class TestMergeDatasetsLeftOnRightOn:
             ],
         )
 
-        result = merge_datasets(
+        merge_datasets(
             fp,
             "Orders",
             "Products",
@@ -651,7 +650,7 @@ class TestMergeOuterJoin:
         fp = str(tmp_path / "merge_outer.xlsx")
         _create_two_sheets(fp)
 
-        result = merge_datasets(
+        merge_datasets(
             fp,
             "Employees",
             "Departments",

@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
-import pytest
 
 from mcp_server.tools.cell_ops import auto_sum, fill_formula, write_cell, write_range
 from mcp_server.tools.formulas import (
@@ -22,7 +21,6 @@ from mcp_server.tools.formulas import (
     set_formulas_batch,
 )
 from mcp_server.tools.workbook import create_workbook
-
 
 # ---------------------------------------------------------------------------
 # 1. Set formula and verify

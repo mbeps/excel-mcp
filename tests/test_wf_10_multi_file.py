@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
-import pytest
 
 from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.multi_file import (
@@ -19,7 +18,6 @@ from mcp_server.tools.multi_file import (
     validate_data_consistency,
 )
 from mcp_server.tools.workbook import create_workbook
-
 
 # ---------------------------------------------------------------------------
 # Helpers

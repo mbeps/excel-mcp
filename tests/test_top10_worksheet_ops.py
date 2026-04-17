@@ -11,7 +11,6 @@ from mcp_server.tools.worksheet_ops import (
     stack_sheets,
 )
 
-
 # ── TestSetPrintTitles ─────────────────────────────────────────────────────────
 
 
@@ -122,7 +121,7 @@ class TestSetPrintTitles:
         """The returned dict always has the correct sheet name."""
         path = str(tmp_path / "wb.xlsx")
         wb = openpyxl.Workbook()
-        ws = wb.create_sheet("MySheet")
+        wb.create_sheet("MySheet")
         wb.remove(wb.active)
         wb.save(path)
         wb.close()

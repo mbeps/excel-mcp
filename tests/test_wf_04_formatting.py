@@ -9,10 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
-import pytest
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-from mcp_server.tools.cell_ops import write_cell, write_range
+from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.conditional_formatting import (
     add_formula_rule,
     add_highlight_rule,
@@ -244,7 +242,7 @@ class TestAutoFitColumns:
         # Get default widths before auto-fit
         wb_before = openpyxl.load_workbook(fp)
         ws_before = wb_before["Sheet1"]
-        default_width = ws_before.column_dimensions["A"].width
+        ws_before.column_dimensions["A"].width
         wb_before.close()
 
         auto_fit_columns(fp, "Sheet1")
