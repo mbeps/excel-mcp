@@ -7,11 +7,14 @@ MCP tools.
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+import csv
 from pathlib import Path
 
 import openpyxl
 import pandas as pd
-import pytest
 
 from mcp_server.tools.analysis import (
     aggregate_data,
@@ -25,7 +28,6 @@ from mcp_server.tools.charts import create_chart, set_chart_axes
 from mcp_server.tools.cleaning import data_cleaner
 from mcp_server.tools.conditional_formatting import (
     add_highlight_rule,
-    apply_conditional_formatting,
 )
 from mcp_server.tools.csv_ops import csv_to_xlsx
 from mcp_server.tools.data_validation import add_dropdown_validation
@@ -44,15 +46,8 @@ from mcp_server.tools.pivot_etl import (
 )
 from mcp_server.tools.protection import protect_cells, protect_sheet
 from mcp_server.tools.statistical import run_exponential_smoothing, run_regression
-from mcp_server.tools.tables import create_table, list_tables
+from mcp_server.tools.tables import create_table
 from mcp_server.tools.workbook import create_workbook
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-import csv
 
 
 def _write_csv(fp: str, headers: list[str], rows: list[list]) -> None:
@@ -152,13 +147,6 @@ class TestFinancialAnalysisWorkflow:
         write_range(fp, "Data", "A1", data)
 
         # Set profit formula for each year
-        formulas = {
-            "F1": "Profit",
-            "F2": "=B2-C2-D2-E2",
-            "F3": "=B3-C3-D3-E3",
-            "F4": "=B4-C4-D4-E4",
-            "F5": "=B5-C5-D5-E5",
-        }
         # Write header manually, then formulas
         from mcp_server.tools.cell_ops import write_cell
 

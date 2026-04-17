@@ -106,8 +106,8 @@ def format_cells(
     file_path: str,
     sheet_name: str,
     cell_range: str,
-    bold: bool = False,
-    italic: bool = False,
+    bold: bool | None = None,
+    italic: bool | None = None,
     font_size: int | None = None,
     font_color: str | None = None,
     bg_color: str | None = None,
@@ -115,15 +115,15 @@ def format_cells(
     number_format_preset: str | None = None,
     horizontal_alignment: str | None = None,
     vertical_alignment: str | None = None,
-    wrap_text: bool = False,
+    wrap_text: bool | None = None,
     border_style: BorderStyle | None = None,
     border_color: str | None = None,
     font_name: str | None = None,
     underline: str | None = None,
-    strikethrough: bool = False,
+    strikethrough: bool | None = None,
     text_rotation: int | None = None,
     indent: int | None = None,
-    shrink_to_fit: bool = False,
+    shrink_to_fit: bool | None = None,
     top_border_style: BorderStyle | None = None,
     bottom_border_style: BorderStyle | None = None,
     left_border_style: BorderStyle | None = None,
@@ -203,12 +203,12 @@ def format_cells(
                     ef = cell.font
                     cell.font = Font(
                         name=font_name if font_name is not None else ef.name,
-                        bold=bold if bold else ef.bold,
-                        italic=italic if italic else ef.italic,
+                        bold=bold if bold is not None else ef.bold,
+                        italic=italic if italic is not None else ef.italic,
                         size=font_size if font_size is not None else ef.size,
                         color=font_color if font_color is not None else ef.color,
                         underline=underline if underline is not None else ef.underline,
-                        strike=strikethrough if strikethrough else ef.strike,
+                        strike=strikethrough if strikethrough is not None else ef.strike,
                     )
                     if bg_color:
                         cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
@@ -216,10 +216,10 @@ def format_cells(
                     cell.alignment = Alignment(
                         horizontal=horizontal_alignment if horizontal_alignment is not None else ea.horizontal,
                         vertical=vertical_alignment if vertical_alignment is not None else ea.vertical,
-                        wrap_text=wrap_text if wrap_text else ea.wrap_text,
+                        wrap_text=wrap_text if wrap_text is not None else ea.wrap_text,
                         textRotation=text_rotation if text_rotation is not None else (ea.textRotation or 0),
                         indent=indent if indent is not None else (ea.indent or 0),
-                        shrinkToFit=shrink_to_fit if shrink_to_fit else ea.shrinkToFit,
+                        shrinkToFit=shrink_to_fit if shrink_to_fit is not None else ea.shrinkToFit,
                     )
                     if border:
                         cell.border = border

@@ -1,11 +1,12 @@
 from __future__ import annotations
+
 import pytest
 from openpyxl import Workbook
+
 from mcp_server.tools.analysis import (
     aggregate_data,
     column_statistics,
     filter_data_advanced,
-    find_duplicates,
     sort_data,
     vlookup_helper,
 )

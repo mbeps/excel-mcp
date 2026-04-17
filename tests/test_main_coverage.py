@@ -1,7 +1,4 @@
-import pytest
-from mcp_server.main import mcp
 import json
-import os
 
 
 def test_main_resources(sample_xlsx):
@@ -22,9 +19,6 @@ def test_main_tools(sample_xlsx):
     # Test tool wrappers in main.py
     from mcp_server.main import (
         get_workbook_metadata,
-        create_workbook,
-        get_sheet_summary,
-        write_multi_sheet,
         sheet_management,
     )
 

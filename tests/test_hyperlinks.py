@@ -15,10 +15,11 @@ def test_add_hyperlink(sample_xlsx: str) -> None:
     wb.close()
 
 from mcp_server.tools.hyperlinks import (
-    read_hyperlink,
     delete_hyperlink,
     list_hyperlinks,
+    read_hyperlink,
 )
+
 
 def test_read_hyperlink(sample_xlsx: str) -> None:
     add_hyperlink(sample_xlsx, "Sheet1", "B1", "https://google.com", display_text="Google", tooltip="Search")

@@ -6,14 +6,13 @@ results independently using openpyxl/pandas — never via MCP tools.
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import openpyxl
 import pandas as pd
 import pytest
 
-from mcp_server.tools.cell_ops import read_range, write_cell, write_range
+from mcp_server.tools.cell_ops import write_cell, write_range
 from mcp_server.tools.workbook import (
     copy_sheet,
     create_workbook,
@@ -25,7 +24,6 @@ from mcp_server.tools.workbook import (
     unhide_sheet,
     write_multi_sheet,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. Create → Populate → Read cycle
@@ -349,7 +347,7 @@ class TestSheetSummaryWithData:
         create_workbook(fp, sheet_names=["Report"])
 
         headers = ["Name", "Age", "City"]
-        data = [[headers]] + [[[f"Person{i}", 20 + i, f"City{i}"]] for i in range(10)]
+        [[headers]] + [[[f"Person{i}", 20 + i, f"City{i}"]] for i in range(10)]
         flat = [headers] + [[f"Person{i}", 20 + i, f"City{i}"] for i in range(10)]
         write_range(fp, "Report", "A1", flat)
 

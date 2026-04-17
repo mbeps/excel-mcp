@@ -11,6 +11,12 @@ from pathlib import Path
 import openpyxl
 import pytest
 
+from mcp_server.tools.analysis import (
+    aggregate_data,
+    column_statistics,
+    filter_data_advanced,
+    sort_data,
+)
 from mcp_server.tools.cell_ops import (
     find_replace,
     read_cell,
@@ -18,30 +24,20 @@ from mcp_server.tools.cell_ops import (
     write_cell,
     write_range,
 )
-from mcp_server.tools.analysis import (
-    aggregate_data,
-    column_statistics,
-    filter_data_advanced,
-    sort_data,
-)
 from mcp_server.tools.charts import create_chart
 from mcp_server.tools.formatting import format_cells
 from mcp_server.tools.formulas import (
     get_formula_dependents,
-    get_formula_errors,
     get_formula_precedents,
     list_formulas,
     set_formula,
-    set_formulas_batch,
 )
 from mcp_server.tools.workbook import (
     copy_sheet,
     create_workbook,
-    get_sheet_summary,
     get_workbook_metadata,
     rename_sheet,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -465,7 +461,7 @@ class TestEmptyFormula:
         fp = str(tmp_path / "empty_f.xlsx")
         create_workbook(fp, sheet_names=["Sheet1"])
 
-        result = set_formula(fp, "Sheet1", "A1", "")
+        set_formula(fp, "Sheet1", "A1", "")
 
         wb = openpyxl.load_workbook(fp)
         ws = wb["Sheet1"]

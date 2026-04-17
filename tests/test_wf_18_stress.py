@@ -6,15 +6,18 @@ openpyxl or pandas — never via MCP tools.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import openpyxl
 import pandas as pd
 import pytest
 
+from mcp_server.tools.analysis import (
+    aggregate_data,
+    filter_data_advanced,
+    sort_data,
+)
 from mcp_server.tools.cell_ops import (
-    copy_range,
     read_cell,
     read_file_chunked,
     read_range,
@@ -22,13 +25,7 @@ from mcp_server.tools.cell_ops import (
     write_cell,
     write_range,
 )
-from mcp_server.tools.analysis import (
-    aggregate_data,
-    filter_data_advanced,
-    sort_data,
-)
 from mcp_server.tools.charts import create_chart
-from mcp_server.tools.cleaning import data_cleaner
 from mcp_server.tools.conditional_formatting import (
     add_highlight_rule,
     apply_conditional_formatting,
@@ -64,7 +61,6 @@ from mcp_server.tools.worksheet_ops import (
     delete_rows,
     insert_rows,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -391,7 +387,7 @@ class TestPivotFromTable:
         )
         create_table(fp, "Sheet1", "A1:C5", "SalesTable")
 
-        result = create_pivot_table(
+        create_pivot_table(
             fp,
             "Sheet1",
             index_cols=["Region"],
@@ -964,7 +960,7 @@ class TestCustomCodeReturnDataFrame:
         write_range(fp, "Sheet1", "A1", [["A", "B"], [1, 10], [2, 20], [3, 30]])
 
         out = str(tmp_path / "cc_out.xlsx")
-        result = execute_custom_code(
+        execute_custom_code(
             fp,
             code="result = df[df['B'] > 15]",
             sheet="Sheet1",

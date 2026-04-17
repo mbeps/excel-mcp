@@ -43,7 +43,6 @@ from mcp_server.tools.financial import (
 )
 from mcp_server.tools.formatting import apply_named_style
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 

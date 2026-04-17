@@ -32,10 +32,9 @@ from mcp_server.tools.cleaning import parse_date_column
 from mcp_server.tools.financial import financial_ratio_analysis
 from mcp_server.tools.formulas import get_formula_precedents, set_formula
 from mcp_server.tools.multi_file import validate_data_consistency
-from mcp_server.tools.protection import protect_cells, protect_sheet
+from mcp_server.tools.protection import protect_cells
 from mcp_server.tools.tables import convert_table_to_range, create_table
 from mcp_server.tools.workbook import get_sheet_summary
-
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 

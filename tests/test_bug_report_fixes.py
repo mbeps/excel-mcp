@@ -18,6 +18,8 @@ import openpyxl
 import pytest
 from openpyxl import Workbook
 
+from mcp_server.models.solver import SolverConstraint, VariableCellBounds
+from mcp_server.routes.statistical import run_solver as route_run_solver
 from mcp_server.tools.charts import (
     create_chart,
     set_chart_data_labels,
@@ -26,8 +28,6 @@ from mcp_server.tools.charts import (
 from mcp_server.tools.financial import calculate_rate
 from mcp_server.tools.pivot_etl import add_computed_column
 from mcp_server.tools.solver import run_solver
-from mcp_server.routes.statistical import run_solver as route_run_solver
-from mcp_server.models.solver import SolverConstraint, VariableCellBounds
 from mcp_server.tools.worksheet_ops import (
     delete_cols,
     delete_rows,
@@ -44,7 +44,6 @@ from mcp_server.tools.worksheet_ops import (
     ungroup_cols,
     ungroup_rows,
 )
-
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 

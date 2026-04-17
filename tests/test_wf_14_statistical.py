@@ -10,12 +10,10 @@ from pathlib import Path
 
 import numpy as np
 import openpyxl
-import pytest
 
 from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.statistical import run_exponential_smoothing, run_regression
 from mcp_server.tools.workbook import create_workbook
-
 
 # ---------------------------------------------------------------------------
 # Helpers

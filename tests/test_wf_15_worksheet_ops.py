@@ -9,10 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
-import pandas as pd
-import pytest
 
-from mcp_server.tools.cell_ops import read_range, write_range
+from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.workbook import create_workbook
 from mcp_server.tools.worksheet_ops import (
     copy_range_across_sheets,
@@ -35,7 +33,6 @@ from mcp_server.tools.worksheet_ops import (
     ungroup_cols,
     ungroup_rows,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

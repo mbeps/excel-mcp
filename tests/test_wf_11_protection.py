@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import openpyxl
-import pytest
 
 from mcp_server.tools.cell_ops import write_range
 from mcp_server.tools.data_validation import (
@@ -22,7 +21,6 @@ from mcp_server.tools.data_validation import (
 from mcp_server.tools.doc_properties import protect_workbook, unprotect_workbook
 from mcp_server.tools.protection import protect_cells, protect_sheet, unprotect_sheet
 from mcp_server.tools.workbook import create_workbook
-
 
 # ---------------------------------------------------------------------------
 # Helpers

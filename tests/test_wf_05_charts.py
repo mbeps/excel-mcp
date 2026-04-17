@@ -12,8 +12,8 @@ import openpyxl
 import pytest
 
 from mcp_server.tools.cell_ops import write_range
-from mcp_server.tools.charts import _safe_chart_title
 from mcp_server.tools.charts import (
+    _safe_chart_title,
     add_chart_series,
     add_chart_trendline,
     create_chart,

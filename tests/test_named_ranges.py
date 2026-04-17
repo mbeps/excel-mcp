@@ -44,6 +44,7 @@ def test_update_named_range(sample_xlsx: str) -> None:
 
 import pytest
 
+
 def test_named_range_with_scope(sample_xlsx: str) -> None:
     # Test local scope
     create_named_range(sample_xlsx, "LocalRange", "Sheet1!$A$1:$A$2", scope="Sheet1")
