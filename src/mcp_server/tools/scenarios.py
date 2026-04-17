@@ -1,4 +1,30 @@
-"""Scenario management: save, list, apply, and delete named parameter sets."""
+"""Scenario management: save, list, apply, and delete named parameter sets.
+
+Implementation note — why we use JSON-in-hidden-sheet instead of the native
+openpyxl Scenario / ScenarioList API:
+
+  1. ``openpyxl.worksheet.scenario.InputCells.val`` is descriptor-enforced as
+     ``str``.  Storing an integer (e.g. 42), a float, or ``None`` raises
+     ``TypeError`` at assignment time.  Because our public API must faithfully
+     round-trip arbitrary Python scalars (int, float, str, bool, None) and
+     apply them back to cells with the correct type, relying on the native API
+     would silently coerce or reject those values.
+
+  2. openpyxl ``Scenario`` objects are scoped to a single worksheet
+     (``ws.scenarios``).  Our API supports multi-sheet scenarios (cell_values
+     maps sheet_name → cells).  Linking multiple per-sheet ``Scenario`` objects
+     into one logical named scenario would require an external association layer
+     — effectively reimplementing what the hidden sheet already provides, but
+     with worse ergonomics.
+
+  3. A hybrid approach (native API for single-sheet + JSON fallback for
+     multi-sheet) was also considered.  It would add significant branching
+     complexity while only partially solving issue #1 (string-only values).
+
+Conclusion: the JSON-in-hidden-sheet approach is simpler, fully type-safe, and
+correctly supports all current test cases.  Revisit if openpyxl adds typed-value
+support to InputCells in a future release.
+"""
 
 from __future__ import annotations
 

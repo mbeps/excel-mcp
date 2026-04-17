@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 from logging import Logger
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.formula.translate import Translator
+from openpyxl.utils import get_column_letter
 
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
@@ -47,6 +50,31 @@ def _save_pivots(wb: Workbook, pivots: dict) -> None:
         ws = wb.create_sheet(_PIVOTS_SHEET)
         ws.sheet_state = "hidden"
     ws["A1"] = json.dumps(pivots)
+
+
+def _try_build_excel_formula(
+    expression: str,
+    col_map: dict[str, str],
+    first_data_row: int,
+) -> str | None:
+    """Convert a pandas eval expression to an Excel formula for first_data_row.
+
+    Returns the formula string (starting with '='), or None if no column names match.
+    """
+    formula = expression
+    found_any = False
+    # Longest names first to avoid partial replacements (e.g. 'Revenue' before 'Rev')
+    sorted_cols = sorted(col_map.keys(), key=len, reverse=True)
+    for col_name in sorted_cols:
+        cell_ref = f"{col_map[col_name]}{first_data_row}"
+        backtick_token = f"`{col_name}`"
+        if backtick_token in formula:
+            formula = formula.replace(backtick_token, cell_ref)
+            found_any = True
+        elif re.search(r"\b" + re.escape(col_name) + r"\b", formula):
+            formula = re.sub(r"\b" + re.escape(col_name) + r"\b", cell_ref, formula)
+            found_any = True
+    return f"={formula}" if found_any else None
 
 
 def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
@@ -374,6 +402,11 @@ def add_computed_column(
     df = _read_sheet_df(file_path, sheet_name, has_header)
     validate_expression(expression)
 
+    # Build column-to-letter map from original columns before adding the new one
+    col_map: dict[str, str] = {col_name: get_column_letter(idx) for idx, col_name in enumerate(df.columns, start=1)}
+    first_data_row = 2 if has_header else 1
+    excel_formula_base = _try_build_excel_formula(expression, col_map, first_data_row)
+
     try:
         df[new_column_name] = df.eval(expression, engine="numexpr")
     except (ImportError, NotImplementedError):
@@ -385,18 +418,19 @@ def add_computed_column(
     try:
         ws = get_sheet(wb, sheet_name)
 
-        # Write header for new column
+        # new_col_idx is after df.eval appended the new column
         new_col_idx = len(df.columns)
         if has_header:
             ws.cell(row=1, column=new_col_idx, value=new_column_name)
 
         start_row = 2 if has_header else 1
+        mode = "formula" if excel_formula_base is not None else "static"
         for r_idx, val in enumerate(df[new_column_name].tolist(), start=start_row):
             ws.cell(row=r_idx, column=new_col_idx, value=val)
 
         save_workbook_safe(wb, file_path)
-        logger.info("Added column '%s' to %s!%s", new_column_name, sheet_name, file_path)
-        return f"Added column '{new_column_name}' ({expression}) to '{sheet_name}' ({len(df)} rows)."
+        logger.info("Added column '%s' to %s!%s (mode=%s)", new_column_name, sheet_name, file_path, mode)
+        return f"Added column '{new_column_name}' ({expression}) to '{sheet_name}' ({len(df)} rows, mode={mode})."
     finally:
         wb.close()
 

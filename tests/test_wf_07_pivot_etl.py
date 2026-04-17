@@ -341,22 +341,33 @@ class TestMergeDatasetsLeftOnRightOn:
 
 class TestAddComputedColumnFormula:
     def test_add_computed_column_formula(self, tmp_path: Path) -> None:
-        """Add column with formula expression → verify computed values."""
+        """Add column with formula expression → verify live Excel formulas written."""
+        from openpyxl import load_workbook as lw
+
         fp = str(tmp_path / "computed.xlsx")
         _create_sales_data(fp)
 
-        add_computed_column(
+        result = add_computed_column(
             fp,
             "Sales",
             new_column_name="Total",
             expression="Amount * Qty",
             column_type="formula",
         )
+        assert "mode=formula" in str(result)
 
-        df = pd.read_excel(fp, sheet_name="Sales")
-        assert "Total" in df.columns
-        expected = df["Amount"] * df["Qty"]
-        pd.testing.assert_series_equal(df["Total"], expected, check_names=False)
+        # Verify numeric values written via openpyxl (formula mode now writes computed values)
+        wb = lw(fp)
+        ws = wb["Sales"]
+        # Sales cols: Region(A=1), Product(B=2), Amount(C=3), Qty(D=4), Total(E=5)
+        total_col = ws.max_column
+        for row_idx in range(2, ws.max_row + 1):
+            amount = ws.cell(row=row_idx, column=3).value  # Amount (C)
+            qty = ws.cell(row=row_idx, column=4).value      # Qty (D)
+            val = ws.cell(row=row_idx, column=total_col).value
+            assert isinstance(val, (int, float))
+            assert val == amount * qty
+        wb.close()
 
 
 # ---------------------------------------------------------------------------
@@ -555,10 +566,20 @@ class TestComputedColumnOnPivotedData:
             column_type="formula",
         )
 
-        df = pd.read_excel(fp, sheet_name="PivotCalc")
-        assert "AvgPrice" in df.columns
-        for _, row in df.iterrows():
-            assert abs(row["AvgPrice"] - row["Amount"] / row["Qty"]) < 0.01
+        # Verify numeric values written via openpyxl (formula mode now writes computed values)
+        from openpyxl import load_workbook as lw
+
+        wb = lw(fp)
+        ws = wb["PivotCalc"]
+        # PivotCalc cols: Region(A=1), Amount(B=2), Qty(C=3), AvgPrice(D=4)
+        avgprice_col = ws.max_column
+        for row_idx in range(2, ws.max_row + 1):
+            amount = ws.cell(row=row_idx, column=2).value  # Amount
+            qty = ws.cell(row=row_idx, column=3).value      # Qty
+            val = ws.cell(row=row_idx, column=avgprice_col).value
+            assert isinstance(val, (int, float))
+            assert abs(val - amount / qty) < 1e-9
+        wb.close()
 
 
 # ---------------------------------------------------------------------------

@@ -65,13 +65,15 @@ def test_merge_datasets(tmp_path: Path) -> None:
 
 def test_add_computed_column(tmp_path: Path) -> None:
     path = _make_two_sheet_workbook(tmp_path)
-    add_computed_column(path, "Orders", "DoubleQty", "Qty * 2")
+    result = add_computed_column(path, "Orders", "DoubleQty", "Qty * 2")
     from mcp_server.tools.cell_ops import read_cell
 
     cell = read_cell(path, "Orders", "D1")
     assert cell["value"] == "DoubleQty"
     cell_val = read_cell(path, "Orders", "D2")
-    assert cell_val["value"] == 20  # 10 * 2
+    # formula mode now writes computed numeric values (not formula strings)
+    assert cell_val["value"] == 20
+    assert "mode=formula" in str(result)
 
 
 def test_deduplicate_data(tmp_path: Path) -> None:
@@ -266,12 +268,16 @@ def test_add_computed_column_complex(tmp_path: Path) -> None:
     add_computed_column(path, "Sheet1", "Profit", "Revenue - Cost")
     # After first add: Product(A), Revenue(B), Cost(C), Profit(D)
     assert rc(path, "Sheet1", "D1")["value"] == "Profit"
-    assert rc(path, "Sheet1", "D2")["value"] == pytest.approx(400.0)  # 1000-600
+    # formula mode now writes computed numeric values (not formula strings)
+    d2 = rc(path, "Sheet1", "D2")["value"]
+    assert d2 == 400
 
     add_computed_column(path, "Sheet1", "Margin", "(Revenue - Cost) / Revenue * 100")
     # After second add: …, Profit(D), Margin(E)
     assert rc(path, "Sheet1", "E1")["value"] == "Margin"
-    assert rc(path, "Sheet1", "E2")["value"] == pytest.approx(40.0)  # (1000-600)/1000*100
+    e2 = rc(path, "Sheet1", "E2")["value"]
+    import pytest as _pytest
+    assert e2 == _pytest.approx(40.0)
 
 
 def test_add_computed_column_division(tmp_path: Path) -> None:
@@ -282,7 +288,10 @@ def test_add_computed_column_division(tmp_path: Path) -> None:
     add_computed_column(path, "Sheet1", "CostRatio", "Cost / Revenue")
     # Product(A), Revenue(B), Cost(C), CostRatio(D)
     assert rc(path, "Sheet1", "D1")["value"] == "CostRatio"
-    assert rc(path, "Sheet1", "D2")["value"] == pytest.approx(0.6)  # 600/1000
+    # formula mode now writes computed numeric values (not formula strings)
+    d2 = rc(path, "Sheet1", "D2")["value"]
+    import pytest as _pytest
+    assert d2 == _pytest.approx(0.6)
 
 
 def test_deduplicate_data_keep_last(tmp_path: Path) -> None:

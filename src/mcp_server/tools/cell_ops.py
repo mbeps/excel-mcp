@@ -15,6 +15,7 @@ from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
     save_workbook_safe,
+    validate_excel_range,
     validate_file_path,
 )
 from mcp_server.utils.logger import configure_logging
@@ -247,6 +248,15 @@ def write_range(file_path: str, sheet_name: str, start_cell: str, data: list[lis
     Remarks:
         - Mutates workbook via openpyxl; calls ``save_workbook_safe()``.
     """
+    if data:
+        expected_cols = len(data[0])
+        for row_index, row_data in enumerate(data, start=1):
+            if len(row_data) != expected_cols:
+                raise ValueError(
+                    "Range data must be rectangular; "
+                    f"row 1 has {expected_cols} columns but row {row_index} has {len(row_data)}."
+                )
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -284,6 +294,10 @@ def clear_range(file_path: str, sheet_name: str, start_cell: str, end_cell: str)
     Remarks:
         - Mutates workbook and saves changes.
     """
+    validation = validate_excel_range(f"{start_cell}:{end_cell}")
+    if not validation["valid"]:
+        raise ValueError(str(validation.get("message", "Invalid cell range.")))
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -724,8 +738,8 @@ def find_replace(
                 if val is None:
                     continue
                 is_formula = isinstance(val, str) and val.startswith("=")
-                if is_formula and not search_formulas:
-                    continue
+                if not search_formulas and is_formula:
+                    continue  # skip formula cells when not searching formulas
                 content = str(val)
 
                 if regex:
