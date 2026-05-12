@@ -206,3 +206,24 @@ def test_multiple_rules_coexist(tmp_path: Path) -> None:
     rules = list(ws.conditional_formatting)
     assert len(rules) == 3
     wb.close()
+
+# ── list_conditional_formatting ────────────────────────────────────
+
+
+def test_list_conditional_formatting(tmp_path: Path) -> None:
+    """List CF rules and verify the returned structures."""
+    from mcp_server.tools.conditional_formatting import list_conditional_formatting
+    fp = _make_numeric_file(tmp_path)
+    
+    # Add some rules
+    add_highlight_rule(fp, "Sheet1", "A1:A5", "greaterThan", "50")
+    apply_conditional_formatting(fp, "Sheet1", "A6:A11", "color_scale")
+    
+    rules = list_conditional_formatting(fp, "Sheet1")
+    assert len(rules) >= 2
+    
+    # Check structure
+    rule_types = [r["type"] for r in rules]
+    # openpyxl might use 'cellIs' for highlight rules
+    assert any(t in rule_types for t in ["cellIs", "expression", "colorScale"])
+    assert any("range" in r for r in rules)
