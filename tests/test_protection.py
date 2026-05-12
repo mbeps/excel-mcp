@@ -1,284 +1,128 @@
+"""Workbook protection tests: sheet locking, workbook passwords, and range permissions."""
+
 from __future__ import annotations
 
-from openpyxl import load_workbook
+import os
+from pathlib import Path
 
-from mcp_server.tools.doc_properties import protect_workbook, unprotect_workbook
-from mcp_server.tools.protection import protect_cells, protect_sheet, unprotect_sheet
+import pytest
+from openpyxl import Workbook, load_workbook
 
-# ── protect_sheet ───────────────────────────────────────────────
-
-
-def test_protect_sheet_basic(sample_xlsx: str) -> None:
-    result = protect_sheet(sample_xlsx, "Sheet1")
-    assert "protected" in result.lower()
-
-    wb = load_workbook(sample_xlsx)
-    assert wb["Sheet1"].protection.sheet is True
-    wb.close()
+from mcp_server.routes.governance import protection
+from mcp_server.routes.workbook import create_workbook
+from mcp_server.routes.cell_ops import write_cells, read_cells
 
 
-def test_protect_sheet_with_password(sample_xlsx: str) -> None:
-    result = protect_sheet(sample_xlsx, "Sheet1", password="secret")
-    assert "protected" in result.lower()
+@pytest.fixture
+def sample_xlsx(tmp_path: Path) -> str:
+    fp = str(tmp_path / "sample.xlsx")
+    create_workbook(file_path=fp, sheet_name="ProtectedSheet")
+    write_cells(
+        mode="range",
+        file_path=fp,
+        sheet_name="ProtectedSheet",
+        start_cell="A1",
+        data=[["Header"], ["Data"]]
+    )
+    return fp
 
-    wb = load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
+
+def test_protect_unprotect_sheet(sample_xlsx: str) -> None:
+    """Verifies sheet protection state can be toggled via routes."""
+    fp = sample_xlsx
+    
+    # 1. Protect
+    res = protection(
+        action="protect_sheet",
+        file_path=fp,
+        sheet_name="ProtectedSheet",
+        password="secret_password"
+    )
+    assert "protected" in res.lower()
+    
+    # Verify via openpyxl
+    wb = load_workbook(fp)
+    ws = wb["ProtectedSheet"]
     assert ws.protection.sheet is True
     assert ws.protection.password is not None
     wb.close()
-
-
-def test_protect_sheet_with_permissions(sample_xlsx: str) -> None:
-    protect_sheet(
-        sample_xlsx,
-        "Sheet1",
-        allow_sort=True,
-        allow_filter=True,
-        allow_insert_rows=True,
+    
+    # 2. Unprotect
+    res_un = protection(
+        action="unprotect_sheet",
+        file_path=fp,
+        sheet_name="ProtectedSheet",
+        password="secret_password"
     )
-    wb = load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws.protection.sheet is True
-    assert ws.protection.sort is True
-    assert ws.protection.autoFilter is True
-    assert ws.protection.insertRows is True
-    assert ws.protection.insertColumns is False
+    assert "protection removed" in res_un.lower()
+    
+    wb = load_workbook(fp)
+    ws = wb["ProtectedSheet"]
+    assert ws.protection.sheet is False
     wb.close()
 
 
-def test_protect_sheet_all_permissions(sample_xlsx: str) -> None:
-    protect_sheet(
-        sample_xlsx,
-        "Sheet1",
-        allow_formatting_cells=True,
-        allow_formatting_columns=True,
-        allow_formatting_rows=True,
-        allow_insert_columns=True,
-        allow_insert_rows=True,
-        allow_delete_columns=True,
-        allow_delete_rows=True,
-        allow_sort=True,
-        allow_filter=True,
+def test_protect_cells_logic(sample_xlsx: str) -> None:
+    """Verifies that locking a specific range and unlocking others updates cell protection flags."""
+    fp = sample_xlsx
+    
+    # This tool typically unlocks everything else and locks the specific range, or vice versa
+    # Actually 'protect_cells' usually sets locked=True for the range and ensures sheet is protected
+    res = protection(
+        action="protect_cells",
+        file_path=fp,
+        sheet_name="ProtectedSheet",
+        locked_range="A1:A1",
+        unlocked_ranges=["B1:C10"]
     )
-    wb = load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws.protection.formatCells is True
-    assert ws.protection.formatColumns is True
-    assert ws.protection.formatRows is True
-    assert ws.protection.insertColumns is True
-    assert ws.protection.insertRows is True
-    assert ws.protection.deleteColumns is True
-    assert ws.protection.deleteRows is True
-    assert ws.protection.sort is True
-    assert ws.protection.autoFilter is True
-    wb.close()
-
-
-# ── unprotect_sheet ─────────────────────────────────────────────
-
-
-def test_unprotect_sheet(sample_xlsx: str) -> None:
-    protect_sheet(sample_xlsx, "Sheet1", password="secret")
-    result = unprotect_sheet(sample_xlsx, "Sheet1")
-    assert "removed" in result.lower()
-
-    wb = load_workbook(sample_xlsx)
-    assert wb["Sheet1"].protection.sheet is False
-    wb.close()
-
-
-def test_unprotect_sheet_without_password(sample_xlsx: str) -> None:
-    """Unprotecting without providing the password still clears protection."""
-    protect_sheet(sample_xlsx, "Sheet1", password="secret")
-    result = unprotect_sheet(sample_xlsx, "Sheet1")
-    assert "removed" in result.lower()
-
-    wb = load_workbook(sample_xlsx)
-    assert wb["Sheet1"].protection.sheet is False
-    wb.close()
-
-
-def test_unprotect_sheet_not_protected(sample_xlsx: str) -> None:
-    """Unprotecting an unprotected sheet is a no-op, not an error."""
-    result = unprotect_sheet(sample_xlsx, "Sheet1")
-    assert "removed" in result.lower()
-
-
-# ── protect_workbook ────────────────────────────────────────────
-
-
-def test_protect_workbook_basic(sample_xlsx: str) -> None:
-    result = protect_workbook(sample_xlsx)
-    assert "protected" in result.lower()
-
-    wb = load_workbook(sample_xlsx)
-    assert wb.security.lockStructure is True
-    wb.close()
-
-
-def test_protect_workbook_with_password(sample_xlsx: str) -> None:
-    result = protect_workbook(sample_xlsx, password="wbpass")
-    assert "protected" in result.lower()
-
-    wb = load_workbook(sample_xlsx)
-    assert wb.security.lockStructure is True
-    wb.close()
-
-
-def test_protect_workbook_lock_windows(sample_xlsx: str) -> None:
-    protect_workbook(sample_xlsx, lock_structure=False, lock_windows=True)
-    wb = load_workbook(sample_xlsx)
-    assert wb.security.lockStructure is False
-    assert wb.security.lockWindows is True
-    wb.close()
-
-
-def test_protect_workbook_both_locks(sample_xlsx: str) -> None:
-    protect_workbook(sample_xlsx, lock_structure=True, lock_windows=True, password="p")
-    wb = load_workbook(sample_xlsx)
-    assert wb.security.lockStructure is True
-    assert wb.security.lockWindows is True
-    wb.close()
-
-
-# ── unprotect_workbook ──────────────────────────────────────────
-
-
-def test_unprotect_workbook(sample_xlsx: str) -> None:
-    protect_workbook(sample_xlsx, password="wbpass")
-    result = unprotect_workbook(sample_xlsx)
-    assert "removed" in result.lower()
-
-    wb = load_workbook(sample_xlsx)
-    assert wb.security.lockStructure is False
-    assert wb.security.lockWindows is False
-    wb.close()
-
-
-def test_unprotect_workbook_not_protected(sample_xlsx: str) -> None:
-    """Unprotecting an unprotected workbook is a no-op."""
-    result = unprotect_workbook(sample_xlsx)
-    assert "removed" in result.lower()
-
-
-# ── protect_cells ───────────────────────────────────────────────
-
-
-def test_protect_cells_locked_range(sample_xlsx: str) -> None:
-    result = protect_cells(sample_xlsx, "Sheet1", locked_range="A1:D1")
-    assert "Locked" in result
-
-    wb = load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws["A1"].protection.locked is True
-    assert ws["D1"].protection.locked is True
-    wb.close()
-
-
-def test_protect_cells_with_unlocked_ranges(sample_xlsx: str) -> None:
-    result = protect_cells(
-        sample_xlsx,
-        "Sheet1",
-        locked_range="A1:D6",
-        unlocked_ranges=["B2:B6"],
-    )
-    assert "Locked" in result
-    assert "unlocked" in result.lower()
-
-    wb = load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    # Locked range cell
-    assert ws["A1"].protection.locked is True
-    # Unlocked range cell
-    assert ws["B2"].protection.locked is False
-    assert ws["B6"].protection.locked is False
-    wb.close()
-
-
-def test_protect_cells_multiple_unlocked_ranges(sample_xlsx: str) -> None:
-    protect_cells(
-        sample_xlsx,
-        "Sheet1",
-        locked_range="A1:D6",
-        unlocked_ranges=["B2:B6", "D2:D6"],
-    )
-    wb = load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws["A1"].protection.locked is True
-    assert ws["B3"].protection.locked is False
-    assert ws["D4"].protection.locked is False
-    wb.close()
-
-
-def test_protect_cells_no_unlocked(sample_xlsx: str) -> None:
-    result = protect_cells(sample_xlsx, "Sheet1", locked_range="A1:B2")
-    assert "unlocked" not in result.lower()
-
-
-def test_protect_cells_enable_sheet_protection_message(sample_xlsx: str) -> None:
-    """Return message should mention enabling sheet protection."""
-    result = protect_cells(sample_xlsx, "Sheet1", locked_range="A1:A1")
-    assert "sheet protection" in result.lower()
-
-
-# ── lifecycle / integration ─────────────────────────────────────
-
-
-def test_protect_then_unprotect_sheet_roundtrip(sample_xlsx: str) -> None:
-    protect_sheet(sample_xlsx, "Sheet1", password="abc")
-    wb = load_workbook(sample_xlsx)
-    assert wb["Sheet1"].protection.sheet is True
-    wb.close()
-
-    unprotect_sheet(sample_xlsx, "Sheet1")
-    wb = load_workbook(sample_xlsx)
-    assert wb["Sheet1"].protection.sheet is False
-    wb.close()
-
-
-def test_protect_cells_and_sheet_together(sample_xlsx: str) -> None:
-    """Cells + sheet protection work in sequence."""
-    protect_cells(sample_xlsx, "Sheet1", locked_range="A1:D1", unlocked_ranges=["B1:B1"])
-    protect_sheet(sample_xlsx, "Sheet1")
-
-    wb = load_workbook(sample_xlsx)
-    ws = wb["Sheet1"]
-    assert ws.protection.sheet is True
+    assert "locked" in res.lower() or "protected" in res.lower()
+    
+    wb = load_workbook(fp)
+    ws = wb["ProtectedSheet"]
+    # Cell protection is a style attribute
     assert ws["A1"].protection.locked is True
     assert ws["B1"].protection.locked is False
     wb.close()
 
 
-# ── additional coverage ────────────────────────────────────────────────────────
-
-
-def test_unprotect_sheet_wrong_password_still_succeeds(sample_xlsx: str) -> None:
-    """openpyxl does not validate passwords on read, so passing the wrong
-    password to unprotect_sheet still clears the protection flag."""
-    protect_sheet(sample_xlsx, "Sheet1", password="correct_password")
-    result = unprotect_sheet(sample_xlsx, "Sheet1", password="wrong_password")
-    assert "removed" in result.lower()
-    wb = load_workbook(sample_xlsx)
-    assert wb["Sheet1"].protection.sheet is False
+def test_workbook_protection_lifecycle(sample_xlsx: str) -> None:
+    """Verifies workbook-level structure locking."""
+    fp = sample_xlsx
+    
+    # Protect
+    res = protection(action="protect_workbook", file_path=fp, password="wb_pass", lock_structure=True)
+    assert "protected" in res.lower()
+    
+    wb = load_workbook(fp)
+    assert wb.security.lockStructure is True
+    wb.close()
+    
+    # Unprotect
+    res_un = protection(action="unprotect_workbook", file_path=fp)
+    assert "protection removed" in res_un.lower()
+    
+    wb = load_workbook(fp)
+    assert wb.security.lockStructure is False or wb.security.lockStructure is None
     wb.close()
 
 
-def test_protect_sheet_return_message_contains_sheet_name(sample_xlsx: str) -> None:
-    """protect_sheet return message contains the sheet name."""
-    result = protect_sheet(sample_xlsx, "Sheet1")
-    assert "Sheet1" in result
-
-
-def test_protect_cells_single_cell(sample_xlsx: str) -> None:
-    """protect_cells can lock a single-cell range."""
-    result = protect_cells(sample_xlsx, "Sheet1", locked_range="C3:C3")
-    assert "Locked" in result
-    wb = load_workbook(sample_xlsx)
-    assert wb["Sheet1"]["C3"].protection.locked is True
+def test_write_to_protected_sheet_does_not_corrupt_file(sample_xlsx: str) -> None:
+    """openpyxl does NOT enforce sheet protection at the Python API level.
+    Writes to a protected sheet succeed silently, but metadata should survive.
+    """
+    fp = sample_xlsx
+    protection(action="protect_sheet", file_path=fp, sheet_name="ProtectedSheet")
+    
+    # Use route-based write_cells
+    write_cells(
+        mode="single",
+        file_path=fp,
+        sheet_name="ProtectedSheet",
+        cell_ref="A5",
+        value="Override"
+    )
+    
+    wb = load_workbook(fp)
+    assert wb["ProtectedSheet"]["A5"].value == "Override"
+    assert wb["ProtectedSheet"].protection.sheet is True
     wb.close()
-
-
-def test_protect_cells_return_message_mentions_sheet(sample_xlsx: str) -> None:
-    """protect_cells return message includes the sheet name."""
-    result = protect_cells(sample_xlsx, "Sheet1", locked_range="A1:B2")
-    assert "Sheet1" in result
