@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from logging import Logger
 
@@ -13,7 +12,10 @@ from openpyxl.utils import get_column_letter
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
     get_sheet,
+    load_hidden_json,
     load_workbook_safe,
+    read_sheet_df,
+    save_hidden_json,
     save_workbook_safe,
     validate_file_path,
 )
@@ -24,31 +26,15 @@ logger: Logger = configure_logging(__name__)
 
 _PIVOTS_SHEET = "_mcp_pivots"
 
-VALID_KEEP = {"first", "last", False}
-
 
 def _load_pivots(wb: Workbook) -> dict:
     """Load pivot definitions from the hidden pivots sheet."""
-    if _PIVOTS_SHEET not in wb.sheetnames:
-        return {}
-    ws = wb[_PIVOTS_SHEET]
-    raw = ws["A1"].value
-    if not raw:
-        return {}
-    try:
-        return json.loads(str(raw))  # type: ignore[no-any-return]
-    except (json.JSONDecodeError, TypeError):
-        return {}
+    return load_hidden_json(wb, _PIVOTS_SHEET)
 
 
 def _save_pivots(wb: Workbook, pivots: dict) -> None:
     """Save pivot definitions dict to hidden sheet."""
-    if _PIVOTS_SHEET in wb.sheetnames:
-        ws = wb[_PIVOTS_SHEET]
-    else:
-        ws = wb.create_sheet(_PIVOTS_SHEET)
-        ws.sheet_state = "hidden"
-    ws["A1"] = json.dumps(pivots)
+    save_hidden_json(wb, _PIVOTS_SHEET, pivots)
 
 
 def _try_build_excel_formula(
@@ -74,12 +60,6 @@ def _try_build_excel_formula(
             formula = re.sub(r"\b" + re.escape(col_name) + r"\b", cell_ref, formula)
             found_any = True
     return f"={formula}" if found_any else None
-
-
-def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
-    from mcp_server.utils.excel_helpers import read_sheet_df
-
-    return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
 
 def _write_df_to_sheet(wb: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
@@ -110,7 +90,7 @@ def create_pivot_table(
     date_freq: str | None = None,
 ) -> dict[str, list[dict[str, CellScalar]] | list[str] | str | dict | None]:
     """Create a static pivot table using pandas and write to a sheet or file."""
-    df = _read_sheet_df(file_path, sheet_name)
+    df = read_sheet_df(file_path, sheet_name)
 
     all_required_cols = index_cols + value_cols + ([column_field] if column_field else [])
     for col in all_required_cols:
@@ -238,7 +218,7 @@ def unpivot_data(
     value_name: str = "Value",
 ) -> dict[str, list[dict[str, CellScalar]] | int]:
     """Unpivot (melt) data from wide to long format."""
-    df = _read_sheet_df(file_path, sheet_name)
+    df = read_sheet_df(file_path, sheet_name)
 
     for col in id_vars + value_vars:
         if col not in df.columns:
@@ -274,8 +254,8 @@ def merge_datasets(
     if join_key is None and left_on is None:
         raise ValueError("Either 'join_key' or both 'left_on'/'right_on' must be provided.")
 
-    df1 = _read_sheet_df(file_path, sheet1)
-    df2 = _read_sheet_df(file_path, sheet2)
+    df1 = read_sheet_df(file_path, sheet1)
+    df2 = read_sheet_df(file_path, sheet2)
 
     if left_on is not None and right_on is not None:
         lkeys = [left_on] if isinstance(left_on, str) else left_on
@@ -303,9 +283,12 @@ def merge_datasets(
 
     if output_sheet:
         wb = load_workbook_safe(file_path)
-        _write_df_to_sheet(wb, output_sheet, merged)
-        save_workbook_safe(wb, file_path)
-        logger.info("Merged result written to sheet '%s'", output_sheet)
+        try:
+            _write_df_to_sheet(wb, output_sheet, merged)
+            save_workbook_safe(wb, file_path)
+            logger.info("Merged result written to sheet '%s'", output_sheet)
+        finally:
+            wb.close()
 
     return {
         "data": merged.to_dict(orient="records"),
@@ -332,7 +315,7 @@ def add_computed_column(
     if column_type == "cumsum":
         if source_col is None:
             raise ValueError("source_col is required when column_type='cumsum'")
-        df = _read_sheet_df(file_path, sheet_name, has_header)
+        df = read_sheet_df(file_path, sheet_name, header_row=has_header)
         if source_col not in df.columns:
             raise ValueError(f"source_col '{source_col}' not found. Available: {list(df.columns)}")
         df[new_column_name] = df[source_col].cumsum()
@@ -371,7 +354,7 @@ def add_computed_column(
             raise ValueError("window is required for column_type='rolling'.")
         if rolling_func not in ("mean", "sum"):
             raise ValueError("rolling_func must be 'mean' or 'sum'.")
-        df = _read_sheet_df(file_path, sheet_name, has_header)
+        df = read_sheet_df(file_path, sheet_name, header_row=has_header)
         if source_col not in df.columns:
             raise ValueError(f"source_col '{source_col}' not found in sheet columns.")
 
@@ -398,7 +381,7 @@ def add_computed_column(
         return f"Added rolling {rolling_func} column '{new_column_name}' (window={window}) from source column '{source_col}' to sheet '{sheet_name}'."
 
     # column_type == "formula" (default path)
-    df = _read_sheet_df(file_path, sheet_name, has_header)
+    df = read_sheet_df(file_path, sheet_name, header_row=has_header)
     validate_expression(expression)
 
     # Build column-to-letter map from original columns before adding the new one
@@ -444,7 +427,7 @@ def deduplicate_data(
     if keep not in ("first", "last", False):
         raise ValueError(f"Invalid keep value '{keep}'. Allowed: 'first', 'last', or False.")
 
-    df = _read_sheet_df(file_path, sheet_name)
+    df = read_sheet_df(file_path, sheet_name)
 
     if columns:
         for c in columns:
@@ -456,17 +439,20 @@ def deduplicate_data(
     removed = original_count - len(df)
 
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
+    try:
+        ws = get_sheet(wb, sheet_name)
 
-    # Clear existing data below header
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
-        for cell in row:
-            cell.value = None
+        # Clear existing data below header
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
+            for cell in row:
+                cell.value = None
 
-    for r_idx, row_data in enumerate(df.values.tolist(), start=2):
-        for c_idx, val in enumerate(row_data, start=1):
-            ws.cell(row=r_idx, column=c_idx, value=val)
+        for r_idx, row_data in enumerate(df.values.tolist(), start=2):
+            for c_idx, val in enumerate(row_data, start=1):
+                ws.cell(row=r_idx, column=c_idx, value=val)
 
-    save_workbook_safe(wb, file_path)
-    logger.info("Removed %d duplicates from %s!%s", removed, sheet_name, file_path)
-    return f"Removed {removed} duplicate row(s) from '{sheet_name}'. {len(df)} rows remain."
+        save_workbook_safe(wb, file_path)
+        logger.info("Removed %d duplicates from %s!%s", removed, sheet_name, file_path)
+        return f"Removed {removed} duplicate row(s) from '{sheet_name}'. {len(df)} rows remain."
+    finally:
+        wb.close()

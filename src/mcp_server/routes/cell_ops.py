@@ -6,7 +6,7 @@ from typing import Any, Literal
 from mcp.types import ToolAnnotations
 
 import mcp_server.tools.cell_ops as _cell_ops
-from mcp_server.models.pivot_etl import ChunkReadResult
+from mcp_server.models.cell_ops import ChunkReadResult
 
 __all__ = [
     "read_cells",

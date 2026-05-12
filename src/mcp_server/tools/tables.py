@@ -29,22 +29,25 @@ def create_table(
 ) -> str:
     """Create a native Excel table (ListObject)."""
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
+    try:
+        ws = get_sheet(wb, sheet_name)
 
-    style = TableStyleInfo(
-        name=style_name,
-        showFirstColumn=False,
-        showLastColumn=False,
-        showRowStripes=True,
-        showColumnStripes=False,
-    )
-    table = Table(displayName=table_name, ref=data_range)
-    table.tableStyleInfo = style
-    ws.add_table(table)
+        style = TableStyleInfo(
+            name=style_name,
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        table = Table(displayName=table_name, ref=data_range)
+        table.tableStyleInfo = style
+        ws.add_table(table)
 
-    save_workbook_safe(wb, file_path)
-    logger.info("Created table '%s' at %s in %s", table_name, data_range, file_path)
-    return f"Created table '{table_name}' at '{data_range}' on sheet '{sheet_name}'."
+        save_workbook_safe(wb, file_path)
+        logger.info("Created table '%s' at %s in %s", table_name, data_range, file_path)
+        return f"Created table '{table_name}' at '{data_range}' on sheet '{sheet_name}'."
+    finally:
+        wb.close()
 
 
 def list_tables(file_path: str, sheet_name: str) -> list[TableInfo]:
@@ -67,14 +70,17 @@ def list_tables(file_path: str, sheet_name: str) -> list[TableInfo]:
 def resize_table(file_path: str, sheet_name: str, table_name: str, new_range: str) -> str:
     """Change the cell reference range of a table."""
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
-    if table_name not in ws.tables:
-        raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
-    old_ref = ws.tables[table_name].ref
-    ws.tables[table_name].ref = new_range
-    save_workbook_safe(wb, file_path)
-    logger.info("Resized table '%s' from %s to %s in %s", table_name, old_ref, new_range, file_path)
-    return f"Resized table '{table_name}' from '{old_ref}' to '{new_range}' on sheet '{sheet_name}'."
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if table_name not in ws.tables:
+            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+        old_ref = ws.tables[table_name].ref
+        ws.tables[table_name].ref = new_range
+        save_workbook_safe(wb, file_path)
+        logger.info("Resized table '%s' from %s to %s in %s", table_name, old_ref, new_range, file_path)
+        return f"Resized table '{table_name}' from '{old_ref}' to '{new_range}' on sheet '{sheet_name}'."
+    finally:
+        wb.close()
 
 
 def set_table_totals_row(
@@ -100,47 +106,50 @@ def set_table_totals_row(
     }
 
     wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
-    if table_name not in ws.tables:
-        raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
-    table = ws.tables[table_name]
+    try:
+        ws = get_sheet(wb, sheet_name)
+        if table_name not in ws.tables:
+            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+        table = ws.tables[table_name]
 
-    min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+        min_col, min_row, max_col, max_row = range_boundaries(table.ref)
 
-    if show_totals:
-        # Only extend ref if table doesn't already have a totals row
-        if not table.totalsRowCount:
-            totals_row = max_row + 1
-            table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{totals_row}"
+        if show_totals:
+            # Only extend ref if table doesn't already have a totals row
+            if not table.totalsRowCount:
+                totals_row = max_row + 1
+                table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{totals_row}"
+            else:
+                totals_row = max_row  # ref already includes totals row
+
+            table.totalsRowCount = 1
+
+            if column_totals and table.tableColumns:
+                for col_idx, col in enumerate(table.tableColumns, start=min_col):
+                    if col.name in column_totals:
+                        func = column_totals[col.name]
+                        col.totalsRowFunction = func
+                        subtotal_id = _SUBTOTAL_IDS.get(func)
+                        if subtotal_id is not None:
+                            cell = ws.cell(row=totals_row, column=col_idx)
+                            cell.value = f"=SUBTOTAL({subtotal_id},[{col.name}])"
         else:
-            totals_row = max_row  # ref already includes totals row
+            # Disable totals
+            if table.totalsRowCount:
+                # Clear cells in the totals row and shrink ref
+                for c in range(min_col, max_col + 1):
+                    ws.cell(row=max_row, column=c).value = None
+                table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row - 1}"
+                if table.tableColumns:
+                    for col in table.tableColumns:
+                        col.totalsRowFunction = None
+            table.totalsRowCount = None
 
-        table.totalsRowCount = 1
-
-        if column_totals and table.tableColumns:
-            for col_idx, col in enumerate(table.tableColumns, start=min_col):
-                if col.name in column_totals:
-                    func = column_totals[col.name]
-                    col.totalsRowFunction = func
-                    subtotal_id = _SUBTOTAL_IDS.get(func)
-                    if subtotal_id is not None:
-                        cell = ws.cell(row=totals_row, column=col_idx)
-                        cell.value = f"=SUBTOTAL({subtotal_id},[{col.name}])"
-    else:
-        # Disable totals
-        if table.totalsRowCount:
-            # Clear cells in the totals row and shrink ref
-            for c in range(min_col, max_col + 1):
-                ws.cell(row=max_row, column=c).value = None
-            table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row - 1}"
-            if table.tableColumns:
-                for col in table.tableColumns:
-                    col.totalsRowFunction = None
-        table.totalsRowCount = None
-
-    save_workbook_safe(wb, file_path)
-    logger.info("Set totals row for table '%s': show=%s", table_name, show_totals)
-    return f"Totals row {'enabled' if show_totals else 'disabled'} for table '{table_name}'."
+        save_workbook_safe(wb, file_path)
+        logger.info("Set totals row for table '%s': show=%s", table_name, show_totals)
+        return f"Totals row {'enabled' if show_totals else 'disabled'} for table '{table_name}'."
+    finally:
+        wb.close()
 
 
 def get_table_data(

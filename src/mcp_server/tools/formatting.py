@@ -8,7 +8,9 @@ The helpers here perform in-place mutations of workbooks and persist changes usi
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterator
 from logging import Logger
+from typing import Any
 
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -102,6 +104,15 @@ logger: Logger = configure_logging(__name__)
 _NAMED_STYLE_LOOKUP: dict[str, str] = {s.lower(): s for s in _VALID_NAMED_STYLES}
 
 
+def _iter_range_cells(ws: Any, range_str: str) -> Iterator[Any]:
+    """Yield every cell in a worksheet range, handling both single-cell and multi-row ranges."""
+    range_data = ws[range_str]
+    if not isinstance(range_data, tuple):
+        range_data = ((range_data,),)
+    for row in range_data:
+        yield from (row if isinstance(row, tuple) else (row,))
+
+
 def format_cells(
     file_path: str,
     sheet_name: str,
@@ -193,47 +204,42 @@ def format_cells(
             side = Side(style=border_style, color=border_color)
             border = Border(left=side, right=side, top=side, bottom=side)
 
-        range_data = ws[cell_range]
-        if not isinstance(range_data, tuple):
-            range_data = ((range_data,),)
-        for row in range_data:
-            cells = row if isinstance(row, tuple) else (row,)
-            for cell in cells:
-                if preserve_existing:
-                    ef = cell.font
-                    cell.font = Font(
-                        name=font_name if font_name is not None else ef.name,
-                        bold=bold if bold is not None else ef.bold,
-                        italic=italic if italic is not None else ef.italic,
-                        size=font_size if font_size is not None else ef.size,
-                        color=font_color if font_color is not None else ef.color,
-                        underline=underline if underline is not None else ef.underline,
-                        strike=strikethrough if strikethrough is not None else ef.strike,
-                    )
-                    if bg_color:
-                        cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
-                    ea = cell.alignment
-                    cell.alignment = Alignment(
-                        horizontal=horizontal_alignment if horizontal_alignment is not None else ea.horizontal,
-                        vertical=vertical_alignment if vertical_alignment is not None else ea.vertical,
-                        wrap_text=wrap_text if wrap_text is not None else ea.wrap_text,
-                        textRotation=text_rotation if text_rotation is not None else (ea.textRotation or 0),
-                        indent=indent if indent is not None else (ea.indent or 0),
-                        shrinkToFit=shrink_to_fit if shrink_to_fit is not None else ea.shrinkToFit,
-                    )
-                    if border:
-                        cell.border = border
-                    if number_format:
-                        cell.number_format = number_format
-                else:
-                    cell.font = font
-                    if fill:
-                        cell.fill = fill
-                    cell.alignment = alignment
-                    if border:
-                        cell.border = border
-                    if number_format:
-                        cell.number_format = number_format
+        for cell in _iter_range_cells(ws, cell_range):
+            if preserve_existing:
+                ef = cell.font
+                cell.font = Font(
+                    name=font_name if font_name is not None else ef.name,
+                    bold=bold if bold is not None else ef.bold,
+                    italic=italic if italic is not None else ef.italic,
+                    size=font_size if font_size is not None else ef.size,
+                    color=font_color if font_color is not None else ef.color,
+                    underline=underline if underline is not None else ef.underline,
+                    strike=strikethrough if strikethrough is not None else ef.strike,
+                )
+                if bg_color:
+                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+                ea = cell.alignment
+                cell.alignment = Alignment(
+                    horizontal=horizontal_alignment if horizontal_alignment is not None else ea.horizontal,
+                    vertical=vertical_alignment if vertical_alignment is not None else ea.vertical,
+                    wrap_text=wrap_text if wrap_text is not None else ea.wrap_text,
+                    textRotation=text_rotation if text_rotation is not None else (ea.textRotation or 0),
+                    indent=indent if indent is not None else (ea.indent or 0),
+                    shrinkToFit=shrink_to_fit if shrink_to_fit is not None else ea.shrinkToFit,
+                )
+                if border:
+                    cell.border = border
+                if number_format:
+                    cell.number_format = number_format
+            else:
+                cell.font = font
+                if fill:
+                    cell.fill = fill
+                cell.alignment = alignment
+                if border:
+                    cell.border = border
+                if number_format:
+                    cell.number_format = number_format
 
         save_workbook_safe(wb, file_path)
         logger.info("Formatted range %s in %s!%s", cell_range, file_path, sheet_name)
@@ -314,19 +320,14 @@ def copy_cell_format(
         src_alignment = copy.copy(src.alignment)
         src_number_format = src.number_format
 
-        range_data = ws[target_range]
-        if not isinstance(range_data, tuple):
-            range_data = ((range_data,),)
         count = 0
-        for row in range_data:
-            cells = row if isinstance(row, tuple) else (row,)
-            for cell in cells:
-                cell.font = copy.copy(src_font)
-                cell.fill = copy.copy(src_fill)
-                cell.border = copy.copy(src_border)
-                cell.alignment = copy.copy(src_alignment)
-                cell.number_format = src_number_format
-                count += 1
+        for cell in _iter_range_cells(ws, target_range):
+            cell.font = copy.copy(src_font)
+            cell.fill = copy.copy(src_fill)
+            cell.border = copy.copy(src_border)
+            cell.alignment = copy.copy(src_alignment)
+            cell.number_format = src_number_format
+            count += 1
 
         save_workbook_safe(wb, file_path)
         logger.info("copy_cell_format: %d cells formatted from %s to %s", count, source_cell, target_range)
@@ -363,19 +364,14 @@ def clear_cell_format(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        range_data = ws[range_str]
-        if not isinstance(range_data, tuple):
-            range_data = ((range_data,),)
         count = 0
-        for row in range_data:
-            cells = row if isinstance(row, tuple) else (row,)
-            for cell in cells:
-                cell.font = Font()
-                cell.fill = PatternFill()
-                cell.border = Border()
-                cell.alignment = Alignment()
-                cell.number_format = "General"
-                count += 1
+        for cell in _iter_range_cells(ws, range_str):
+            cell.font = Font()
+            cell.fill = PatternFill()
+            cell.border = Border()
+            cell.alignment = Alignment()
+            cell.number_format = "General"
+            count += 1
 
         save_workbook_safe(wb, file_path)
         logger.info("clear_cell_format: %d cells cleared in %s", count, range_str)

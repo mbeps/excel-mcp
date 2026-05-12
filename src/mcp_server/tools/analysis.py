@@ -17,6 +17,7 @@ from scipy import stats
 from mcp_server.models.analysis import ColumnStats
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
+    col_letter_to_index,
     get_sheet,
     load_workbook_safe,
     read_sheet_df,
@@ -29,25 +30,6 @@ logger: Logger = configure_logging(__name__)
 
 FILTER_OPERATORS = {"==", "!=", ">", "<", ">=", "<=", "contains", "startswith", "endswith"}
 AGGREGATE_OPERATIONS = {"sum", "mean", "count", "min", "max", "median", "std"}
-
-
-def _resolve_col(df: pd.DataFrame, col: str) -> str:
-    """Resolve a column letter (e.g. 'A') or header name to a DataFrame column name."""
-    if col in df.columns:
-        return col
-    if col.isalpha() and len(col) <= 3:
-        value = 0
-        for ch in col.upper():
-            value = value * 26 + (ord(ch) - ord("A") + 1)
-        idx = value - 1
-        all_cols = list(df.columns)
-        if 0 <= idx < len(all_cols):
-            return str(all_cols[idx])
-    raise ValueError(f"Column '{col}' not found. Available: {list(df.columns)}")
-
-
-def _read_sheet_df(file_path: str, sheet_name: str, has_header: bool = True) -> pd.DataFrame:
-    return read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
 
 def filter_data_advanced(
@@ -176,7 +158,7 @@ def sort_data(
         - This function mutates the workbook and uses ``load_workbook_safe()`` and ``save_workbook_safe()`` to persist changes.
         - Expect openpyxl I/O errors (or permission errors) on save; callers should handle or propagate.
     """
-    df = _read_sheet_df(file_path, sheet_name, has_header)
+    df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
     if sort_by:
         cols = [s["column"] for s in sort_by]
@@ -228,10 +210,17 @@ def column_statistics(file_path: str, sheet_name: str, column: str, has_header: 
     Remarks:
         - Uses pandas via ``read_sheet_df()``; no workbook mutation.
     """
-    df = _read_sheet_df(file_path, sheet_name, has_header)
-    column = _resolve_col(df, column)
+    df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
     if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
+        if column.isalpha() and len(column) <= 3:
+            idx = col_letter_to_index(column) - 1
+            all_cols = list(df.columns)
+            if 0 <= idx < len(all_cols):
+                column = str(all_cols[idx])
+            else:
+                raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
+        else:
+            raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
 
     col = df[column]
     if not pd.api.types.is_numeric_dtype(col):
@@ -293,7 +282,7 @@ def aggregate_data(
         - Pure data processing using pandas; does not mutate workbooks unless caller writes results separately.
     """
     group_cols = [group_by] if isinstance(group_by, str) else list(group_by)
-    df = _read_sheet_df(file_path, sheet_name, has_header)
+    df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
     for col_name in group_cols:
         if col_name not in df.columns:
             raise ValueError(f"Column '{col_name}' not found. Available: {list(df.columns)}")
@@ -340,7 +329,7 @@ def find_duplicates(
     Raises:
         ValueError: if any column is not found.
     """
-    df = _read_sheet_df(file_path, sheet_name, has_header)
+    df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
     for c in columns:
         if c not in df.columns:
             raise ValueError(f"Column '{c}' not found. Available: {list(df.columns)}")

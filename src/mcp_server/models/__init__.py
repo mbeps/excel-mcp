@@ -4,30 +4,17 @@ This module re-exports the most commonly used model types for easy imports elsew
 """
 
 from .analysis import (
-    AggregateResult,
     ColumnStats,
-    DuplicateResult,
     FilterResult,
-    ValidationResult,
 )
 from .cell_ops import (
     CellAlignmentInfo,
     CellStyleInfo,
-    CellValue,
-    RangeData,
+    ChunkReadResult,
 )
-from .charts import ChartConfig, ChartInfo
-from .cleaning import CsvPreview, DataProfile
+from .charts import ChartInfo
 from .comments import CommentInfo
 from .common import CellScalar
-from .financial import (
-    AmortizationPeriod,
-    BudgetVarianceItem,
-    BudgetVarianceSummary,
-    GoalSeekResult,
-    RatioEntry,
-)
-from .formatting import ConditionalFormatRule, FormatOptions, SortCriteria
 from .hyperlinks import HyperlinkInfo, HyperlinkReadResult
 from .multi_file import (
     MultiFileAggResult,
@@ -36,10 +23,9 @@ from .multi_file import (
     WorkbookDiff,
 )
 from .named_ranges import FormulaErrorInfo, FormulaInfo, NamedRangeInfo
-from .pivot_etl import ChunkReadResult, PivotResult
-from .scenarios import ScenarioChangeInfo, ScenarioInfo
+from .scenarios import ScenarioApplyResult, ScenarioChangeInfo, ScenarioInfo
 from .solver import SolverResult
-from .statistics import ColumnStatResult, RegressionResult
+from .statistics import RegressionResult
 from .tables import TableInfo, ValidationRuleInfo
 from .workbook import (
     SheetCreatedInfo,
@@ -60,23 +46,11 @@ __all__ = [
     "SheetCreatedInfo",
     "SheetDefinition",
     "ValidationRangeResult",
-    "CellValue",
-    "RangeData",
     "CellAlignmentInfo",
     "CellStyleInfo",
+    "ChunkReadResult",
     "FilterResult",
     "ColumnStats",
-    "AggregateResult",
-    "DuplicateResult",
-    "ValidationResult",
-    "CsvPreview",
-    "DataProfile",
-    "PivotResult",
-    "ChunkReadResult",
-    "FormatOptions",
-    "ConditionalFormatRule",
-    "SortCriteria",
-    "ChartConfig",
     "ChartInfo",
     "CommentInfo",
     "HyperlinkInfo",
@@ -86,15 +60,10 @@ __all__ = [
     "FormulaErrorInfo",
     "ScenarioInfo",
     "ScenarioChangeInfo",
+    "ScenarioApplyResult",
     "TableInfo",
     "ValidationRuleInfo",
-    "AmortizationPeriod",
-    "BudgetVarianceItem",
-    "BudgetVarianceSummary",
-    "RatioEntry",
-    "GoalSeekResult",
     "SolverResult",
-    "ColumnStatResult",
     "RegressionResult",
     "MultiFilePerFileResult",
     "MultiFileAggResult",

@@ -9,14 +9,17 @@ use in typical server environments.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
 import re
 from logging import Logger
 from pathlib import Path
+from typing import Any
 
 import openpyxl
 import pandas as pd
-from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.utils import column_index_from_string
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -36,27 +39,6 @@ Typical values:
     {'.xlsx', '.xls', '.csv', '.xlsm'}
 """
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".xlsm"}
-
-"""
-MAX_ROWS_DEFAULT (int): Default maximum number of rows used for read operations when
-no explicit limit is provided by the caller.
-
-Purpose:
-    Guard memory/CPU usage for convenience functions that may read large sheets.
-
-Typical value:
-    10000
-"""
-MAX_ROWS_DEFAULT = 10000
-
-"""
-MAX_ROWS_WRITE (int): Safety cap for write operations to prevent very large writes
-that may impact performance or memory.
-
-Typical value:
-    50000
-"""
-MAX_ROWS_WRITE = 50000
 
 
 def validate_file_path(file_path: str, must_exist: bool = True) -> Path:
@@ -184,20 +166,7 @@ def col_letter_to_index(letter: str) -> int:
     return int(column_index_from_string(letter))
 
 
-def index_to_col_letter(index: int) -> str:
-    """
-    Convert a 1-based column index to Excel column letters.
-
-    Args:
-        index (int): 1-based column index (1 -> 'A').
-
-    Returns:
-        str: Column letters for the provided index.
-    """
-    return str(get_column_letter(index))
-
-
-def read_sheet_df(file_path: str, sheet_name: str, header_row: int = 1) -> pd.DataFrame:
+def read_sheet_df(file_path: str, sheet_name: str, header_row: int | bool = 1) -> pd.DataFrame:
     """
     Read a worksheet into a pandas DataFrame, preferring the 'calamine' engine for speed
     and falling back to 'openpyxl' when needed.
@@ -310,3 +279,39 @@ def validate_excel_range(range_str: str) -> ValidationRangeResult:
         "end_cell": parts[1].upper(),
         "is_range": True,
     }
+
+
+def copy_cell_style(src_cell: Any, dest_cell: Any) -> None:
+    """Copy all style attributes from src_cell to dest_cell."""
+    dest_cell.font = copy.copy(src_cell.font)
+    dest_cell.fill = copy.copy(src_cell.fill)
+    dest_cell.border = copy.copy(src_cell.border)
+    dest_cell.alignment = copy.copy(src_cell.alignment)
+    dest_cell.number_format = src_cell.number_format
+
+
+def load_hidden_json(wb: Workbook, sheet_name: str) -> dict:
+    """Read and deserialise JSON stored in cell A1 of a hidden sheet.
+
+    Returns empty dict if the sheet doesn't exist or the cell is empty.
+    """
+    if sheet_name not in wb.sheetnames:
+        return {}
+    ws = wb[sheet_name]
+    raw = ws["A1"].value
+    if not raw:
+        return {}
+    try:
+        return json.loads(str(raw))  # type: ignore[no-any-return]
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def save_hidden_json(wb: Workbook, sheet_name: str, data: dict) -> None:
+    """Serialise data to JSON and write to cell A1 of a hidden sheet (creating if needed)."""
+    if sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+    else:
+        ws = wb.create_sheet(sheet_name)
+        ws.sheet_state = "hidden"
+    ws["A1"] = json.dumps(data)

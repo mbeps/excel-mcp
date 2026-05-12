@@ -27,7 +27,6 @@ from mcp_server.utils.excel_helpers import (
     load_workbook_safe,
     read_sheet_df,
     save_workbook_safe,
-    validate_file_path,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -92,9 +91,8 @@ def create_workbook(
         PermissionError: if the file cannot be written.
 
     Remarks:
-        - Calls ``validate_file_path(..., must_exist=False)`` before creating and ``save_workbook_safe()`` to persist.
+        - Calls ``save_workbook_safe()`` to persist.
     """
-    validate_file_path(file_path, must_exist=False)
     wb = Workbook()
 
     if sheet_name and not sheet_names:
@@ -270,7 +268,6 @@ def write_multi_sheet(
     Remarks:
         - This is a convenience function for batch workbook creation; it uses ``save_workbook_safe()`` to persist the final workbook.
     """
-    validate_file_path(file_path, must_exist=False)
     wb = Workbook()
 
     # Remove the default sheet
@@ -396,7 +393,6 @@ def set_tab_color(file_path: str, sheet_name: str, color: str) -> dict[str, str]
     if len(color) != 6 or not all(c in "0123456789ABCDEF" for c in color):
         raise ValueError(f"Invalid color '{color}'. Expected a 6-character hex string, e.g. 'FF0000'.")
 
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -425,7 +421,6 @@ def move_sheet(file_path: str, sheet_name: str, offset: int) -> dict[str, str]:
     Remarks:
         - Mutates workbook and saves.
     """
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         get_sheet(wb, sheet_name)  # validates sheet exists
