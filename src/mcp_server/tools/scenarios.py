@@ -28,13 +28,18 @@ support to InputCells in a future release.
 
 from __future__ import annotations
 
-import json
 from logging import Logger
 from typing import TYPE_CHECKING, cast
 
 from mcp_server.models.common import ScenarioCellValue
 from mcp_server.models.scenarios import ScenarioApplyResult, ScenarioChangeInfo, ScenarioInfo
-from mcp_server.utils.excel_helpers import get_sheet, load_workbook_safe, save_workbook_safe
+from mcp_server.utils.excel_helpers import (
+    get_sheet,
+    load_hidden_json,
+    load_workbook_safe,
+    save_hidden_json,
+    save_workbook_safe,
+)
 from mcp_server.utils.logger import configure_logging
 
 if TYPE_CHECKING:
@@ -47,26 +52,12 @@ _SCENARIOS_SHEET = "_mcp_scenarios"
 
 def _load_scenarios(wb: Workbook) -> dict[str, ScenarioInfo]:
     """Load scenarios from the hidden scenarios sheet."""
-    if _SCENARIOS_SHEET not in wb.sheetnames:
-        return {}
-    ws = wb[_SCENARIOS_SHEET]
-    raw = ws["A1"].value
-    if not raw:
-        return {}
-    try:
-        return cast(dict[str, ScenarioInfo], json.loads(str(raw)))
-    except (json.JSONDecodeError, TypeError):
-        return {}
+    return cast(dict[str, ScenarioInfo], load_hidden_json(wb, _SCENARIOS_SHEET))
 
 
 def _save_scenarios(wb: Workbook, scenarios: dict[str, ScenarioInfo]) -> None:
     """Save scenarios dict to hidden sheet."""
-    if _SCENARIOS_SHEET in wb.sheetnames:
-        ws = wb[_SCENARIOS_SHEET]
-    else:
-        ws = wb.create_sheet(_SCENARIOS_SHEET)
-        ws.sheet_state = "hidden"
-    ws["A1"] = json.dumps(scenarios)
+    save_hidden_json(wb, _SCENARIOS_SHEET, scenarios)
 
 
 def add_scenario(

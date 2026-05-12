@@ -12,40 +12,6 @@ from pydantic import BaseModel, Field
 from .common import CellScalar
 
 
-class CellValue(BaseModel):
-    """Value and metadata for a single cell.
-
-    Attributes:
-        cell_ref (str): Cell reference in A1 notation, e.g. 'B3'. Required.
-        value (CellScalar): Current value of the cell. May be None for empty cells.
-        data_type (str): Data type code reported by openpyxl (e.g. 's', 'n', 'd', 'b'). Required.
-
-    Notes:
-        - This model is used as a response schema for single-cell read operations.
-    """
-
-    cell_ref: str = Field(..., description="Cell reference in A1 notation, e.g. 'B3'.")
-    value: CellScalar = Field(..., description="Current value of the cell.")
-    data_type: str = Field(..., description="Data type code reported by openpyxl (s, n, d, b, etc.).")
-
-
-class RangeData(BaseModel):
-    """Raw grid data read from a rectangular range.
-
-    Attributes:
-        rows (list[list[CellScalar]]): Row-major list of cell values.
-        row_count (int): Number of rows returned. Required.
-        col_count (int): Number of columns returned. Required.
-
-    Notes:
-        - row_count and col_count must match the dimensions of `rows` when present.
-    """
-
-    rows: list[list[CellScalar]] = Field(..., description="Row-major list of cell values.")
-    row_count: int = Field(..., description="Number of rows returned.")
-    col_count: int = Field(..., description="Number of columns returned.")
-
-
 class CellAlignmentInfo(TypedDict):
     """Alignment settings extracted from a cell's style.
 
@@ -82,3 +48,24 @@ class CellStyleInfo(TypedDict):
     fill_color: str | None
     number_format: str
     alignment: CellAlignmentInfo
+
+
+class ChunkReadResult(BaseModel):
+    """A paginated chunk of rows from a large dataset.
+
+    Attributes:
+        rows (list[dict[str, CellScalar]]): Rows in this chunk (required).
+        chunk_start (int): 0-based starting row index (required).
+        chunk_size (int): Number of rows returned (required).
+        has_more (bool): True if additional rows remain (required).
+        next_start_row (int | None): Next start row to request, or None if has_more is False.
+    """
+
+    rows: list[dict[str, CellScalar]] = Field(..., description="Rows in this chunk as column-keyed dicts.")
+    chunk_start: int = Field(..., description="0-based starting row index of this chunk.")
+    chunk_size: int = Field(..., description="Number of rows in this chunk.")
+    has_more: bool = Field(..., description="Whether more rows remain after this chunk.")
+    next_start_row: int | None = Field(
+        None,
+        description="Row number to pass as start_row to get the next chunk; None if has_more=False.",
+    )

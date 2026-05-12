@@ -5,13 +5,13 @@ Functions mutate workbooks when writing and use ``load_workbook_safe()``/``save_
 
 from __future__ import annotations
 
-import copy
 import math
 from logging import Logger
 
 from mcp_server.models.cell_ops import CellStyleInfo
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
+    copy_cell_style,
     get_sheet,
     load_workbook_safe,
     save_workbook_safe,
@@ -438,11 +438,7 @@ def copy_range(
                 if copy_values:
                     dst.value = computed[r_offset][c_offset] if paste_values_only else cell.value  # type: ignore[index]
                 if copy_styles:
-                    dst.font = copy.copy(cell.font)
-                    dst.fill = copy.copy(cell.fill)
-                    dst.border = copy.copy(cell.border)
-                    dst.number_format = cell.number_format
-                    dst.alignment = copy.copy(cell.alignment)
+                    copy_cell_style(cell, dst)
                 cells_copied += 1
 
         save_workbook_safe(wb, file_path)
@@ -598,7 +594,6 @@ def merge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str,
     Remarks:
         - Mutates workbook; uses ``validate_file_path()`` and ``load_workbook_safe()``.
     """
-    validate_file_path(file_path)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -627,7 +622,6 @@ def unmerge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[st
     Remarks:
         - Mutates workbook; uses ``validate_file_path()`` and ``load_workbook_safe()``.
     """
-    validate_file_path(file_path)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)

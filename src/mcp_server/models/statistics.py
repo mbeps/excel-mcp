@@ -5,29 +5,6 @@ from __future__ import annotations
 from typing import TypedDict
 
 
-class ColumnStatResult(TypedDict, total=False):
-    """Descriptive statistics result for a column returned by column_statistics.
-
-    Keys (total=False): fields are optional and present when calculable.
-        column (str): Column name.
-        count, mean, median, min_val, max_val, std, sum_val: numeric stats.
-        skewness, kurtosis (float | None): Higher-order moments; may be None.
-        message (str): Informational message when stats are unavailable.
-    """
-
-    column: str
-    count: int
-    mean: float
-    median: float
-    min_val: float
-    max_val: float
-    std: float
-    sum_val: float
-    skewness: float | None
-    kurtosis: float | None
-    message: str
-
-
 class RegressionResult(TypedDict, total=False):
     """Result returned by run_regression.
 

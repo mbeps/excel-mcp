@@ -5,6 +5,7 @@ from __future__ import annotations
 from logging import Logger
 
 from mcp_server.utils.excel_helpers import (
+    copy_cell_style,
     get_sheet,
     load_workbook_safe,
     save_workbook_safe,
@@ -61,8 +62,6 @@ def copy_range_across_sheets(
     copy_styles: bool = False,
 ) -> str:
     """Copy a range from one sheet to another within the same workbook."""
-    import copy
-
     from openpyxl.utils import column_index_from_string
     from openpyxl.utils.cell import coordinate_from_string
 
@@ -82,11 +81,7 @@ def copy_range_across_sheets(
                 if copy_values:
                     dest.value = cell.value
                 if copy_styles and cell.has_style:
-                    dest.font = copy.copy(cell.font)
-                    dest.fill = copy.copy(cell.fill)
-                    dest.border = copy.copy(cell.border)
-                    dest.alignment = copy.copy(cell.alignment)
-                    dest.number_format = cell.number_format
+                    copy_cell_style(cell, dest)
                 col_offset += 1
             row_count += 1
         save_workbook_safe(wb, file_path)
@@ -113,12 +108,10 @@ def copy_sheet_across_workbooks(
     dest_sheet_name: str | None = None,
 ) -> str:
     """Copy a sheet from one workbook to another by replicating cell data and column widths."""
-    import copy
     from pathlib import Path
 
     import openpyxl
 
-    validate_file_path(source_file, must_exist=True)
     dest_path = Path(dest_file).resolve()
     from mcp_server.utils.excel_helpers import ALLOWED_EXTENSIONS
 
@@ -141,15 +134,10 @@ def copy_sheet_across_workbooks(
                 for cell in row:
                     dest_cell = tgt_ws.cell(row=cell.row, column=cell.column, value=cell.value)
                     if cell.has_style:
-                        dest_cell.font = copy.copy(cell.font)
-                        dest_cell.fill = copy.copy(cell.fill)
-                        dest_cell.border = copy.copy(cell.border)
-                        dest_cell.alignment = copy.copy(cell.alignment)
-                        dest_cell.number_format = cell.number_format
+                        copy_cell_style(cell, dest_cell)
             for col_letter, dim in src_ws.column_dimensions.items():
                 tgt_ws.column_dimensions[col_letter].width = dim.width
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            dest_wb.save(str(dest_path))
+            save_workbook_safe(dest_wb, dest_file)
             logger.info("Copied sheet '%s' from %s to %s as '%s'", source_sheet, source_file, dest_file, new_name)
             return f"Sheet '{source_sheet}' copied to '{dest_file}' as '{new_name}'."
         finally:
@@ -167,7 +155,6 @@ def merge_workbooks(
 
     conflict_strategy: 'rename' (append _2, _3, ...) or 'overwrite'.
     """
-    import copy
     from pathlib import Path
 
     import openpyxl
@@ -180,7 +167,7 @@ def merge_workbooks(
     if out_path.suffix.lower() not in ALLOWED_EXTENSIONS:
         raise ValueError(f"output_file must have an allowed extension: {ALLOWED_EXTENSIONS}")
     if out_path.exists():
-        out_wb = openpyxl.load_workbook(output_file)
+        out_wb = load_workbook_safe(output_file)
         sheet_names_used: list[str] = list(out_wb.sheetnames)
     else:
         out_wb = openpyxl.Workbook()
@@ -188,7 +175,6 @@ def merge_workbooks(
         sheet_names_used = []
     merged_files = 0
     for src_file in source_files:
-        validate_file_path(src_file, must_exist=True)
         src_wb = load_workbook_safe(src_file)
         try:
             for sheet_name in src_wb.sheetnames:
@@ -208,19 +194,14 @@ def merge_workbooks(
                     for cell in row:
                         dest_cell = tgt_ws.cell(row=cell.row, column=cell.column, value=cell.value)
                         if cell.has_style:
-                            dest_cell.font = copy.copy(cell.font)
-                            dest_cell.fill = copy.copy(cell.fill)
-                            dest_cell.border = copy.copy(cell.border)
-                            dest_cell.alignment = copy.copy(cell.alignment)
-                            dest_cell.number_format = cell.number_format
+                            copy_cell_style(cell, dest_cell)
                 for col_letter, dim in src_ws.column_dimensions.items():
                     tgt_ws.column_dimensions[col_letter].width = dim.width
                 sheet_names_used.append(target_name)
             merged_files += 1
         finally:
             src_wb.close()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_wb.save(str(out_path))
+    save_workbook_safe(out_wb, output_file)
     out_wb.close()
     logger.info("Merged %d files into %s (%d sheets)", merged_files, output_file, len(sheet_names_used))
     return {
@@ -233,7 +214,6 @@ def merge_workbooks(
 
 def insert_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[str, str]:
     """Insert one or more rows at the given row index, shifting existing rows down."""
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -247,7 +227,6 @@ def insert_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[st
 
 def delete_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[str, str]:
     """Delete one or more rows starting at the given row index."""
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -261,7 +240,6 @@ def delete_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[st
 
 def insert_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[str, str]:
     """Insert one or more columns at the given column index, shifting existing columns right."""
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -275,7 +253,6 @@ def insert_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[st
 
 def delete_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[str, str]:
     """Delete one or more columns starting at the given column index."""
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -289,7 +266,6 @@ def delete_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[st
 
 def set_print_area(file_path: str, sheet: str, print_area: str) -> dict[str, str]:
     """Set the print area for a worksheet (e.g. 'A1:H20')."""
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -310,7 +286,6 @@ def set_page_setup(
     fit_to_height: int | None = None,
 ) -> dict[str, object]:
     """Configure page setup: orientation, paper size, and fit-to-page scaling."""
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -344,7 +319,6 @@ def group_rows(
     When hidden=True, the summary row at end_row+1 gets collapsed=True so the
     collapse button renders correctly in Excel.
     """
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -371,7 +345,6 @@ def group_cols(
     """
     from openpyxl.utils import get_column_letter
 
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -399,7 +372,6 @@ def group_cols(
 
 def ungroup_rows(file_path: str, sheet: str, start_row: int, end_row: int) -> dict[str, str]:
     """Ungroup rows by resetting their outline level to 0 and unhiding them."""
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -417,7 +389,6 @@ def ungroup_cols(file_path: str, sheet: str, start_col: int, end_col: int) -> di
     """Ungroup columns by resetting their outline level to 0 and unhiding them."""
     from openpyxl.utils import get_column_letter
 
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -583,7 +554,6 @@ def add_page_break(
     if row is None and col is None:
         raise ValueError("At least one of 'row' or 'col' must be provided.")
 
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -621,7 +591,6 @@ def remove_page_break(
     if row is None and col is None:
         raise ValueError("At least one of 'row' or 'col' must be provided.")
 
-    validate_file_path(file_path, must_exist=True)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)

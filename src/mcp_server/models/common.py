@@ -61,14 +61,6 @@ BorderStyle = Literal[
     "thin",
 ]
 
-# Side of a cell where borders can be applied
-"""Sides of a cell where a border can be applied.
-
-Keys:
-    BorderSide (Literal): One of 'left', 'right', 'top', 'bottom', 'diagonal', 'outline'.
-"""
-BorderSide = Literal["left", "right", "top", "bottom", "diagonal", "outline"]
-
 # Alignment options for cells
 """Horizontal alignment options supported for cells.
 

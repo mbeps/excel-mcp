@@ -21,7 +21,7 @@ logger: Logger = configure_logging(__name__)
 
 
 def _eval_expression(expr: str, x_val: float) -> float:
-    tree = validate_expression(expr, allowed_names=frozenset({"x"}))
+    tree = validate_expression(expr, allowed_names=frozenset({"x"} | set(SAFE_MATH_FUNCS.keys())))
     code = compile(tree, "<expression>", "eval")
     namespace = {"x": x_val, **SAFE_MATH_FUNCS}
     return float(eval(code, {"__builtins__": {}}, namespace))
@@ -29,7 +29,7 @@ def _eval_expression(expr: str, x_val: float) -> float:
 
 def _eval_expression_vars(expr: str, variables: dict[str, float]) -> float:
     """Evaluate a validated expression with multiple named variables."""
-    tree = validate_expression(expr, allowed_names=frozenset(variables.keys()))
+    tree = validate_expression(expr, allowed_names=frozenset(set(variables.keys()) | set(SAFE_MATH_FUNCS.keys())))
     code = compile(tree, "<expression>", "eval")
     namespace = {**variables, **SAFE_MATH_FUNCS}
     return float(eval(code, {"__builtins__": {}}, namespace))
@@ -54,7 +54,7 @@ def goal_seek(
     from scipy.optimize import root_scalar
 
     try:
-        validate_expression(expression, allowed_names=frozenset({"x"}))
+        validate_expression(expression, allowed_names=frozenset({"x"} | set(SAFE_MATH_FUNCS.keys())))
     except ValueError as e:
         raise ValueError(
             f"Invalid expression: {e}. Expression must use 'x' as the variable name. "
@@ -631,7 +631,7 @@ def create_sensitivity_table(
     all_vars = {var1_name}
     if var2_name:
         all_vars.add(var2_name)
-    validate_expression(expression, allowed_names=frozenset(all_vars))
+    validate_expression(expression, allowed_names=frozenset(all_vars | set(SAFE_MATH_FUNCS.keys())))
 
     # Compute results
     table: list[list[float | str]] = []

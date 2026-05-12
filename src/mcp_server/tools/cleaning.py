@@ -9,6 +9,7 @@ from logging import Logger
 import pandas as pd
 
 from mcp_server.utils.excel_helpers import (
+    col_letter_to_index,
     load_workbook_safe,
     read_sheet_df,
     save_workbook_safe,
@@ -27,24 +28,6 @@ ALL_OPERATIONS = [
     "remove_duplicates",
     "fill_missing",
 ]
-
-
-def _col_letters_to_names(df: pd.DataFrame, columns: list[str] | None) -> list[str] | None:
-    """Convert column letters like ['A', 'B'] to actual DataFrame column names."""
-    if columns is None:
-        return None
-    result = []
-    all_cols = list(df.columns)
-    for letter in columns:
-        idx = 0
-        value = 0
-        for ch in letter.upper():
-            value = value * 26 + (ord(ch) - ord("A") + 1)
-        idx = value - 1
-        if idx < 0 or idx >= len(all_cols):
-            raise ValueError(f"Column letter '{letter}' is out of range. Sheet has {len(all_cols)} columns.")
-        result.append(all_cols[idx])
-    return result
 
 
 def _get_target_cols(df: pd.DataFrame, col_names: list[str] | None) -> list[str]:
@@ -273,7 +256,17 @@ def data_cleaner(
     original_df = df.copy()
     rows_before = len(df)
 
-    col_names = _col_letters_to_names(df, columns)
+    col_names: list[str] | None
+    if columns is None:
+        col_names = None
+    else:
+        all_cols = list(df.columns)
+        col_names = []
+        for letter in columns:
+            idx = col_letter_to_index(letter) - 1
+            if idx < 0 or idx >= len(all_cols):
+                raise ValueError(f"Column letter '{letter}' is out of range. Sheet has {len(all_cols)} columns.")
+            col_names.append(all_cols[idx])
     changes: dict[str, int] = {}
 
     for op in ops:
@@ -352,17 +345,6 @@ def data_cleaner(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_col(df: pd.DataFrame, col: str) -> str:
-    """Resolve a column reference (letter like 'A' or direct column name) to a df column name."""
-    if col in df.columns:
-        return col
-    if re.match(r"^[A-Za-z]+$", col):
-        resolved = _col_letters_to_names(df, [col])
-        if resolved:
-            return resolved[0]
-    raise ValueError(f"Column '{col}' not found. Available columns: {list(df.columns)}")
-
-
 def _write_df_to_workbook(
     df: pd.DataFrame,
     file_path: str,
@@ -431,7 +413,16 @@ def split_column(
     """
     validate_file_path(file_path)
     df = read_sheet_df(file_path, sheet_name, header_row)
-    col_name = _resolve_col(df, column)
+    if column not in df.columns:
+        if re.match(r"^[A-Za-z]+$", column):
+            all_cols = list(df.columns)
+            idx = col_letter_to_index(column) - 1
+            if idx < 0 or idx >= len(all_cols):
+                raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
+            column = all_cols[idx]
+        else:
+            raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
+    col_name = column
 
     split_df = df[col_name].astype(str).str.split(delimiter, expand=True)
     num_parts = split_df.shape[1]
@@ -478,7 +469,15 @@ def parse_date_column(
     from dateutil import parser as dateutil_parser
 
     df = read_sheet_df(file_path, sheet_name, header_row)
-    column = _resolve_col(df, column)
+    if column not in df.columns:
+        if re.match(r"^[A-Za-z]+$", column):
+            all_cols = list(df.columns)
+            idx = col_letter_to_index(column) - 1
+            if idx < 0 or idx >= len(all_cols):
+                raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
+            column = all_cols[idx]
+        else:
+            raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
     if column not in df.columns:
         raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
 
