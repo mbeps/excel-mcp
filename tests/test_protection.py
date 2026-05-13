@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook
 
+from mcp_server.routes.cell_ops import write_cells
 from mcp_server.routes.governance import protection
 from mcp_server.routes.workbook import create_workbook
-from mcp_server.routes.cell_ops import write_cells, read_cells
 
 
 @pytest.fixture

@@ -7,9 +7,29 @@ from logging import Logger
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.pivot.cache import (
+    CacheDefinition,
+    CacheField,
+    CacheSource,
+    SharedItems,
+    WorksheetSource,
+)
+from openpyxl.pivot.fields import Text
+from openpyxl.pivot.table import (
+    DataField,
+    FieldItem,
+    Location,
+    PageField,
+    PivotField,
+    RowColField,
+    RowColItem,
+    TableDefinition,
+)
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import column_index_from_string
 
 from mcp_server.models.common import CellScalar
+from mcp_server.models.pivot_etl import NativePivotValueField
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_hidden_json,
@@ -456,3 +476,257 @@ def deduplicate_data(
         return f"Removed {removed} duplicate row(s) from '{sheet_name}'. {len(df)} rows remain."
     finally:
         wb.close()
+
+
+_AGGFUNC_LABELS = {
+    "sum": "Sum",
+    "count": "Count",
+    "average": "Average",
+    "max": "Max",
+    "min": "Min",
+    "product": "Product",
+    "countNums": "Count Nums",
+    "stdDev": "Std Dev",
+    "stdDevp": "Std DevP",
+    "var": "Var",
+    "varp": "VarP",
+}
+_VALID_AGGFUNCS = frozenset(_AGGFUNC_LABELS.keys())
+_VALID_SHOW_DATA_AS = frozenset({
+    "normal", "difference", "percent", "percentDiff", "runTotal",
+    "percentOfRow", "percentOfCol", "percentOfTotal", "index"
+})
+
+def _collect_source_meta(wb: Workbook, sheet_name: str) -> dict:
+    ws = get_sheet(wb, sheet_name)
+    max_row = ws.max_row
+    max_col = ws.max_column
+    
+    col_names = []
+    for c in range(1, max_col + 1):
+        val = ws.cell(row=1, column=c).value
+        col_names.append(str(val) if val is not None else f"Column{c}")
+        
+    meta = {
+        "max_row": max_row,
+        "max_col": max_col,
+        "col_names": col_names,
+        "ref": f"A1:{get_column_letter(max_col)}{max_row}",
+        "columns": {}
+    }
+    
+    for c in range(1, max_col + 1):
+        col_name = col_names[c - 1]
+        contains_string = False
+        contains_number = False
+        contains_date = False
+        contains_non_date = False
+        uniques: set[str] = set()
+        
+        for r in range(2, max_row + 1):
+            val = ws.cell(row=r, column=c).value
+            if val is None:
+                continue
+            if isinstance(val, str):
+                contains_string = True
+                contains_non_date = True
+                if len(uniques) < 1000:
+                    uniques.add(val)
+            elif isinstance(val, (int, float)):
+                contains_number = True
+                contains_non_date = True
+            elif hasattr(val, "year") and hasattr(val, "month") and hasattr(val, "day"):
+                contains_date = True
+            else:
+                contains_non_date = True
+                
+        meta["columns"][col_name] = {
+            "index": c - 1,
+            "contains_string": contains_string,
+            "contains_number": contains_number,
+            "contains_date": contains_date,
+            "contains_non_date": contains_non_date or contains_number or contains_string,
+            "uniques": sorted(list(uniques)),
+        }
+    return meta
+
+def _build_cache_def(source_sheet: str, meta: dict) -> CacheDefinition:
+    from typing import Any
+    cache_fields = []
+    col_names = meta["col_names"]
+    for col_name in col_names:
+        c_meta = meta["columns"][col_name]
+        
+        shared_items_kwargs: dict[str, Any] = {
+            "containsString": c_meta["contains_string"],
+            "containsNumber": c_meta["contains_number"],
+            "containsDate": c_meta["contains_date"],
+            "containsNonDate": c_meta["contains_non_date"],
+        }
+        
+        if c_meta["contains_string"]:
+            shared_items_kwargs["_fields"] = [Text(v=str(u)) for u in c_meta["uniques"]]
+            shared_items_kwargs["containsSemiMixedTypes"] = False
+            
+        shared_items = SharedItems(**shared_items_kwargs)
+        cache_fields.append(CacheField(name=col_name, numFmtId=0, sharedItems=shared_items))
+        
+    assert len(cache_fields) == len(col_names)
+    
+    return CacheDefinition(
+        refreshOnLoad=True,
+        cacheSource=CacheSource(
+            type="worksheet",
+            worksheetSource=WorksheetSource(ref=meta["ref"], sheet=source_sheet)
+        ),
+        cacheFields=cache_fields,
+        createdVersion=3,
+        refreshedVersion=3,
+        minRefreshableVersion=3,
+    )
+
+def _build_table_def(
+    table_name: str,
+    meta: dict,
+    row_fields: list[str],
+    value_fields: list[NativePivotValueField],
+    col_fields: list[str] | None,
+    filter_fields: list[str] | None,
+    output_cell: str,
+    row_grand_totals: bool,
+    col_grand_totals: bool,
+) -> TableDefinition:
+    import re
+    from typing import Any
+    col_names = meta["col_names"]
+    col_fields = col_fields or []
+    filter_fields = filter_fields or []
+    
+    all_specified = row_fields + [vf.field for vf in value_fields] + col_fields + filter_fields
+    for f in all_specified:
+        if f not in meta["columns"]:
+            raise ValueError(f"Field '{f}' not found in source data. Available: {col_names}")
+            
+    for vf in value_fields:
+        if vf.aggfunc not in _VALID_AGGFUNCS:
+            raise ValueError(f"Invalid aggfunc '{vf.aggfunc}'. Available: {list(_VALID_AGGFUNCS)}")
+        if vf.show_data_as and vf.show_data_as not in _VALID_SHOW_DATA_AS:
+            raise ValueError(f"Invalid show_data_as '{vf.show_data_as}'. Available: {list(_VALID_SHOW_DATA_AS)}")
+            
+    pivot_fields = []
+    for col_name in col_names:
+        if col_name in filter_fields:
+            pivot_fields.append(PivotField(axis="axisPage", showAll=False))
+        elif col_name in row_fields:
+            pivot_fields.append(PivotField(axis="axisRow", showAll=False, items=[FieldItem(t="default")]))
+        elif col_name in col_fields:
+            pivot_fields.append(PivotField(axis="axisCol", showAll=False, items=[FieldItem(t="default")]))
+        elif any(vf.field == col_name for vf in value_fields):
+            pivot_fields.append(PivotField(dataField=True, showAll=False))
+        else:
+            pivot_fields.append(PivotField(showAll=False))
+            
+    assert len(pivot_fields) == len(col_names)
+    
+    row_fields_xml = [RowColField(x=meta["columns"][f]["index"]) for f in row_fields]
+    col_fields_xml = [RowColField(x=meta["columns"][f]["index"]) for f in col_fields]
+    page_fields_xml = [PageField(fld=meta["columns"][f]["index"]) for f in filter_fields]
+    
+    if value_fields:
+        col_fields_xml.append(RowColField(x=-2))
+        
+    data_fields_xml = []
+    for vf in value_fields:
+        d_name = vf.name or f"{_AGGFUNC_LABELS[vf.aggfunc]} of {vf.field}"
+        kwargs: dict[str, Any] = {
+            "name": d_name,
+            "fld": meta["columns"][vf.field]["index"],
+            "subtotal": vf.aggfunc,
+        }
+        if vf.show_data_as:
+            kwargs["showDataAs"] = vf.show_data_as
+        data_fields_xml.append(DataField(**kwargs))
+        
+    match = re.match(r"([A-Za-z]+)(\d+)", output_cell)
+    if not match:
+        raise ValueError(f"Invalid output_cell format '{output_cell}'")
+    start_col_let = match.group(1)
+    start_row_num = int(match.group(2))
+    end_col_let = get_column_letter(column_index_from_string(start_col_let) + 1)
+    end_row_num = start_row_num + 1
+
+    location = Location(
+        ref=f"{start_col_let}{start_row_num}:{end_col_let}{end_row_num}",
+        firstHeaderRow=1,
+        firstDataRow=2,
+        firstDataCol=1
+    )
+
+    return TableDefinition(
+        name=table_name,
+        cacheId=0,
+        dataCaption="Values",
+        location=location,
+        pivotFields=pivot_fields,
+        rowFields=row_fields_xml,
+        colFields=col_fields_xml,
+        pageFields=page_fields_xml,
+        dataFields=data_fields_xml,
+        rowItems=[RowColItem(t="grand")],
+        colItems=[RowColItem(), RowColItem(t="grand")],
+        rowGrandTotals=row_grand_totals,
+        colGrandTotals=col_grand_totals,
+        createdVersion=3, 
+        updatedVersion=3,
+        minRefreshableVersion=3,
+    )
+
+def create_pivot_table_native(
+    file_path: str,
+    source_sheet: str,
+    output_sheet: str,
+    row_fields: list[str],
+    value_fields: list[NativePivotValueField],
+    col_fields: list[str] | None = None,
+    filter_fields: list[str] | None = None,
+    output_cell: str = "A1",
+    row_grand_totals: bool = True,
+    col_grand_totals: bool = True,
+    table_name: str | None = None,
+) -> dict:  # typed as dict at runtime
+    """Create a native OOXML Excel pivot table object."""
+    wb = load_workbook_safe(file_path)
+    try:
+        meta = _collect_source_meta(wb, source_sheet)
+        cache_def = _build_cache_def(source_sheet, meta)
+        
+        if output_sheet not in wb.sheetnames:
+            ws_out = wb.create_sheet(title=output_sheet)
+        else:
+            ws_out = wb[output_sheet]
+            
+        t_name = table_name or f"PivotTable{len(ws_out._pivots) + 1}"
+        
+        table_def = _build_table_def(
+            t_name, meta, row_fields, value_fields, col_fields, filter_fields, 
+            output_cell, row_grand_totals, col_grand_totals
+        )
+        table_def.cache = cache_def
+        
+        ws_out.add_pivot(table_def)
+        save_workbook_safe(wb, file_path)
+        logger.info("Native pivot table '%s' written to sheet '%s' in %s", t_name, output_sheet, file_path)
+    finally:
+        wb.close()
+        
+    return {
+        "file": file_path,
+        "output_sheet": output_sheet,
+        "pivot_table_name": t_name,
+        "source_range": f"{source_sheet}!{meta['ref']}",
+        "pivot_location": output_cell,
+        "row_fields": row_fields,
+        "col_fields": col_fields or [],
+        "value_fields": [vf.name or f"{_AGGFUNC_LABELS[vf.aggfunc]} of {vf.field}" for vf in value_fields],
+        "filter_fields": filter_fields or [],
+    }

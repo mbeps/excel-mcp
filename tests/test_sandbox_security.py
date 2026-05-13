@@ -5,15 +5,14 @@ Validates execute_custom_code restrictions, import blocking, and stdout capture.
 
 from __future__ import annotations
 
-import sys
 import io
+import sys
 from pathlib import Path
 
 import pytest
 
 from mcp_server.tools.custom_code import execute_custom_code
 from mcp_server.tools.workbook import create_workbook
-
 
 # ---------------------------------------------------------------------------
 # 8.6, 8.7, 8.8 Sandbox — Imports Blocked

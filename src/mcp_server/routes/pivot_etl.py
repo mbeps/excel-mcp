@@ -5,8 +5,10 @@ from typing import Any
 from mcp.types import ToolAnnotations
 
 import mcp_server.tools.pivot_etl as _pivot_etl
+from mcp_server.models.pivot_etl import NativePivotValueField
 
 __all__ = [
+    "create_pivot_table_native",
     "create_pivot_table",
     "refresh_pivot_table",
     "unpivot_data",
@@ -207,10 +209,41 @@ def deduplicate_data(
     return _pivot_etl.deduplicate_data(file_path, sheet_name, columns, keep)
 
 
+def create_pivot_table_native(
+    file_path: str,
+    source_sheet: str,
+    output_sheet: str,
+    row_fields: list[str],
+    value_fields: list[NativePivotValueField],
+    col_fields: list[str] | None = None,
+    filter_fields: list[str] | None = None,
+    output_cell: str = "A1",
+    row_grand_totals: bool = True,
+    col_grand_totals: bool = True,
+    table_name: str | None = None,
+) -> dict:
+    """Create a native OOXML Excel pivot table. LibreOffice may require 'Data -> Refresh All' to display."""
+    return _pivot_etl.create_pivot_table_native(
+        file_path,
+        source_sheet,
+        output_sheet,
+        row_fields,
+        value_fields,
+        col_fields,
+        filter_fields,
+        output_cell,
+        row_grand_totals,
+        col_grand_totals,
+        table_name,
+    )
+
+
 def register(mcp: Any) -> None:
     """Register pivot/ETL tools on *mcp*."""
-    mcp.tool()(create_pivot_table)
-    mcp.tool()(refresh_pivot_table)
+    mcp.tool(annotations=ToolAnnotations(title="Create Native Excel Pivot Table"))(create_pivot_table_native)
+    # create_pivot_table and refresh_pivot_table are deprecated and no longer registered by default.
+    # mcp.tool()(create_pivot_table)
+    # mcp.tool()(refresh_pivot_table)
     mcp.tool()(unpivot_data)
     mcp.tool()(merge_datasets)
     mcp.tool()(add_computed_column)
