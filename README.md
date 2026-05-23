@@ -1,6 +1,6 @@
 # Excel MCP Server
 
-A Python-based Model Context Protocol (MCP) server for Excel and CSV automation. It enables LLMs to work with `.xlsx`, `.xlsm`, `.xls`, and `.csv` files through 66 structured tools, 2 JSON resources, and 20 prompts spanning workbook operations, formatting, charts, ETL, analysis, and financial/statistical workflows.
+A Python-based Model Context Protocol (MCP) server for Excel and CSV automation. It enables LLMs to work with `.xlsx`, `.xlsm`, `.xls`, and `.csv` files through 69 structured tools, 2 JSON resources, and 20 prompts spanning workbook operations, formatting, charts, ETL, analysis, financial/statistical workflows, and HTTP file transfer.
 
 # Features
 
@@ -99,7 +99,13 @@ A Python-based Model Context Protocol (MCP) server for Excel and CSV automation.
 ## Cross-file Operations
 - Aggregate, filter, validate, and compare data across multiple files.
 
-**66 Tools | 2 Resources | 20 Prompts**
+## File Transfer
+- Upload files (base64, HTTP URL, or local path) for server-side processing.
+- Download processed files as base64.
+- Release session files to free server disk space.
+- Supports single and multi-file upload workflows.
+
+**69 Tools | 2 Resources | 20 Prompts**
 
 
 # Prerequisites
@@ -114,13 +120,62 @@ Installing all project dependencies:
 uv sync
 ```
 
-Running the MCP server:
+## Running in STDIO Mode (default)
+
 ```sh
 uv run src/mcp_server/main.py   # or: uv run excel-mcp
 ```
 
-## Using with MCP clients:
-- ### GitHub Copilot (Visual Studio Code)
+The default transport is STDIO, preserving compatibility with local CLI-based clients.
+
+### GitHub Copilot (VS Code) — STDIO
+
+In `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "excel-mcp": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "mcp[cli]",
+        "excel-mcp"
+      ],
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    }
+  }
+}
+```
+
+## Running in HTTP Mode
+
+```sh
+uv run excel-mcp --transport http --host 127.0.0.1 --port 8765
+```
+
+With defaults (host `127.0.0.1`, port `8000`):
+
+```sh
+uv run excel-mcp --transport http
+```
+
+### GitHub Copilot (VS Code) — HTTP
+
+In `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "excel-mcp-http": {
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+### Other MCP Clients
 In the `.vscode/mcp.json` add:
 ```json
 "excel-mcp": {
@@ -330,6 +385,11 @@ This section merges the previous "Tool Overview" and the full grouped tool list.
 - Multi-file operations (1) — Bulk and cross-workbook operations
   - `multi_file` — Aggregate, filter, validate, or compare across multiple workbooks.
 
+- File transfer (3) — Upload, download, and release session-managed files
+  - `upload_file` — Upload a file via base64 or HTTP URL for server-side processing (supports single and multi-file uploads).
+  - `download_file` — Download a server-side file as base64 after processing.
+  - `release_file` — Release a session file and delete it from server disk.
+
 - Custom code & images (2) — Sandboxed code execution and images
   - `insert_image` — Insert an image into a worksheet anchored at a target cell.
   - `execute_custom_code` — Run sandboxed Python/pandas code against a workbook and return results.
@@ -337,8 +397,8 @@ This section merges the previous "Tool Overview" and the full grouped tool list.
  
 # Architecture
 - **Modular design**: `src/mcp_server/` is split into `tools/` (25 pure domain modules), `routes/` (15 registration/dispatch modules), `models/` (Pydantic response schemas), and `utils/` (shared workbook, logging, and expression-safety helpers).
-- **Entry point**: `src/mcp_server/main.py` creates the FastMCP server, registers 2 JSON resources directly (`excel://workbook/{file_path}/sheets`, `excel://workbook/{file_path}/sheet/{sheet_name}/preview`), calls `register_all_routes(mcp)` to register the tool surface, and calls `_register_prompts(mcp)` from `src/mcp_server/prompts.py` to register 20 prompts.
-- **Data flow**: MCP client → FastMCP (stdio/JSON-RPC) → `main.py` → `routes/*.py` (registration/dispatch) → `tools/*.py` (domain logic) → `openpyxl` / `pandas` / `scipy` and related libraries → Pydantic models → JSON-RPC response.
+- **Entry point**: `src/mcp_server/main.py` creates the FastMCP server, registers 2 JSON resources directly (`excel://workbook/{file_path}/sheets`, `excel://workbook/{file_path}/sheet/{sheet_name}/preview`), calls `register_all_routes(mcp)` to register the tool surface, and calls `_register_prompts(mcp)` from `src/mcp_server/prompts.py` to register 20 prompts. Supports both STDIO (default) and HTTP transport selection via `--transport {stdio,http}` CLI flags.
+- **Data flow**: MCP client → FastMCP (stdio/JSON-RPC or HTTP) → `main.py` → `routes/*.py` (registration/dispatch) → `tools/*.py` (domain logic) → `openpyxl` / `pandas` / `scipy` and related libraries → Pydantic models → JSON-RPC response. HTTP mode uses temp-file resolution (`utils/file_resolver.py`) to convert remote inputs to local paths before reaching the tool layer.
 - **Utilities**: `src/mcp_server/utils/excel_helpers.py` centralises safe workbook access and workbook path validation; `logger.py` keeps logs on stderr; `expression_validator.py` provides shared AST validation for user-supplied expressions.
 - **Safety**: Workbook paths are checked against an extension whitelist and optional `EXCEL_MCP_ALLOWED_DIRS` sandbox; AST validation is reused by `goal_seek`, `create_sensitivity_table`, and computed-column expressions; `execute_custom_code` uses a separate sandboxed validation path.
 - **Workbook lifecycle**: Openpyxl-backed workbook tools generally use `load_workbook_safe()` / `save_workbook_safe()` with explicit close handling, while pandas/CSV flows and hidden-sheet state (`_mcp_pivots`, `_mcp_scenarios`) follow separate storage paths.
