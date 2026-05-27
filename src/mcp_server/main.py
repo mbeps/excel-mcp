@@ -100,6 +100,7 @@ from mcp_server.routes.governance import *  # noqa: E402, F401, F403
 from mcp_server.routes.metadata import *  # noqa: E402, F401, F403
 from mcp_server.routes.multi_file import *  # noqa: E402, F401, F403
 from mcp_server.routes.custom_code import *  # noqa: E402, F401, F403
+from mcp_server.routes.file_transfer import *  # noqa: E402, F401, F403
 
 # ── Internal module aliases (for test monkeypatching) ────────────────────────
 import mcp_server.tools.formatting as _formatting  # noqa: E402
@@ -134,9 +135,37 @@ _register_prompts(mcp)
 
 
 def run() -> None:
-    """Launch the MCP server."""
+    """Launch the MCP server.
+
+    Supports two transport modes selected via --transport:
+      stdio (default): reads/writes on stdin/stdout. Suitable for local clients.
+      http: starts a streamable-HTTP server. Use --host and --port to configure.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Excel MCP Server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default="stdio",
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+
+    if args.transport == "http":
+        logger.info("Starting MCP server in http mode on %s:%s", args.host, args.port)
+    else:
+        logger.info("Starting MCP server in stdio mode")
+
     try:
-        mcp.run()
+        if args.transport == "http":
+            if hasattr(mcp, "settings"):
+                mcp.settings.host = args.host
+                mcp.settings.port = args.port
+            mcp.run(transport="streamable-http")
+        else:
+            mcp.run()
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
     except Exception:

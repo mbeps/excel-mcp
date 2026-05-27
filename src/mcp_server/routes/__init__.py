@@ -15,6 +15,7 @@ def register_all_routes(mcp: object) -> None:
         charts,
         cleaning,
         custom_code,
+        file_transfer,
         financial,
         formatting,
         formulas,
@@ -43,5 +44,6 @@ def register_all_routes(mcp: object) -> None:
         metadata,
         multi_file,
         custom_code,
+        file_transfer,
     ):
         mod.register(mcp)

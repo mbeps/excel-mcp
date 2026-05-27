@@ -13,6 +13,7 @@ import copy
 import json
 import os
 import re
+import tempfile
 from logging import Logger
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,8 @@ Typical values:
 """
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".xlsm"}
 
+_SERVER_TEMP_PREFIX = os.path.join(tempfile.gettempdir(), "excel_mcp_")
+
 
 def validate_file_path(file_path: str, must_exist: bool = True) -> Path:
     """
@@ -60,12 +63,17 @@ def validate_file_path(file_path: str, must_exist: bool = True) -> Path:
             outside directories permitted by the `EXCEL_MCP_ALLOWED_DIRS` environment variable.
     """
     path = Path(file_path).resolve()
-    if must_exist and not path.exists():
-        raise ValueError(f"File not found: {file_path}")
+    _is_server_temp = str(path).startswith(_SERVER_TEMP_PREFIX)
+
     if path.suffix.lower() not in ALLOWED_EXTENSIONS:
         raise ValueError(f"Unsupported file type: {path.suffix}. Allowed: {ALLOWED_EXTENSIONS}")
+    if must_exist and not path.exists():
+        raise ValueError(f"File not found: {file_path}")
     if must_exist and not path.is_file():
         raise ValueError(f"Path is not a file: {file_path}")
+
+    if _is_server_temp:
+        return path
 
     allowed_dirs_env = os.environ.get("EXCEL_MCP_ALLOWED_DIRS", "").strip()
     if allowed_dirs_env:

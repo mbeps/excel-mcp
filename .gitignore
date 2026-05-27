@@ -27,8 +27,15 @@ Thumbs.db
 *.swo
 # Ignore any other files or directories you want to exclude from version control
 *.csv
-.github/copilot-instructions.md
 **.xlsx
 .github/prompts/**
 .github/agents/**
 .mypy_cache/**
+
+copilot-instructions.md
+AGENT.md
+GEMINI.md
+CLAUDE.md
+
+docs/**
+wiki/**
