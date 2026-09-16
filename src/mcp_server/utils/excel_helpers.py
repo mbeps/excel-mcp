@@ -261,7 +261,7 @@ def validate_excel_range(range_str: str) -> ValidationRangeResult:
     if not start["valid"]:
         return {
             "valid": False,
-            "message": str(start.get("message", "Unknown error")),
+            "message": start.get("message", "Unknown error"),
         }
 
     if len(parts) == 1:
@@ -277,7 +277,7 @@ def validate_excel_range(range_str: str) -> ValidationRangeResult:
     if not end["valid"]:
         return {
             "valid": False,
-            "message": str(end.get("message", "Unknown error")),
+            "message": end.get("message", "Unknown error"),
         }
 
     return {
@@ -310,7 +310,7 @@ def load_hidden_json(wb: Workbook, sheet_name: str) -> dict:
     if not raw:
         return {}
     try:
-        return json.loads(str(raw))  # type: ignore[no-any-return]
+        return json.loads(str(raw))
     except (json.JSONDecodeError, TypeError):
         return {}
 

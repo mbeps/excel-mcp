@@ -253,7 +253,7 @@ def budget_variance_analysis(
     total_variance = total_actual - total_budget
     total_variance_pct = (total_variance / total_budget * 100) if total_budget != 0 else 0.0
 
-    result = {
+    result: dict[str, object] = {
         "items": items,
         "summary": {
             "total_budget": round(total_budget, 2),

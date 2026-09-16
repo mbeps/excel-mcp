@@ -29,7 +29,7 @@ packages = ["src/mcp_server"]
 
 [dependency-groups]
 dev = [
-    "mypy>=1.19.0",
+    "pyrefly>=1.1.1",
     "pytest>=8.3.3",
     "pytest-cov>=7.1.0",
     "ruff>=0.14.9",
@@ -48,31 +48,21 @@ extend-ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 "src/mcp_server/main.py" = ["F401", "I001"]
 
-[tool.mypy]
-plugins = ["pydantic.mypy"]
-python_version = "3.12"
-strict = false
-warn_return_any = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
-ignore_missing_imports = true
-exclude = ["tests/"]
-
-[[tool.mypy.overrides]]
-module = [
+[tool.pyrefly]
+# Root as search path so 'src.' prefixed imports resolve.
+search-path = ["."]
+python-version = "3.12"
+project-includes = ["src/mcp_server"]
+project-excludes = ["tests/"]
+# Third-party packages without type stubs. mypy previously ignored these via
+# ignore_missing_imports; replace-imports-with-any reproduces that behaviour.
+replace-imports-with-any = [
     "openpyxl.*",
     "calamine.*",
     "numpy_financial.*",
     "scipy.*",
     "statsmodels.*",
     "pandas.*",
+    "numpy.*",
+    "dateutil.*",
 ]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["dateutil.*"]
-ignore_missing_imports = true

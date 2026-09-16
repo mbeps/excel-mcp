@@ -31,6 +31,7 @@ Thumbs.db
 .github/prompts/**
 .github/agents/**
 .mypy_cache/**
+.pyrefly_cache/**
 
 copilot-instructions.md
 AGENT.md

@@ -296,7 +296,7 @@ def clear_range(file_path: str, sheet_name: str, start_cell: str, end_cell: str)
     """
     validation = validate_excel_range(f"{start_cell}:{end_cell}")
     if not validation["valid"]:
-        raise ValueError(str(validation.get("message", "Invalid cell range.")))
+        raise ValueError(validation.get("message", "Invalid cell range."))
 
     wb = load_workbook_safe(file_path)
     try:
@@ -436,7 +436,10 @@ def copy_range(
                     column=dest_start_col + c_offset,
                 )
                 if copy_values:
-                    dst.value = computed[r_offset][c_offset] if paste_values_only else cell.value  # type: ignore[index]
+                    if paste_values_only and computed is not None:
+                        dst.value = computed[r_offset][c_offset]
+                    else:
+                        dst.value = cell.value
                 if copy_styles:
                     copy_cell_style(cell, dst)
                 cells_copied += 1
@@ -721,10 +724,8 @@ def find_replace(
         modified: list[str] = []
         flags = 0 if match_case else _re.IGNORECASE
 
-        if regex:
-            pattern = _re.compile(find_text, flags)
-        else:
-            needle = find_text if match_case else find_text.lower()
+        pattern = _re.compile(find_text, flags) if regex else None
+        needle = find_text if match_case else find_text.lower()
 
         for row in ws.iter_rows():
             for cell in row:
@@ -736,7 +737,7 @@ def find_replace(
                     continue  # skip formula cells when not searching formulas
                 content = str(val)
 
-                if regex:
+                if pattern is not None:
                     if match_entire_cell:
                         m = pattern.fullmatch(content)
                         if m:
@@ -792,21 +793,19 @@ def transpose_range(
     src_sheet = source_sheet if source_sheet is not None else sheet_name
     range_key = source_range if ":" in source_range else f"{source_range}:{source_range}"
 
-    data: list[list]
-    if paste_values_only:
-        wb_data = load_workbook_safe(file_path, data_only=True)
-        try:
-            ws_data = get_sheet(wb_data, src_sheet)
-            data = [[cell.value for cell in row] for row in ws_data[range_key]]
-        finally:
-            wb_data.close()
-
     wb = load_workbook_safe(file_path)
     try:
         ws_src = get_sheet(wb, src_sheet)
         ws_dst = get_sheet(wb, sheet_name)
 
-        if not paste_values_only:
+        if paste_values_only:
+            wb_data = load_workbook_safe(file_path, data_only=True)
+            try:
+                ws_data = get_sheet(wb_data, src_sheet)
+                data = [[cell.value for cell in row] for row in ws_data[range_key]]
+            finally:
+                wb_data.close()
+        else:
             data = [[cell.value for cell in row] for row in ws_src[range_key]]
 
         n_rows = len(data)

@@ -41,8 +41,8 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: uv sync
-      - name: Run Mypy
-        run: uv run mypy src/mcp_server
+      - name: Run Pyrefly
+        run: uv run pyrefly check
 
   test:
     name: Test

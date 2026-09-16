@@ -52,7 +52,7 @@ def upload_file(
             items.append(
                 {
                     "session_id": session_id,
-                    "file_path": str(path),
+                    "file_path": path,
                     "message": f"File '{os.path.basename(path)}' is ready for processing.",
                 }
             )
@@ -68,7 +68,7 @@ def upload_file(
     session_id = session_store.register(path, is_temp=is_temp)
     return {
         "session_id": session_id,
-        "file_path": str(path),
+        "file_path": path,
         "message": f"File '{os.path.basename(path)}' is ready for processing.",
     }
 

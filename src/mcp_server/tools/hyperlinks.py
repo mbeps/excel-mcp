@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from logging import Logger
+from typing import Any
 
 from mcp_server.models.hyperlinks import HyperlinkInfo, HyperlinkReadResult
 from mcp_server.utils.excel_helpers import (
@@ -32,7 +33,8 @@ def add_hyperlink(
         if display_text is not None:
             cell.value = display_text
         if tooltip is not None:
-            cell.hyperlink.tooltip = tooltip
+            link: Any = cell.hyperlink  # openpyxl returns a Hyperlink object here
+            link.tooltip = tooltip
         save_workbook_safe(wb, file_path)
         logger.info("Added hyperlink to %s!%s in %s", sheet_name, cell_ref, file_path)
         return f"Hyperlink added to cell {cell_ref} on sheet '{sheet_name}'."

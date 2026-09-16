@@ -5,6 +5,27 @@ from __future__ import annotations
 from typing import TypedDict
 
 
+class RegressionExtras(TypedDict, total=False):
+    """Extended regression diagnostics returned by the model-fitting helpers.
+
+    The numpy fallback returns only ``r_squared``, ``adjusted_r_squared``,
+    ``ss_residual``, ``ss_total`` and ``predictions``; statsmodels adds the
+    remaining inference fields.
+    """
+
+    r_squared: float
+    adjusted_r_squared: float
+    ss_residual: float
+    ss_total: float
+    std_errors: list[float]
+    t_values: list[float]
+    p_values: list[float]
+    f_statistic: float
+    f_pvalue: float
+    confidence_intervals: list[list[float]]
+    predictions: list[float]
+
+
 class RegressionResult(TypedDict, total=False):
     """Result returned by run_regression.
 
