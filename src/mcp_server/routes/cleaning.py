@@ -192,5 +192,5 @@ def register(mcp: Any) -> None:
     """Register cleaning/CSV tools on *mcp*."""
     mcp.tool()(split_column)
     mcp.tool()(data_cleaner)
-    mcp.tool(annotations=ToolAnnotations(destructiveHint=True))(parse_date_column)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(parse_date_column)
     mcp.tool()(csv_ops)

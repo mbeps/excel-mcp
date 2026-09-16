@@ -278,6 +278,6 @@ def worksheet_transfer(
 def register(mcp: Any) -> None:
     """Register worksheet-operations tools on *mcp*."""
     mcp.tool()(worksheet_view)
-    mcp.tool(annotations=ToolAnnotations(destructiveHint=True))(worksheet_structure)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(worksheet_structure)
     mcp.tool()(worksheet_print)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))(worksheet_transfer)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=False))(worksheet_transfer)

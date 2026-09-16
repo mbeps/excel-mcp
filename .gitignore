@@ -38,4 +38,6 @@ GEMINI.md
 CLAUDE.md
 
 docs/**
+subagents/**
 wiki/**
+graphify-out/**

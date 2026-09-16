@@ -176,7 +176,7 @@ def correlation_matrix(
 
 def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(run_regression)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(run_exponential_smoothing)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(run_regression)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(run_exponential_smoothing)
     mcp.tool()(run_solver)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(correlation_matrix)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(correlation_matrix)

@@ -292,9 +292,9 @@ def register(mcp: Any) -> None:
     """Register financial tools on *mcp*."""
     mcp.tool()(goal_seek)
     mcp.tool()(loan_amortization)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(dcf_analysis)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(dcf_analysis)
     mcp.tool()(budget_variance_analysis)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(financial_ratio_analysis)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(financial_ratio_analysis)
     mcp.tool()(break_even_analysis)
     mcp.tool()(create_sensitivity_table)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(time_value_calc)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(time_value_calc)

@@ -30,18 +30,37 @@ def test_run_defaults_to_stdio_calls_noarg_mcp_run(monkeypatch: pytest.MonkeyPat
 
 
 def test_run_http_mode_calls_streamable_http(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HTTP mode should pass streamable-http transport and host/port."""
+    """HTTP mode should pass streamable-http transport, host, port, and stateless_http."""
 
     run_mock = Mock()
-    settings_mock = Mock(host="127.0.0.1", port=8000)
-    monkeypatch.setattr(main_module, "mcp", Mock(run=run_mock, settings=settings_mock))
+    monkeypatch.setattr(main_module, "mcp", Mock(run=run_mock))
     _mock_parsed_args(monkeypatch, Namespace(transport="http", host="0.0.0.0", port=9000))
 
     main_module.run()
 
-    assert settings_mock.host == "0.0.0.0"
-    assert settings_mock.port == 9000
-    run_mock.assert_called_once_with(transport="streamable-http")
+    run_mock.assert_called_once_with(
+        transport="streamable-http",
+        host="0.0.0.0",
+        port=9000,
+        stateless_http=True,
+    )
+
+
+def test_run_streamable_http_mode_calls_streamable_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    """streamable-http mode should pass streamable-http transport, host, port, and stateless_http."""
+
+    run_mock = Mock()
+    monkeypatch.setattr(main_module, "mcp", Mock(run=run_mock))
+    _mock_parsed_args(monkeypatch, Namespace(transport="streamable-http", host="127.0.0.1", port=8000))
+
+    main_module.run()
+
+    run_mock.assert_called_once_with(
+        transport="streamable-http",
+        host="127.0.0.1",
+        port=8000,
+        stateless_http=True,
+    )
 
 
 def test_run_handles_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:

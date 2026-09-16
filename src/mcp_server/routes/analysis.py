@@ -257,11 +257,11 @@ def value_counts(
 def register(mcp: Any) -> None:
     """Register analysis tools on *mcp*."""
     mcp.tool()(sort_data)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(column_statistics)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(aggregate_data)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(find_duplicates)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(vlookup_helper)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(column_statistics)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(aggregate_data)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(find_duplicates)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(vlookup_helper)
     mcp.tool()(filter_data_advanced)
     mcp.tool()(insert_subtotals)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(profile_data)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(value_counts)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(profile_data)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(value_counts)

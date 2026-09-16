@@ -298,9 +298,9 @@ def transpose_range(
 
 def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(read_cells)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(read_cells)
     mcp.tool()(write_cells)
-    mcp.tool(annotations=ToolAnnotations(destructiveHint=True))(clear_range)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(clear_range)
     mcp.tool()(copy_range)
     mcp.tool()(find_replace)
     mcp.tool()(transpose_range)

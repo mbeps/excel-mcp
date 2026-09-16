@@ -118,6 +118,6 @@ def release_file(session_id: str) -> dict:
 
 def register(mcp: Any) -> None:
     """Register file transfer tools on *mcp*."""
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))(upload_file)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(download_file)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))(release_file)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False))(upload_file)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(download_file)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True))(release_file)
