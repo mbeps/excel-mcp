@@ -257,9 +257,9 @@ Run linting with:
 uv run ruff check src/ tests/
 ```
 
-Run MyPy type checks with:
+Run Pyrefly type checks with:
 ```sh
-uv run mypy src/mcp_server
+uv run pyrefly check
 ```
 
 # Prompts

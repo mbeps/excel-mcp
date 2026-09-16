@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 
-from mcp_server.models.statistics import RegressionResult
+from mcp_server.models.statistics import RegressionExtras, RegressionResult
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -42,7 +42,7 @@ def _regression_statsmodels(
     y_clean: np.ndarray,
     X_clean: np.ndarray,
     x_columns: list[str],
-) -> tuple[dict[str, float], dict[str, object]]:
+) -> tuple[dict[str, float], RegressionExtras]:
     """Run regression via statsmodels OLS and return (coefficients, extras)."""
     X_with_const = sm.add_constant(X_clean, has_constant="add")
     model = sm.OLS(y_clean, X_with_const)
@@ -60,7 +60,7 @@ def _regression_statsmodels(
     ]
 
     y_pred = fit.predict(X_with_const)
-    extras: dict[str, object] = {
+    extras: RegressionExtras = {
         "r_squared": round(float(fit.rsquared), 6),
         "adjusted_r_squared": round(float(fit.rsquared_adj), 6),
         "ss_residual": round(float(fit.ssr), 6),
@@ -80,7 +80,7 @@ def _regression_numpy(
     y_clean: np.ndarray,
     X_clean: np.ndarray,
     x_columns: list[str],
-) -> tuple[dict[str, float], dict[str, object]]:
+) -> tuple[dict[str, float], RegressionExtras]:
     """Fallback regression using numpy lstsq."""
     X_with_const = np.column_stack([np.ones(len(X_clean)), X_clean])
     coeffs, _residuals, _rank, _sv = np.linalg.lstsq(X_with_const, y_clean, rcond=None)
@@ -98,7 +98,7 @@ def _regression_numpy(
         "intercept": round(float(coeffs[0]), 6),
         **{col: round(float(c), 6) for col, c in zip(x_columns, coeffs[1:])},
     }
-    extras: dict[str, object] = {
+    extras: RegressionExtras = {
         "r_squared": round(r_sq, 6),
         "adjusted_r_squared": round(adj_r_sq, 6),
         "ss_residual": round(ss_res, 6),
@@ -148,24 +148,24 @@ def run_regression(
     equation = _build_equation(x_columns, coefficients)
 
     results: RegressionResult = {
-        "r_squared": extras["r_squared"],  # type: ignore[typeddict-item]
+        "r_squared": extras["r_squared"],
         "coefficients": coefficients,
-        "n_observations": int(len(y_clean)),
-        "ss_residual": extras["ss_residual"],  # type: ignore[typeddict-item]
-        "ss_total": extras["ss_total"],  # type: ignore[typeddict-item]
+        "n_observations": len(y_clean),
+        "ss_residual": extras["ss_residual"],
+        "ss_total": extras["ss_total"],
         "output_sheet": output_sheet,
         "intercept": coefficients["intercept"],
         "equation": equation,
-        "predictions": extras["predictions"],  # type: ignore[typeddict-item]
-        "adjusted_r_squared": extras["adjusted_r_squared"],  # type: ignore[typeddict-item]
+        "predictions": extras["predictions"],
+        "adjusted_r_squared": extras["adjusted_r_squared"],
     }
     if "std_errors" in extras:
-        results["std_errors"] = extras["std_errors"]  # type: ignore[typeddict-item]
-        results["t_values"] = extras["t_values"]  # type: ignore[typeddict-item]
-        results["p_values"] = extras["p_values"]  # type: ignore[typeddict-item]
-        results["f_statistic"] = extras["f_statistic"]  # type: ignore[typeddict-item]
-        results["f_pvalue"] = extras["f_pvalue"]  # type: ignore[typeddict-item]
-        results["confidence_intervals"] = extras["confidence_intervals"]  # type: ignore[typeddict-item]
+        results["std_errors"] = extras["std_errors"]
+        results["t_values"] = extras["t_values"]
+        results["p_values"] = extras["p_values"]
+        results["f_statistic"] = extras["f_statistic"]
+        results["f_pvalue"] = extras["f_pvalue"]
+        results["confidence_intervals"] = extras["confidence_intervals"]
 
     # ── Write results to sheet ──
     target_file = output_file or file_path

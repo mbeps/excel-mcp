@@ -14,7 +14,7 @@ try:
     from mcp.server.mcpserver.exceptions import ToolError
 except ImportError:  # pragma: no cover
 
-    class ToolError(Exception):  # type: ignore[no-redef]
+    class ToolError(Exception):
         """Fallback ToolError when mcp is not installed."""
 
         pass

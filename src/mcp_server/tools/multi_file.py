@@ -134,7 +134,7 @@ def bulk_filter_multi_files(
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
 
-    per_file: list[dict] = []
+    per_file: list[MultiFileFilterPerFileResult] = []
     matched_frames: list[pd.DataFrame] = []
 
     for fp in file_paths:

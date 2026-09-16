@@ -304,7 +304,7 @@ def write_multi_sheet(
 
         summary.append(
             SheetCreatedInfo(
-                name=str(name),
+                name=name,
                 header_count=len(headers),
                 row_count=rows_written,
                 column_widths_set=list(column_widths.keys()) if column_widths else [],

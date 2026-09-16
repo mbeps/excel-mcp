@@ -199,7 +199,8 @@ def refresh_pivot_table(
         column_field=params.get("column_field"),
     )
 
-    rows = len(result.get("data", []))  # type: ignore[arg-type]
+    data = result.get("data")
+    rows = len(data) if isinstance(data, list) else 0
     logger.info("Refreshed pivot '%s' in %s (%d rows)", output_sheet, file_path, rows)
     return {
         "refreshed": output_sheet,

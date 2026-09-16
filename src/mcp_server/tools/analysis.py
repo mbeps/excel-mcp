@@ -260,7 +260,7 @@ def aggregate_data(
     operation: str = "sum",
     has_header: bool = True,
     aggfunc: str | dict | None = None,
-) -> dict[str, list[dict[str, CellScalar]] | str | list[str]]:
+) -> dict[str, list[dict[str, CellScalar]] | str | list[str] | dict]:
     """Group by one or more columns and aggregate a value column using a named operation or custom agg dict.
 
     Args:
