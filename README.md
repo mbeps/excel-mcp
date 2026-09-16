@@ -193,7 +193,7 @@ In the `.vscode/mcp.json` add:
 ```
 
 - ### Anthropic Claude
-Expose the FastMCP server via the Streamable HTTP transport and register it with Claude/Claude Code for direct tool use. For development you can also use the MCP Inspector or run a small HTTP adapter that forwards Claude Messages to the MCP server.
+Expose the MCP server via the stateless Streamable HTTP transport and register it with Claude/Claude Code for direct tool use. For development you can also use the MCP Inspector or run a small HTTP adapter that forwards Claude Messages to the MCP server.
 
 Example (from research spec):
 ```sh
@@ -394,24 +394,9 @@ This section merges the previous "Tool Overview" and the full grouped tool list.
   - `insert_image` — Insert an image into a worksheet anchored at a target cell.
   - `execute_custom_code` — Run sandboxed Python/pandas code against a workbook and return results.
 
- 
-# Architecture
-- **Modular design**: `src/mcp_server/` is split into `tools/` (25 pure domain modules), `routes/` (15 registration/dispatch modules), `models/` (Pydantic response schemas), and `utils/` (shared workbook, logging, and expression-safety helpers).
-- **Entry point**: `src/mcp_server/main.py` creates the FastMCP server, registers 2 JSON resources directly (`excel://workbook/{file_path}/sheets`, `excel://workbook/{file_path}/sheet/{sheet_name}/preview`), calls `register_all_routes(mcp)` to register the tool surface, and calls `_register_prompts(mcp)` from `src/mcp_server/prompts.py` to register 20 prompts. Supports both STDIO (default) and HTTP transport selection via `--transport {stdio,http}` CLI flags.
-- **Data flow**: MCP client → FastMCP (stdio/JSON-RPC or HTTP) → `main.py` → `routes/*.py` (registration/dispatch) → `tools/*.py` (domain logic) → `openpyxl` / `pandas` / `scipy` and related libraries → Pydantic models → JSON-RPC response. HTTP mode uses temp-file resolution (`utils/file_resolver.py`) to convert remote inputs to local paths before reaching the tool layer.
-- **Utilities**: `src/mcp_server/utils/excel_helpers.py` centralises safe workbook access and workbook path validation; `logger.py` keeps logs on stderr; `expression_validator.py` provides shared AST validation for user-supplied expressions.
-- **Safety**: Workbook paths are checked against an extension whitelist and optional `EXCEL_MCP_ALLOWED_DIRS` sandbox; AST validation is reused by `goal_seek`, `create_sensitivity_table`, and computed-column expressions; `execute_custom_code` uses a separate sandboxed validation path.
-- **Workbook lifecycle**: Openpyxl-backed workbook tools generally use `load_workbook_safe()` / `save_workbook_safe()` with explicit close handling, while pandas/CSV flows and hidden-sheet state (`_mcp_pivots`, `_mcp_scenarios`) follow separate storage paths.
-
-## Extending
-- Add new tool functions under `src/mcp_server/tools/` (pure functions, no decorators).
-- Expose that logic through an existing `src/mcp_server/routes/` module, or add a new route module with a `register(mcp)` function and include it in `register_all_routes()` in `src/mcp_server/routes/__init__.py`.
-- Add tests in `tests/` using pytest and the `tmp_path` fixture where appropriate.
-- Run `uv run ruff check src/ tests/` to lint and `uv run pytest -v` to test.
-
 ## References
 - [Model Context Protocol specification](https://modelcontextprotocol.io/specification)
-- [FastMCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
 - [uv documentation](https://docs.astral.sh/uv/)
 - [openpyxl documentation](https://openpyxl.readthedocs.io/)
 - [pandas documentation](https://pandas.pydata.org/docs/)

@@ -109,4 +109,4 @@ def formula_audit(
 def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool()(formula_write)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(formula_audit)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(formula_audit)

@@ -151,8 +151,8 @@ def sheet_management(
 
 def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(get_workbook_metadata)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(get_workbook_metadata)
     mcp.tool()(create_workbook)
-    mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))(get_sheet_summary)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(get_sheet_summary)
     mcp.tool()(write_multi_sheet)
     mcp.tool()(sheet_management)

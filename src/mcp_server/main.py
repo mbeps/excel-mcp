@@ -1,7 +1,7 @@
 """excel-mcp MCP server entrypoint and route registration.
 
-This module configures logging and initialises the MCP `mcp` object (a
-`FastMCP` instance) unless tool registration is disabled for testing. It
+This module configures logging and initialises the MCP `mcp` object (an
+`MCPServer` instance) unless tool registration is disabled for testing. It
 registers JSON resources and all tool routes, exposes a backwards-compatible
 set of route exports for tests/consumers, and provides `run()` as the
 convenience entrypoint to start the server.
@@ -45,14 +45,24 @@ class _NoopMCP:
     def run(self, *args: Any, **kwargs: Any) -> None:
         pass
 
+    def streamable_http_app(self, *args: Any, **kwargs: Any) -> Any:
+        return None
+
 
 mcp: Any
 if __import__("os").environ.get("MCP_SERVER_DISABLE_TOOL_REGISTRATION") == "1":
     mcp = _NoopMCP()
 else:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer, ResourceSecurity
 
-    mcp = FastMCP("excel-mcp-server")
+    mcp = MCPServer(
+        name="excel-mcp-server",
+        version="0.1.0",
+        description="MCP server for Excel automation and data manipulation",
+        resource_security=ResourceSecurity(exempt_params={"file_path"}),
+    )
+
+app: Any = mcp.streamable_http_app(stateless_http=True) if hasattr(mcp, "streamable_http_app") else None
 
 logger: Logger = configure_logging("mcp_server.main")
 
@@ -146,24 +156,26 @@ def run() -> None:
     parser = argparse.ArgumentParser(description="Excel MCP Server")
     parser.add_argument(
         "--transport",
-        choices=["stdio", "http"],
+        choices=["stdio", "http", "streamable-http"],
         default="stdio",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
 
-    if args.transport == "http":
-        logger.info("Starting MCP server in http mode on %s:%s", args.host, args.port)
+    if args.transport in ("http", "streamable-http"):
+        logger.info("Starting MCP server in streamable-http mode on %s:%s", args.host, args.port)
     else:
         logger.info("Starting MCP server in stdio mode")
 
     try:
-        if args.transport == "http":
-            if hasattr(mcp, "settings"):
-                mcp.settings.host = args.host
-                mcp.settings.port = args.port
-            mcp.run(transport="streamable-http")
+        if args.transport in ("http", "streamable-http"):
+            mcp.run(
+                transport="streamable-http",
+                host=args.host,
+                port=args.port,
+                stateless_http=True,
+            )
         else:
             mcp.run()
     except KeyboardInterrupt:

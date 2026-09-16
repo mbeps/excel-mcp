@@ -214,4 +214,4 @@ def register(mcp: Any) -> None:
     mcp.tool()(unpivot_data)
     mcp.tool()(merge_datasets)
     mcp.tool()(add_computed_column)
-    mcp.tool(annotations=ToolAnnotations(destructiveHint=True))(deduplicate_data)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(deduplicate_data)
