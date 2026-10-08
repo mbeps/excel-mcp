@@ -30,10 +30,24 @@ packages = ["src/mcp_server"]
 [dependency-groups]
 dev = [
     "pyrefly>=1.1.1",
+    # "rpytest>=0.1.0",
     "pytest>=8.3.3",
     "pytest-cov>=7.1.0",
     "ruff>=0.14.9",
+    "poethepoet>=0.48.0",
 ]
+
+[tool.poe.tasks]
+run-stdio = "uv run src/mcp_server/main.py"
+run-http = "uv run excel-mcp --transport http"
+test = "uv run pytest -v"
+test-coverage = "uv run pytest -v --cov=src --cov-report=term-missing"
+test-quick = "uv run pytest -v -x"
+lint = "ruff check src/ tests/"
+lint-fix = "ruff check src/ tests/ --fix"
+format = "ruff format ."
+type-check = "pyrefly check"
+type-check-strict = "pyrefly check --min-severity error"
 
 [tool.ruff]
 line-length = 120
