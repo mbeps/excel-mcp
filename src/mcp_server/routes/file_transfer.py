@@ -16,8 +16,9 @@ __all__ = [
 
 
 def upload_file(
-    file_content: str | list[str],
+    file_content: str | list[str] | None = None,
     filename: str | list[str] = "workbook.xlsx",
+    url: str | list[str] | None = None,
 ) -> dict:
     """Upload a file for server-side processing.
 
@@ -28,6 +29,7 @@ def upload_file(
     Args:
         file_content: Base64-encoded file bytes OR an HTTP/HTTPS URL pointing to the file.
         filename: Filename hint used to determine the file extension (e.g. "data.xlsx", "report.csv").
+        url: Optional alias for file_content when passing an HTTP/HTTPS URL.
 
     Returns:
         dict: A mapping containing:
@@ -35,18 +37,22 @@ def upload_file(
             - file_path (str): Server-side local path — use this as file_path in other tools.
             - message (str): Human-readable confirmation.
     """
-    if isinstance(file_content, list):
+    effective_content = file_content if file_content is not None else url
+    if effective_content is None:
+        raise ValueError("Either 'file_content' or 'url' must be provided to upload_file")
+
+    if isinstance(effective_content, list):
         if isinstance(filename, list):
-            if len(filename) != len(file_content):
+            if len(filename) != len(effective_content):
                 raise ValueError(
                     "When passing multiple files, filename list length must match file_content list length"
                 )
             filename_hints = filename
         else:
-            filename_hints = [filename] * len(file_content)
+            filename_hints = [filename] * len(effective_content)
 
         items: list[dict] = []
-        for content, name_hint in zip(file_content, filename_hints, strict=True):
+        for content, name_hint in zip(effective_content, filename_hints, strict=True):
             path, is_temp = resolve_to_local(content, name_hint)
             session_id = session_store.register(path, is_temp=is_temp)
             items.append(
@@ -64,7 +70,7 @@ def upload_file(
         }
 
     filename_hint = filename[0] if isinstance(filename, list) and filename else "workbook.xlsx"
-    path, is_temp = resolve_to_local(file_content, filename_hint)
+    path, is_temp = resolve_to_local(effective_content, filename_hint)
     session_id = session_store.register(path, is_temp=is_temp)
     return {
         "session_id": session_id,
