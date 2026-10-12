@@ -33,12 +33,9 @@ Thumbs.db
 .mypy_cache/**
 .pyrefly_cache/**
 
-copilot-instructions.md
-AGENT.md
-GEMINI.md
-CLAUDE.md
-
+AGENTS.md
 docs/**
 subagents/**
 wiki/**
 graphify-out/**
+.github/skills/**
