@@ -7,6 +7,7 @@ via ``read_sheet_df()`` and may write results back using ``load_workbook_safe()`
 from __future__ import annotations
 
 import difflib
+import math
 from logging import Logger
 from typing import Any
 
@@ -17,12 +18,14 @@ from scipy import stats
 from mcp_server.models.analysis import ColumnStats
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
-    col_letter_to_index,
     get_sheet,
     load_workbook_safe,
     read_sheet_df,
+    resolve_dataframe_column,
+    sanitize_excel_value,
     save_workbook_safe,
     validate_file_path,
+    write_dataframe_to_workbook,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -30,6 +33,20 @@ logger: Logger = configure_logging(__name__)
 
 FILTER_OPERATORS = {"==", "!=", ">", "<", ">=", "<=", "contains", "startswith", "endswith"}
 AGGREGATE_OPERATIONS = {"sum", "mean", "count", "min", "max", "median", "std"}
+
+
+def _get_col_series(df: pd.DataFrame, col_key: Any) -> pd.Series:
+    """Return a single Series for *col_key*, even if *df* has duplicate column names."""
+    idx = list(df.columns).index(col_key)
+    return df.iloc[:, idx]
+
+
+def _finite_or_none(val: Any) -> float | None:
+    """Convert numeric scalar to float, returning None for NaN/Inf."""
+    if val is None or pd.isna(val):
+        return None
+    f = float(val)
+    return f if math.isfinite(f) else None
 
 
 def filter_data_advanced(
@@ -72,34 +89,38 @@ def filter_data_advanced(
 
     masks = []
     for cond in conditions:
-        col_name = cond["column"]
+        col_name = resolve_dataframe_column(df, cond["column"])
         operator = cond["operator"]
         value = cond["value"]
 
         if operator not in FILTER_OPERATORS:
             raise ValueError(f"Unsupported operator '{operator}'. Allowed: {FILTER_OPERATORS}")
-        if col_name not in df.columns:
-            raise ValueError(f"Column '{col_name}' not found. Available: {list(df.columns)}")
 
-        col = df[col_name]
-        if operator == "==":
-            mask = col == value
-        elif operator == "!=":
-            mask = col != value
-        elif operator == ">":
-            mask = col > value
-        elif operator == "<":
-            mask = col < value
-        elif operator == ">=":
-            mask = col >= value
-        elif operator == "<=":
-            mask = col <= value
-        elif operator == "contains":
-            mask = col.astype(str).str.contains(str(value), case=False, na=False)
-        elif operator == "startswith":
-            mask = col.astype(str).str.startswith(str(value), na=False)
-        else:  # endswith
-            mask = col.astype(str).str.endswith(str(value), na=False)
+        col = _get_col_series(df, col_name)
+        try:
+            if operator == "==":
+                mask = col == value
+            elif operator == "!=":
+                mask = col != value
+            elif operator == ">":
+                mask = col > value
+            elif operator == "<":
+                mask = col < value
+            elif operator == ">=":
+                mask = col >= value
+            elif operator == "<=":
+                mask = col <= value
+            elif operator == "contains":
+                str_col = col.where(col.notna(), other=pd.NA).astype("string")
+                mask = str_col.str.contains(str(value), case=False, na=False, regex=False)
+            elif operator == "startswith":
+                str_col = col.where(col.notna(), other=pd.NA).astype("string")
+                mask = str_col.str.startswith(str(value), na=False)
+            else:  # endswith
+                str_col = col.where(col.notna(), other=pd.NA).astype("string")
+                mask = str_col.str.endswith(str(value), na=False)
+        except TypeError as e:
+            raise ValueError(f"Cannot compare column '{col_name}' with value {value!r} using '{operator}': {e}") from e
         masks.append(mask)
 
     combined = masks[0]
@@ -109,24 +130,17 @@ def filter_data_advanced(
     matched = df[combined]
 
     if output_sheet:
-        wb = load_workbook_safe(file_path)
-        if output_sheet in wb.sheetnames:
-            ws = wb[output_sheet]
-            for row in ws.iter_rows():
-                for cell in row:
-                    cell.value = None
-        else:
-            ws = wb.create_sheet(output_sheet)
-        for c_idx, col_name in enumerate(matched.columns, start=1):
-            ws.cell(row=1, column=c_idx, value=col_name)
-        for r_idx, row_data in enumerate(matched.values.tolist(), start=2):
-            for c_idx, val in enumerate(row_data, start=1):
-                ws.cell(row=r_idx, column=c_idx, value=val)
-        save_workbook_safe(wb, file_path)
+        write_dataframe_to_workbook(
+            matched,
+            file_path,
+            sheet_name=output_sheet,
+            start_row=1,
+            include_header=True,
+        )
 
     return {
         "rows": len(matched),
-        "data": matched.values.tolist()[:100],
+        "data": [[sanitize_excel_value(v) for v in row] for row in matched.values.tolist()[:100]],
     }
 
 
@@ -161,33 +175,23 @@ def sort_data(
     df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
 
     if sort_by:
-        cols = [s["column"] for s in sort_by]
+        cols = [resolve_dataframe_column(df, s["column"]) for s in sort_by]
         asc = [s.get("ascending", True) for s in sort_by]
-        for c in cols:
-            if c not in df.columns:
-                raise ValueError(f"Column '{c}' not found. Available: {list(df.columns)}")
         df = df.sort_values(by=cols, ascending=asc)
     elif column:
-        if column not in df.columns:
-            raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
-        df = df.sort_values(by=column, ascending=ascending)
+        col_key = resolve_dataframe_column(df, column)
+        df = df.sort_values(by=col_key, ascending=ascending)
     else:
         raise ValueError("Provide either 'sort_by' or 'column' to sort.")
 
-    wb = load_workbook_safe(file_path)
-    ws = get_sheet(wb, sheet_name)
-
-    # Clear existing data rows (keep header if present)
     start_row = 2 if has_header else 1
-    for row in ws.iter_rows(min_row=start_row, max_row=ws.max_row, max_col=ws.max_column):
-        for cell in row:
-            cell.value = None
-
-    for r_idx, row_data in enumerate(df.values.tolist(), start=start_row):
-        for c_idx, val in enumerate(row_data, start=1):
-            ws.cell(row=r_idx, column=c_idx, value=val)
-
-    save_workbook_safe(wb, file_path)
+    write_dataframe_to_workbook(
+        df,
+        file_path,
+        sheet_name=sheet_name,
+        start_row=start_row,
+        include_header=False,
+    )
     logger.info("Sorted sheet '%s' in %s", sheet_name, file_path)
     return f"Sorted {len(df)} rows in '{sheet_name}'."
 
@@ -211,42 +215,34 @@ def column_statistics(file_path: str, sheet_name: str, column: str, has_header: 
         - Uses pandas via ``read_sheet_df()``; no workbook mutation.
     """
     df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
-    if column not in df.columns:
-        if column.isalpha() and len(column) <= 3:
-            idx = col_letter_to_index(column) - 1
-            all_cols = list(df.columns)
-            if 0 <= idx < len(all_cols):
-                column = str(all_cols[idx])
-            else:
-                raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
-        else:
-            raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
+    col_key = resolve_dataframe_column(df, column)
+    col_name = str(col_key)
+    col = _get_col_series(df, col_key)
 
-    col = df[column]
-    if not pd.api.types.is_numeric_dtype(col):
+    if not pd.api.types.is_numeric_dtype(col) or pd.api.types.is_bool_dtype(col):
         return ColumnStats(
-            column=column,
+            column=col_name,
             count=int(col.count()),
-            message=f"Column '{column}' is not numeric (dtype: {col.dtype}). Cannot compute statistics.",
+            message=f"Column '{col_name}' is not numeric (dtype: {col.dtype}). Cannot compute statistics.",
         )
 
     desc = col.describe()
     numeric_vals = col.dropna()
     skewness: float | None = None
     kurtosis: float | None = None
-    if len(numeric_vals) >= 3:
-        skewness = float(stats.skew(numeric_vals, bias=False))
-        kurtosis = float(stats.kurtosis(numeric_vals, bias=False))
+    if len(numeric_vals) >= 3 and numeric_vals.nunique() > 1:
+        skewness = _finite_or_none(stats.skew(numeric_vals, bias=False))
+        kurtosis = _finite_or_none(stats.kurtosis(numeric_vals, bias=False))
 
     return ColumnStats(
-        column=column,
+        column=col_name,
         count=int(desc["count"]),
-        mean=float(desc["mean"]),
-        median=float(col.median()),
-        min_val=float(desc["min"]),
-        max_val=float(desc["max"]),
-        std=float(desc["std"]),
-        sum_val=float(col.sum()),
+        mean=_finite_or_none(desc["mean"]),
+        median=_finite_or_none(col.median()),
+        min_val=_finite_or_none(desc["min"]),
+        max_val=_finite_or_none(desc["max"]),
+        std=_finite_or_none(desc["std"]),
+        sum_val=_finite_or_none(col.sum()),
         skewness=skewness,
         kurtosis=kurtosis,
     )
@@ -283,30 +279,28 @@ def aggregate_data(
     """
     group_cols = [group_by] if isinstance(group_by, str) else list(group_by)
     df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
-    for col_name in group_cols:
-        if col_name not in df.columns:
-            raise ValueError(f"Column '{col_name}' not found. Available: {list(df.columns)}")
+    group_cols = [resolve_dataframe_column(df, col_name) for col_name in group_cols]
 
     effective_aggfunc = aggfunc if aggfunc is not None else operation
 
     if isinstance(effective_aggfunc, dict):
-        for col_name in effective_aggfunc:
-            if col_name not in df.columns:
-                raise ValueError(f"Column '{col_name}' not found. Available: {list(df.columns)}")
-        grouped = df.groupby(group_cols).agg(effective_aggfunc).reset_index()
+        resolved_aggfunc = {resolve_dataframe_column(df, k): v for k, v in effective_aggfunc.items()}
+        grouped = df.groupby(group_cols).agg(resolved_aggfunc).reset_index()
         grouped.columns = [
             "_".join(str(c) for c in col).strip("_") if isinstance(col, tuple) else col for col in grouped.columns
         ]
     else:
         if effective_aggfunc not in AGGREGATE_OPERATIONS:
             raise ValueError(f"Unsupported operation '{effective_aggfunc}'. Allowed: {AGGREGATE_OPERATIONS}")
-        if value_column not in df.columns:
-            raise ValueError(f"Column '{value_column}' not found. Available: {list(df.columns)}")
-        grouped = df.groupby(group_cols)[value_column].agg(effective_aggfunc).reset_index()
-        grouped.columns = list(group_cols) + [f"{value_column}_{effective_aggfunc}"]
+        resolved_val_col = resolve_dataframe_column(df, value_column)
+        grouped = df.groupby(group_cols)[resolved_val_col].agg(effective_aggfunc).reset_index()
+        grouped.columns = list(group_cols) + [f"{resolved_val_col}_{effective_aggfunc}"]
 
+    groups_records = [
+        {str(k): sanitize_excel_value(v) for k, v in rec.items()} for rec in grouped.to_dict(orient="records")
+    ]
     return {
-        "groups": grouped.to_dict(orient="records"),
+        "groups": groups_records,
         "group_by": group_by,
         "operation": effective_aggfunc,
     }
@@ -330,35 +324,26 @@ def find_duplicates(
         ValueError: if any column is not found.
     """
     df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
-    for c in columns:
-        if c not in df.columns:
-            raise ValueError(f"Column '{c}' not found. Available: {list(df.columns)}")
+    resolved_cols = [resolve_dataframe_column(df, c) for c in columns]
 
-    mask = df.duplicated(subset=columns, keep=False)
+    mask = df.duplicated(subset=resolved_cols, keep=False)
     dupes = df[mask]
     return {
-        "duplicates": dupes.values.tolist(),
+        "duplicates": [[sanitize_excel_value(v) for v in row] for row in dupes.values.tolist()],
         "count": len(dupes),
-        "headers": list(df.columns),
+        "headers": [str(c) for c in df.columns],
     }
 
 
 def _resolve_column_index(ws: Any, header_row: int, col_ref: str) -> int:
     """Resolve a column reference to a 1-based column index.
 
-    Accepts Excel column letters (e.g. "A", "BC") or header names (e.g. "Name", "Amount").
+    Checks exact and case-insensitive header names first, then Excel column letters (e.g. "A", "BC").
     """
     from openpyxl.utils import column_index_from_string
 
-    # Try as Excel column letter if purely alphabetic and 1-3 chars
-    if col_ref.isalpha() and len(col_ref) <= 3:
-        try:
-            return int(column_index_from_string(col_ref.upper()))
-        except ValueError:
-            pass
-
-    # Fall back to header name scan
-    header_cells = list(ws.iter_rows(min_row=header_row, max_row=header_row))[0]
+    header_rows = list(ws.iter_rows(min_row=header_row, max_row=header_row))
+    header_cells = header_rows[0] if header_rows else []
     available: list[str] = []
     for cell in header_cells:
         if cell.value is not None:
@@ -366,7 +351,21 @@ def _resolve_column_index(ws: Any, header_row: int, col_ref: str) -> int:
             available.append(header_name)
             if header_name == col_ref:
                 return int(cell.column)
-    raise ValueError(f"Column '{col_ref}' not found as a column letter or header name. Available headers: {available}")
+    lower_ref = col_ref.lower()
+    for cell in header_cells:
+        if cell.value is not None and str(cell.value).lower() == lower_ref:
+            return int(cell.column)
+
+    stripped = col_ref.strip()
+    if stripped.isalpha() and len(stripped) <= 3:
+        try:
+            idx = int(column_index_from_string(stripped.upper()))
+        except ValueError:
+            idx = -1
+        if 1 <= idx <= (ws.max_column or 1):
+            return idx
+
+    raise ValueError(f"Column '{col_ref}' not found as a header name or column letter. Available headers: {available}")
 
 
 def vlookup_helper(
@@ -409,66 +408,73 @@ def vlookup_helper(
     """
 
     # Load lookup workbook
-    lookup_wb = load_workbook_safe(lookup_file, read_only=True)
-    lookup_ws = get_sheet(lookup_wb, lookup_sheet)
-    lookup_col_idx = _resolve_column_index(lookup_ws, header_row, lookup_column)
+    lookup_wb = load_workbook_safe(lookup_file, read_only=True, data_only=True)
+    lookup_values: list[tuple[int, Any]] = []
+    try:
+        lookup_ws = get_sheet(lookup_wb, lookup_sheet)
+        lookup_col_idx = _resolve_column_index(lookup_ws, header_row, lookup_column)
 
-    # Extract lookup values (skip header row)
-    lookup_values: list[tuple[int, str | int | float | None]] = []
-    for row_idx, row in enumerate(
-        lookup_ws.iter_rows(min_row=header_row + 1, max_row=lookup_ws.max_row),
-        start=header_row + 1,
-    ):
-        cell = row[lookup_col_idx - 1] if lookup_col_idx - 1 < len(row) else None
-        if cell is not None and cell.value is not None:
-            lookup_values.append((row_idx, cell.value))
-    lookup_wb.close()
+        # Extract lookup values (skip header row)
+        for row_idx, row in enumerate(
+            lookup_ws.iter_rows(min_row=header_row + 1, max_row=lookup_ws.max_row),
+            start=header_row + 1,
+        ):
+            cell = row[lookup_col_idx - 1] if lookup_col_idx - 1 < len(row) else None
+            if cell is not None and cell.value is not None:
+                lookup_values.append((row_idx, cell.value))
+    finally:
+        lookup_wb.close()
 
     # Load data workbook
-    data_wb = load_workbook_safe(data_file, read_only=True)
-    data_ws = get_sheet(data_wb, data_sheet)
-    data_key_idx = _resolve_column_index(data_ws, header_row, data_key_column)
-    return_col_idxs = [_resolve_column_index(data_ws, header_row, c) for c in data_return_columns]
-
-    # Extract header names from the data file
-    header_cells = list(data_ws.iter_rows(min_row=header_row, max_row=header_row))[0]
-    return_headers = []
-    for idx in return_col_idxs:
-        if idx - 1 < len(header_cells) and header_cells[idx - 1].value is not None:
-            return_headers.append(str(header_cells[idx - 1].value))
-        else:
-            return_headers.append(f"Col_{idx}")
-
-    # Build data lookup index: key_value -> list of return-column values
+    data_wb = load_workbook_safe(data_file, read_only=True, data_only=True)
+    return_headers: list[str] = []
     data_rows: list[tuple[object, list[object]]] = []
-    for row in data_ws.iter_rows(min_row=header_row + 1, max_row=data_ws.max_row):
-        key_cell = row[data_key_idx - 1] if data_key_idx - 1 < len(row) else None
-        key_val = key_cell.value if key_cell is not None else None
-        ret_vals = []
+    exact_index: dict[tuple[bool, Any], tuple[Any, list[Any]]] = {}
+    try:
+        data_ws = get_sheet(data_wb, data_sheet)
+        data_key_idx = _resolve_column_index(data_ws, header_row, data_key_column)
+        return_col_idxs = [_resolve_column_index(data_ws, header_row, c) for c in data_return_columns]
+
+        # Extract header names from the data file
+        header_rows = list(data_ws.iter_rows(min_row=header_row, max_row=header_row))
+        header_cells = header_rows[0] if header_rows else []
         for idx in return_col_idxs:
-            c = row[idx - 1] if idx - 1 < len(row) else None
-            ret_vals.append(c.value if c is not None else None)
-        data_rows.append((key_val, ret_vals))
-    data_wb.close()
+            if idx - 1 < len(header_cells) and header_cells[idx - 1].value is not None:
+                return_headers.append(str(header_cells[idx - 1].value))
+            else:
+                return_headers.append(f"Col_{idx}")
+
+        # Build data lookup index: key_value -> list of return-column values
+        for row in data_ws.iter_rows(min_row=header_row + 1, max_row=data_ws.max_row):
+            key_cell = row[data_key_idx - 1] if data_key_idx - 1 < len(row) else None
+            key_val = key_cell.value if key_cell is not None else None
+            ret_vals = []
+            for idx in return_col_idxs:
+                c = row[idx - 1] if idx - 1 < len(row) else None
+                ret_vals.append(c.value if c is not None else None)
+            data_rows.append((key_val, ret_vals))
+            if key_val is not None:
+                typed_key = (isinstance(key_val, bool), key_val)
+                if typed_key not in exact_index:
+                    exact_index[typed_key] = (key_val, ret_vals)
+    finally:
+        data_wb.close()
 
     # Perform matching
     results: list[dict] = []
     for _src_row, lv in lookup_values:
-        if lv is None:
-            continue
-
         best_match: dict | None = None
 
         if not fuzzy:
-            # Exact match
-            for dk, dvals in data_rows:
-                if dk == lv:
-                    best_match = {
-                        "lookup_value": lv,
-                        "matched_value": dk,
-                        "return_values": dict(zip(return_headers, dvals)),
-                    }
-                    break
+            # Exact O(1) match (distinguishing bool from int)
+            hit = exact_index.get((isinstance(lv, bool), lv))
+            if hit is not None:
+                dk, dvals = hit
+                best_match = {
+                    "lookup_value": lv,
+                    "matched_value": dk,
+                    "return_values": dict(zip(return_headers, dvals)),
+                }
         else:
             # Fuzzy string matching
             lv_str = str(lv)
@@ -501,33 +507,39 @@ def vlookup_helper(
     if output_file:
         validate_file_path(output_file, must_exist=False)
         out_wb = openpyxl.Workbook()
-        out_ws = out_wb.active
-        out_ws.title = "VLookup Results"
+        try:
+            out_ws = out_wb.active
+            if out_ws is None:  # pragma: no cover
+                out_ws = out_wb.create_sheet("VLookup Results")
+            else:
+                out_ws.title = "VLookup Results"
 
-        # Write headers
-        out_headers = ["Lookup Value", "Matched Value"]
-        if fuzzy:
-            out_headers.append("Similarity")
-        out_headers.extend(return_headers)
-        for c_idx, h in enumerate(out_headers, start=1):
-            out_ws.cell(row=1, column=c_idx, value=h)
-
-        # Write data rows
-        for r_idx, row_data in enumerate(results, start=2):
-            c = 1
-            out_ws.cell(row=r_idx, column=c, value=row_data["lookup_value"])
-            c += 1
-            out_ws.cell(row=r_idx, column=c, value=row_data["matched_value"])
-            c += 1
+            # Write headers
+            out_headers = ["Lookup Value", "Matched Value"]
             if fuzzy:
-                out_ws.cell(row=r_idx, column=c, value=row_data.get("similarity"))
-                c += 1
-            for h in return_headers:
-                out_ws.cell(row=r_idx, column=c, value=row_data["return_values"].get(h))
-                c += 1
+                out_headers.append("Similarity")
+            out_headers.extend(return_headers)
+            for c_idx, h in enumerate(out_headers, start=1):
+                out_ws.cell(row=1, column=c_idx, value=h)
 
-        save_workbook_safe(out_wb, output_file)
-        logger.info("VLookup results written to %s", output_file)
+            # Write data rows
+            for r_idx, row_data in enumerate(results, start=2):
+                c = 1
+                out_ws.cell(row=r_idx, column=c, value=sanitize_excel_value(row_data["lookup_value"]))
+                c += 1
+                out_ws.cell(row=r_idx, column=c, value=sanitize_excel_value(row_data["matched_value"]))
+                c += 1
+                if fuzzy:
+                    out_ws.cell(row=r_idx, column=c, value=sanitize_excel_value(row_data.get("similarity")))
+                    c += 1
+                for h in return_headers:
+                    out_ws.cell(row=r_idx, column=c, value=sanitize_excel_value(row_data["return_values"].get(h)))
+                    c += 1
+
+            save_workbook_safe(out_wb, output_file)
+            logger.info("VLookup results written to %s", output_file)
+        finally:
+            out_wb.close()
 
     return {
         "matched": sum(1 for r in results if r["matched_value"] is not None),
@@ -568,15 +580,15 @@ def profile_data(
 
         min_col, min_row, max_col, max_row = range_boundaries(data_range)
         # Adjust to 0-based DataFrame indices (row 1 is header, data starts at row 2)
-        row_start = min_row - 2  # header is row 1
-        row_end = max_row - 1
-        col_start = min_col - 1
-        col_end = max_col
-        df = df.iloc[max(row_start, 0) : row_end, col_start:col_end]
+        row_start = max((min_row - 2), 0) if min_row is not None else 0
+        row_end = (max_row - 1) if max_row is not None else None
+        col_start = (min_col - 1) if min_col is not None else 0
+        col_end = max_col if max_col is not None else None
+        df = df.iloc[row_start:row_end, col_start:col_end]
 
     columns_profile: list[dict] = []
-    for col_name in df.columns:
-        col = df[col_name]
+    for idx, col_name in enumerate(df.columns):
+        col = df.iloc[:, idx]
         info: dict = {
             "name": str(col_name),
             "dtype": str(col.dtype),
@@ -588,12 +600,12 @@ def profile_data(
         non_null = col.dropna()
         info["sample_values"] = [str(v) for v in non_null.head(3).tolist()]
 
-        if pd.api.types.is_numeric_dtype(col):
-            info["min"] = float(non_null.min()) if len(non_null) else None
-            info["max"] = float(non_null.max()) if len(non_null) else None
-            info["mean"] = float(non_null.mean()) if len(non_null) else None
-            info["median"] = float(non_null.median()) if len(non_null) else None
-            info["std"] = float(non_null.std()) if len(non_null) > 1 else None
+        if pd.api.types.is_numeric_dtype(col) and not pd.api.types.is_bool_dtype(col):
+            info["min"] = _finite_or_none(non_null.min()) if len(non_null) else None
+            info["max"] = _finite_or_none(non_null.max()) if len(non_null) else None
+            info["mean"] = _finite_or_none(non_null.mean()) if len(non_null) else None
+            info["median"] = _finite_or_none(non_null.median()) if len(non_null) else None
+            info["std"] = _finite_or_none(non_null.std()) if len(non_null) > 1 else None
             info["p25"] = round(float(non_null.quantile(0.25)), 2) if len(non_null) else None
             info["p75"] = round(float(non_null.quantile(0.75)), 2) if len(non_null) else None
             info["p90"] = round(float(non_null.quantile(0.90)), 2) if len(non_null) else None
@@ -656,16 +668,14 @@ def insert_subtotals(
 
     df = read_sheet_df(file_path, sheet_name, header_row=1)
 
-    if group_col not in df.columns:
-        raise ValueError(f"group_col '{group_col}' not found. Available: {list(df.columns)}")
-    if value_col not in df.columns:
-        raise ValueError(f"value_col '{value_col}' not found. Available: {list(df.columns)}")
+    group_col_key = resolve_dataframe_column(df, group_col)
+    value_col_key = resolve_dataframe_column(df, value_col)
 
-    df = df.sort_values(by=group_col).reset_index(drop=True)
+    df = df.sort_values(by=group_col_key).reset_index(drop=True)
 
     col_names = list(df.columns)
-    group_col_idx = col_names.index(group_col) + 1
-    value_col_idx = col_names.index(value_col) + 1
+    group_col_idx = col_names.index(group_col_key) + 1
+    value_col_idx = col_names.index(value_col_key) + 1
     value_col_letter = _get_col_letter(value_col_idx)
 
     wb = load_workbook_safe(file_path)
@@ -673,25 +683,26 @@ def insert_subtotals(
         ws = get_sheet(wb, sheet_name)
 
         for c_idx, col_name in enumerate(col_names, start=1):
-            ws.cell(row=1, column=c_idx, value=col_name)
+            ws.cell(row=1, column=c_idx, value=sanitize_excel_value(col_name))
 
         ws.delete_rows(2, ws.max_row)
 
         current_row = 2
         n_groups = 0
 
-        for group_val, group_df in df.groupby(group_col, sort=False):
+        for _group_val, group_df in df.groupby(group_col_key, sort=False, dropna=False):
             n_groups += 1
             group_start_row = current_row
 
             for _, row_data in group_df.iterrows():
                 for c_idx, col_name in enumerate(col_names, start=1):
-                    ws.cell(row=current_row, column=c_idx, value=row_data[col_name])
+                    ws.cell(row=current_row, column=c_idx, value=sanitize_excel_value(row_data[col_name]))
                 current_row += 1
 
             group_end_row = current_row - 1
             subtotal_range = f"{value_col_letter}{group_start_row}:{value_col_letter}{group_end_row}"
-            ws.cell(row=current_row, column=group_col_idx, value="Subtotal")
+            if group_col_idx != value_col_idx:
+                ws.cell(row=current_row, column=group_col_idx, value="Subtotal")
             ws.cell(row=current_row, column=value_col_idx, value=f"=SUBTOTAL({subtotal_func},{subtotal_range})")
             current_row += 1
 
@@ -699,7 +710,8 @@ def insert_subtotals(
 
         if include_grand_total and n_groups:
             grand_range = f"{value_col_letter}2:{value_col_letter}{current_row - 1}"
-            ws.cell(row=current_row, column=group_col_idx, value="Grand Total")
+            if group_col_idx != value_col_idx:
+                ws.cell(row=current_row, column=group_col_idx, value="Grand Total")
             ws.cell(row=current_row, column=value_col_idx, value=f"=SUBTOTAL({subtotal_func},{grand_range})")
             subtotal_rows_inserted += 1
 
@@ -749,10 +761,10 @@ def value_counts(
     df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
     if df.empty:
         raise ValueError(f"Sheet '{sheet_name}' is empty.")
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
+    col_key = resolve_dataframe_column(df, column)
+    col_name = str(col_key)
 
-    series = df[column]
+    series = _get_col_series(df, col_key)
     counts = series.value_counts(normalize=normalize, dropna=dropna)
 
     if top_n is not None:
@@ -761,13 +773,13 @@ def value_counts(
         counts = counts.head(top_n)
 
     result_list = [
-        {"value": (None if (isinstance(k, float) and k != k) else k), "count": round(v, 6) if normalize else int(v)}
+        {"value": sanitize_excel_value(k), "count": round(float(v), 6) if normalize else int(v)}
         for k, v in counts.items()
     ]
 
-    logger.info("value_counts for column '%s' in '%s': %d unique values", column, sheet_name, len(result_list))
+    logger.info("value_counts for column '%s' in '%s': %d unique values", col_name, sheet_name, len(result_list))
     return {
-        "column": column,
+        "column": col_name,
         "total_rows": int(series.count() if dropna else len(series)),
         "normalize": normalize,
         "counts": result_list,

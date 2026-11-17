@@ -20,7 +20,7 @@ def multi_file(
     value: str | float | None = None,
     key_column: str | None = None,
     check_columns: list[str] | None = None,
-    sheet_name: str = "Sheet1",
+    sheet_name: str | None = None,
     header_row: int = 1,
     output_file: str | None = None,
     compare_values: bool = True,
@@ -45,6 +45,7 @@ def multi_file(
     Notes:
         - When `output_file` is provided operations may write new files — document overwrite policy.
     """
+    effective_sheet = sheet_name or "Sheet1"
     if action == "aggregate":
         if file_paths is None:
             raise ValueError("file_paths is required for action='aggregate'.")
@@ -54,7 +55,7 @@ def multi_file(
             file_paths,
             column,
             operation,
-            sheet_name,
+            effective_sheet,
             header_row,
             output_file,
         )
@@ -72,7 +73,7 @@ def multi_file(
             column,
             operator,
             value,
-            sheet_name,
+            effective_sheet,
             header_row,
             output_file,
         )
@@ -81,13 +82,21 @@ def multi_file(
             raise ValueError("file_paths is required for action='validate'.")
         if key_column is None:
             raise ValueError("key_column is required for action='validate'.")
-        return _multi_file.validate_data_consistency(file_paths, key_column, check_columns, sheet_name, header_row)
+        return _multi_file.validate_data_consistency(file_paths, key_column, check_columns, effective_sheet, header_row)
     if action == "compare":
         if not file_a:
             raise ValueError("file_a is required for action='compare'.")
         if not file_b:
             raise ValueError("file_b is required for action='compare'.")
-        return _multi_file.compare_workbooks(file_a, file_b, sheet_name, output_file, sheet_name_b)
+        return _multi_file.compare_workbooks(
+            file_a,
+            file_b,
+            sheet_name,
+            output_file,
+            sheet_name_b,
+            compare_values=compare_values,
+            compare_formulas=compare_formulas,
+        )
     raise ValueError(f"Unknown action: {action}")
 
 

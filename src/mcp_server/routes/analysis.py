@@ -260,7 +260,7 @@ def register(mcp: Any) -> None:
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(column_statistics)
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(aggregate_data)
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(find_duplicates)
-    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(vlookup_helper)
+    mcp.tool()(vlookup_helper)
     mcp.tool()(filter_data_advanced)
     mcp.tool()(insert_subtotals)
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(profile_data)
