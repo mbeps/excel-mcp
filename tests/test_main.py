@@ -13,9 +13,11 @@ from mcp_server.main import (
     resource_list_sheets,
     resource_sheet_preview,
     sheet_management,
+    sort_data,
     write_cells,
     write_multi_sheet,
 )
+from mcp_server.models.analysis import SortDescriptor
 from mcp_server.models.workbook import SheetInfo, WorkbookMetadata
 
 
@@ -119,8 +121,7 @@ def test_write_cells(mock_fill, mock_range, mock_cell):
 # Add cases for other tools (condensed) to improve coverage
 @patch("mcp_server.tools.analysis.sort_data")
 def test_sort_data_integration(mock_sort):
-    # This just ensures main.py has the tool registered and it calls the module
-    # To cover more of main.py, we could add more tests for each @mcp.tool
-    # But for brevity and fulfilling the request of "all models" and "registration logic"
-    # we'll focus on the ones we've already added.
-    pass
+    mock_sort.return_value = "Sorted 5 rows by ColA"
+    res = sort_data("book.xlsx", "Sheet1", [SortDescriptor(column="ColA", ascending=True)])
+    assert res == "Sorted 5 rows by ColA"
+    mock_sort.assert_called_once()

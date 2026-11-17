@@ -292,10 +292,7 @@ def _validate_single_cell(ref: str) -> ValidationRangeResult:
         return {"valid": False, "message": f"Invalid cell reference format: '{ref}'"}
     col_letters: str = m.group(1).upper()
     row_num: int = int(m.group(2))
-    try:
-        col_idx: int = column_index_from_string(col_letters)
-    except ValueError:
-        return {"valid": False, "message": f"Invalid column letters: '{col_letters}'"}
+    col_idx: int = column_index_from_string(col_letters)
     if col_idx > MAX_COL_INDEX:
         return {"valid": False, "message": f"Column '{col_letters}' exceeds max (XFD)"}
     if row_num < 1 or row_num > MAX_ROW:
@@ -449,10 +446,7 @@ def resolve_dataframe_column(df: pd.DataFrame, col_ref: str) -> Any:
             return col
     stripped = col_ref.strip()
     if _EXCEL_COL_RE.match(stripped):
-        try:
-            idx = int(column_index_from_string(stripped.upper())) - 1
-        except ValueError:
-            idx = -1
+        idx = int(column_index_from_string(stripped.upper())) - 1
         if 0 <= idx < len(df.columns):
             return df.columns[idx]
     raise ValueError(f"Column '{col_ref}' not found. Available: {list(df.columns)}")
