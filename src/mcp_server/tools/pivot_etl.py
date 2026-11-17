@@ -159,7 +159,7 @@ def create_pivot_table(
         new_index: list = []
         for col in index_cols:
             try:
-                df[col] = pd.to_datetime(df[col], errors="coerce")
+                df[col] = pd.to_datetime(df[col], errors="coerce", format="mixed")
                 if df[col].notna().any():
                     new_index.append(pd.Grouper(key=col, freq=date_freq))
                 else:
