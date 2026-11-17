@@ -60,6 +60,7 @@ def set_formulas_batch(file_path: str, sheet_name: str, formulas: dict[str, str]
         ws = get_sheet(wb, sheet_name)
 
         for cell_ref, formula in formulas.items():
+            formula = formula.strip("{}")
             if not formula.startswith("="):
                 formula = f"={formula}"
             ws[cell_ref] = formula
@@ -81,13 +82,14 @@ def get_formula_value(
     wb = load_workbook_safe(file_path, data_only=True)
     try:
         ws = get_sheet(wb, sheet_name)
-        val = ws[cell_ref].value
+        val = getattr(ws[cell_ref].value, "text", ws[cell_ref].value)
         result: dict[str, object] = {"cell": cell_ref, "value": val, "type": type(val).__name__}
         if val is None:
             # Check whether the cell actually contains a formula (without data_only)
             wb2 = load_workbook_safe(file_path)
             try:
-                formula = get_sheet(wb2, sheet_name)[cell_ref].value
+                raw_formula = get_sheet(wb2, sheet_name)[cell_ref].value
+                formula = getattr(raw_formula, "text", raw_formula)
             finally:
                 wb2.close()
             if isinstance(formula, str) and formula.startswith("="):
@@ -108,22 +110,36 @@ def get_formula_errors(
     cell_range: str | None = None,
 ) -> dict[str, list[FormulaErrorInfo] | int]:
     """Find all cells with Excel error values (#REF!, #VALUE!, #DIV/0!, etc.)."""
-    EXCEL_ERRORS = {"#REF!", "#VALUE!", "#DIV/0!", "#N/A", "#NAME?", "#NUM!", "#NULL!", "#SPILL!"}
+    EXCEL_ERRORS = {
+        "#REF!",
+        "#VALUE!",
+        "#DIV/0!",
+        "#N/A",
+        "#NAME?",
+        "#NUM!",
+        "#NULL!",
+        "#SPILL!",
+        "#CALC!",
+        "#GETTING_DATA",
+        "#BLOCKED!",
+        "#CONNECT!",
+        "#FIELD!",
+    }
 
-    wb = load_workbook_safe(file_path, data_only=True)
+    wb = load_workbook_safe(file_path, read_only=True, data_only=True)
     try:
         ws = get_sheet(wb, sheet_name)
 
         if cell_range:
             raw = ws[cell_range]
             if not isinstance(raw, tuple):
-                rows_iter: tuple = ((raw,),)
+                rows_iter = ((raw,),)
             elif raw and not isinstance(raw[0], tuple):
                 rows_iter = (raw,)
             else:
                 rows_iter = raw
         else:
-            rows_iter = tuple(ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column))
+            rows_iter = ws.iter_rows()
 
         errors: list[FormulaErrorInfo] = []
         for row in rows_iter:
@@ -136,6 +152,24 @@ def get_formula_errors(
         wb.close()
 
 
+_MAX_PRECEDENT_EXPANSION = 100_000
+_STRING_LITERAL_RE = r'"(?:[^"]|"")*"'
+_SHEET_PREFIX_RE = r"(?:'(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!"
+
+
+def _strip_string_literals(formula: str) -> str:
+    import re
+
+    return re.sub(_STRING_LITERAL_RE, "", formula)
+
+
+def _unquote_sheet_prefix(prefix_with_bang: str) -> str:
+    name = prefix_with_bang[:-1]
+    if len(name) >= 2 and name.startswith("'") and name.endswith("'"):
+        return name[1:-1].replace("''", "'")
+    return name
+
+
 def get_formula_precedents(
     file_path: str,
     sheet_name: str,
@@ -144,40 +178,45 @@ def get_formula_precedents(
     """Parse a cell's formula to extract cell references it depends on (precedents)."""
     import re
 
-    wb = load_workbook_safe(file_path)
+    wb = load_workbook_safe(file_path, read_only=True)
     try:
         ws = get_sheet(wb, sheet_name)
-        formula = ws[cell_ref].value
+        formula = getattr(ws[cell_ref].value, "text", ws[cell_ref].value)
 
         if not formula or not isinstance(formula, str) or not formula.startswith("="):
             return {"cell": cell_ref, "formula": formula, "precedents": []}
 
-        # Match optional sheet prefix + cell ref or range (e.g. Sheet1!A1, $A$1, B3, A1:A3)
-        range_pattern = r"(?:(?:'[^']+'|[A-Za-z_][A-Za-z0-9_]*)!)?\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?"
-        raw_refs = re.findall(range_pattern, formula)
-        # Filter out false positives that are just numbers
-        raw_refs = [r for r in raw_refs if re.search(r"[A-Za-z]", r)]
+        formula_no_str = _strip_string_literals(formula)
+        range_pattern = (
+            rf"(?<![A-Za-z0-9_])(?:{_SHEET_PREFIX_RE})?"
+            r"\$?[A-Za-z]{1,3}\$?\d+(?::\$?[A-Za-z]{1,3}\$?\d+)?(?![A-Za-z0-9_(])"
+        )
+        raw_refs = re.findall(range_pattern, formula_no_str, flags=re.IGNORECASE)
 
-        # Expand ranges into individual cell references
         from openpyxl.utils import column_index_from_string, get_column_letter
         from openpyxl.utils.cell import coordinate_from_string
 
-        precedents = []
+        precedents: list[str] = []
         for ref in raw_refs:
             if ":" in ref:
-                # Handle sheet prefix
                 prefix = ""
                 range_part = ref
                 if "!" in ref:
                     prefix, range_part = ref.rsplit("!", 1)
                     prefix += "!"
                 start, end = range_part.split(":")
-                start_col_str, start_row = coordinate_from_string(start.replace("$", ""))
-                end_col_str, end_row = coordinate_from_string(end.replace("$", ""))
+                start_col_str, start_row = coordinate_from_string(start.replace("$", "").upper())
+                end_col_str, end_row = coordinate_from_string(end.replace("$", "").upper())
                 start_col = column_index_from_string(start_col_str)
                 end_col = column_index_from_string(end_col_str)
-                for c in range(start_col, end_col + 1):
-                    for r in range(start_row, end_row + 1):
+                c_min, c_max = min(start_col, end_col), max(start_col, end_col)
+                r_min, r_max = min(start_row, end_row), max(start_row, end_row)
+                if (c_max - c_min + 1) * (r_max - r_min + 1) > _MAX_PRECEDENT_EXPANSION:
+                    raise ValueError(
+                        f"Range '{ref}' exceeds maximum precedent expansion of {_MAX_PRECEDENT_EXPANSION} cells."
+                    )
+                for c in range(c_min, c_max + 1):
+                    for r in range(r_min, r_max + 1):
                         precedents.append(f"{prefix}{get_column_letter(c)}{r}")
             else:
                 precedents.append(ref)
@@ -219,27 +258,37 @@ def get_formula_dependents(
     """Find all cells that reference the given cell in their formula (dependents)."""
     import re
 
-    wb = load_workbook_safe(file_path)
+    wb = load_workbook_safe(file_path, read_only=True)
     try:
         ws = get_sheet(wb, sheet_name)
         cell_upper = cell_ref.upper().replace("$", "")
+        target_sheet_lower = sheet_name.lower()
 
-        range_pattern = re.compile(r"[A-Z]{1,3}\d+:[A-Z]{1,3}\d+")
+        cross_sheet_re = re.compile(
+            rf"({_SHEET_PREFIX_RE})(\$?[A-Za-z]{{1,3}}\$?\d+(?::\$?[A-Za-z]{{1,3}}\$?\d+)?)",
+            flags=re.IGNORECASE,
+        )
+        range_pattern = re.compile(r"(?<![A-Z0-9_])[A-Z]{1,3}\d+:[A-Z]{1,3}\d+(?![A-Z0-9_(])")
 
-        dependents: list[dict] = []
+        def _filter_sheet_ref(match: re.Match[str]) -> str:
+            ref_sheet = _unquote_sheet_prefix(match.group(1)).lower()
+            return match.group(2) if ref_sheet == target_sheet_lower else ""
+
+        dependents: list[dict[str, str]] = []
         for row in ws.iter_rows():
             for cell in row:
-                if not isinstance(cell.value, str) or not cell.value.startswith("="):
+                raw_val = getattr(cell.value, "text", cell.value)
+                if not isinstance(raw_val, str) or not raw_val.startswith("="):
                     continue
-                formula_clean = cell.value.upper().replace("$", "")
-                # Check for literal cell reference match
-                if re.search(r"(?<![A-Z0-9])" + re.escape(cell_upper) + r"(?![A-Z0-9])", formula_clean):
-                    dependents.append({"cell": cell.coordinate, "formula": cell.value})
+                no_str = _strip_string_literals(raw_val)
+                filtered = cross_sheet_re.sub(_filter_sheet_ref, no_str)
+                formula_clean = filtered.upper().replace("$", "")
+                if re.search(r"(?<![A-Z0-9_])" + re.escape(cell_upper) + r"(?![A-Z0-9_(])", formula_clean):
+                    dependents.append({"cell": cell.coordinate, "formula": raw_val})
                     continue
-                # Check if the target cell falls within any range references
                 for rng in range_pattern.findall(formula_clean):
                     if _cell_in_range(cell_upper, rng):
-                        dependents.append({"cell": cell.coordinate, "formula": cell.value})
+                        dependents.append({"cell": cell.coordinate, "formula": raw_val})
                         break
 
         return {"cell": cell_ref, "dependents": dependents, "count": len(dependents)}
@@ -252,14 +301,15 @@ def list_formulas(file_path: str, sheet_name: str) -> list[FormulaInfo]:
 
     Returns list of {cell_ref: str, formula: str}.
     """
-    wb = load_workbook_safe(file_path)
+    wb = load_workbook_safe(file_path, read_only=True)
     try:
         ws = get_sheet(wb, sheet_name)
         results: list[FormulaInfo] = []
         for row in ws.iter_rows():
             for cell in row:
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    results.append({"cell_ref": cell.coordinate, "formula": cell.value})
+                raw_val = getattr(cell.value, "text", cell.value)
+                if isinstance(raw_val, str) and raw_val.startswith("="):
+                    results.append({"cell_ref": cell.coordinate, "formula": raw_val})
         logger.info("Found %d formulas in %s!%s", len(results), sheet_name, file_path)
         return results
     finally:

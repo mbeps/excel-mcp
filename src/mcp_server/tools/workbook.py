@@ -8,6 +8,7 @@ and ``save_workbook_safe()`` to ensure files are validated and closed correctly.
 from __future__ import annotations
 
 from logging import Logger
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -94,19 +95,21 @@ def create_workbook(
         - Calls ``save_workbook_safe()`` to persist.
     """
     wb = Workbook()
+    try:
+        if sheet_name and not sheet_names:
+            sheet_names = [sheet_name]
 
-    if sheet_name and not sheet_names:
-        sheet_names = [sheet_name]
+        if sheet_names:
+            for name in sheet_names:
+                wb.create_sheet(title=name)
+            if "Sheet" not in sheet_names and "Sheet" in wb.sheetnames:
+                del wb["Sheet"]
 
-    if sheet_names:
-        for name in sheet_names:
-            wb.create_sheet(title=name)
-        if "Sheet" not in sheet_names and "Sheet" in wb.sheetnames:
-            del wb["Sheet"]
-
-    save_workbook_safe(wb, file_path)
-    logger.info("Created workbook: %s", file_path)
-    return WorkbookCreatedResult(file_path=file_path, sheets=list(wb.sheetnames))
+        save_workbook_safe(wb, file_path)
+        logger.info("Created workbook: %s", file_path)
+        return WorkbookCreatedResult(file_path=file_path, sheets=list(wb.sheetnames))
+    finally:
+        wb.close()
 
 
 def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
@@ -133,8 +136,8 @@ def get_sheet_summary(file_path: str, sheet_name: str) -> SheetSummary:
             row_count = len(df) + 1  # +1 for header
             col_count = len(df.columns)
         except Exception:
-            row_count = ws.max_row or 0
-            col_count = ws.max_column or 0
+            row_count = (ws.max_row - min_row + 1) if ws.max_row else 0
+            col_count = (ws.max_column - min_col + 1) if ws.max_column else 0
 
         if col_count == 0:
             return SheetSummary(
@@ -269,51 +272,53 @@ def write_multi_sheet(
         - This is a convenience function for batch workbook creation; it uses ``save_workbook_safe()`` to persist the final workbook.
     """
     wb = Workbook()
+    try:
+        # Remove the default sheet
+        if "Sheet" in wb.sheetnames:
+            del wb["Sheet"]
 
-    # Remove the default sheet
-    if "Sheet" in wb.sheetnames:
-        del wb["Sheet"]
+        summary: list[SheetCreatedInfo] = []
+        for sheet_def in sheets:
+            name = sheet_def["name"]
+            headers: list[str] = sheet_def.get("headers") or []
+            data: list[list[object]] | None = sheet_def.get("data") or sheet_def.get("values")
+            column_widths: dict[str, float] | None = sheet_def.get("column_widths")
 
-    summary: list[SheetCreatedInfo] = []
-    for sheet_def in sheets:
-        name = sheet_def["name"]
-        headers: list[str] = sheet_def.get("headers") or []
-        data: list[list[object]] | None = sheet_def.get("data") or sheet_def.get("values")
-        column_widths: dict[str, float] | None = sheet_def.get("column_widths")
+            ws = wb.create_sheet(title=name)
+            current_row = 1
 
-        ws = wb.create_sheet(title=name)
-        current_row = 1
-
-        if headers:
-            for col_idx, header in enumerate(headers, start=1):
-                cell = ws.cell(row=current_row, column=col_idx, value=header)
-                cell.font = Font(bold=True)
-            current_row += 1
-
-        rows_written = 0
-        if data:
-            for row_data in data:
-                for col_idx, value in enumerate(row_data, start=1):
-                    ws.cell(row=current_row, column=col_idx, value=value)
+            if headers:
+                for col_idx, header in enumerate(headers, start=1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=header)
+                    cell.font = Font(bold=True)
                 current_row += 1
-                rows_written += 1
 
-        if column_widths:
-            for col_letter, width in column_widths.items():
-                ws.column_dimensions[col_letter.upper()].width = width
+            rows_written = 0
+            if data:
+                for row_data in data:
+                    for col_idx, value in enumerate(row_data, start=1):
+                        ws.cell(row=current_row, column=col_idx, value=value)
+                    current_row += 1
+                    rows_written += 1
 
-        summary.append(
-            SheetCreatedInfo(
-                name=name,
-                header_count=len(headers),
-                row_count=rows_written,
-                column_widths_set=list(column_widths.keys()) if column_widths else [],
+            if column_widths:
+                for col_letter, width in column_widths.items():
+                    ws.column_dimensions[col_letter.upper()].width = width
+
+            summary.append(
+                SheetCreatedInfo(
+                    name=name,
+                    header_count=len(headers),
+                    row_count=rows_written,
+                    column_widths_set=list(column_widths.keys()) if column_widths else [],
+                )
             )
-        )
 
-    save_workbook_safe(wb, file_path)
-    logger.info("Created multi-sheet workbook: %s with %d sheets", file_path, len(sheets))
-    return WriteMultiSheetResult(file_path=file_path, sheets_created=summary)
+        save_workbook_safe(wb, file_path)
+        logger.info("Created multi-sheet workbook: %s with %d sheets", file_path, len(sheets))
+        return WriteMultiSheetResult(file_path=file_path, sheets_created=summary)
+    finally:
+        wb.close()
 
 
 def hide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
@@ -370,13 +375,13 @@ def unhide_sheet(file_path: str, sheet_name: str) -> dict[str, str]:
         wb.close()
 
 
-def set_tab_color(file_path: str, sheet_name: str, color: str) -> dict[str, str]:
-    """Set the worksheet tab colour using a 6-character hex string.
+def set_tab_color(file_path: str, sheet_name: str, color: str | None) -> dict[str, str | None]:
+    """Set or clear the worksheet tab colour using a 6-character hex string.
 
     Args:
         file_path (str): Workbook path.
         sheet_name (str): Worksheet to modify.
-        color (str): 6-character hex RGB string (e.g. 'FF0000'). Use '000000' to reset/remove colour.
+        color (str | None): 6-character hex RGB string (e.g. 'FF0000', '000000'). Pass None or '' to clear.
 
     Returns:
         dict: status with updated colour.
@@ -389,25 +394,27 @@ def set_tab_color(file_path: str, sheet_name: str, color: str) -> dict[str, str]
     """
     from openpyxl.styles import Color
 
-    color = color.lstrip("#").upper()
-    if len(color) != 6 or not all(c in "0123456789ABCDEF" for c in color):
+    cleaned = "" if color is None else color.strip().lstrip("#").upper()
+    if cleaned and (len(cleaned) != 6 or not all(c in "0123456789ABCDEF" for c in cleaned)):
         raise ValueError(f"Invalid color '{color}'. Expected a 6-character hex string, e.g. 'FF0000'.")
 
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        if color == "000000":
+        if not cleaned:
             ws.sheet_properties.tabColor = None
+            result_color: str | None = None
         else:
-            ws.sheet_properties.tabColor = Color(rgb=color)
+            ws.sheet_properties.tabColor = Color(rgb=cleaned)
+            result_color = cleaned
         save_workbook_safe(wb, file_path)
-        logger.info("Set tab color to %s for sheet '%s' in %s", color, sheet_name, file_path)
-        return {"status": "success", "sheet": sheet_name, "color": color}
+        logger.info("Set tab color to %s for sheet '%s' in %s", result_color, sheet_name, file_path)
+        return {"status": "success", "sheet": sheet_name, "color": result_color}
     finally:
         wb.close()
 
 
-def move_sheet(file_path: str, sheet_name: str, offset: int) -> dict[str, str]:
+def move_sheet(file_path: str, sheet_name: str, offset: int) -> dict[str, Any]:
     """Move a worksheet tab by a relative offset within the workbook's sheet order.
 
     Args:

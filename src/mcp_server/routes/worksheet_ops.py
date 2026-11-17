@@ -98,19 +98,19 @@ def worksheet_structure(
     if action == "insert_rows":
         if row is None:
             raise ValueError("row is required for action='insert_rows'.")
-        return _ws_ops.insert_rows(file_path, sheet_name, row, count or 1)
+        return _ws_ops.insert_rows(file_path, sheet_name, row, 1 if count is None else count)
     if action == "delete_rows":
         if row is None:
             raise ValueError("row is required for action='delete_rows'.")
-        return _ws_ops.delete_rows(file_path, sheet_name, row, count or 1)
+        return _ws_ops.delete_rows(file_path, sheet_name, row, 1 if count is None else count)
     if action == "insert_cols":
         if col is None:
             raise ValueError("col is required for action='insert_cols'.")
-        return _ws_ops.insert_cols(file_path, sheet_name, col, count or 1)
+        return _ws_ops.insert_cols(file_path, sheet_name, col, 1 if count is None else count)
     if action == "delete_cols":
         if col is None:
             raise ValueError("col is required for action='delete_cols'.")
-        return _ws_ops.delete_cols(file_path, sheet_name, col, count or 1)
+        return _ws_ops.delete_cols(file_path, sheet_name, col, 1 if count is None else count)
     if action == "set_row_height":
         if rows is None:
             raise ValueError("rows is required for action='set_row_height'.")
@@ -128,13 +128,27 @@ def worksheet_structure(
             raise ValueError("start_row is required for action='group_rows'.")
         if end_row is None:
             raise ValueError("end_row is required for action='group_rows'.")
-        return _ws_ops.group_rows(file_path, sheet_name, start_row, end_row, outline_level or 1, hidden or False)
+        return _ws_ops.group_rows(
+            file_path,
+            sheet_name,
+            start_row,
+            end_row,
+            1 if outline_level is None else outline_level,
+            False if hidden is None else hidden,
+        )
     if action == "group_cols":
         if start_col is None:
             raise ValueError("start_col is required for action='group_cols'.")
         if end_col is None:
             raise ValueError("end_col is required for action='group_cols'.")
-        return _ws_ops.group_cols(file_path, sheet_name, start_col, end_col, outline_level or 1, hidden or False)
+        return _ws_ops.group_cols(
+            file_path,
+            sheet_name,
+            start_col,
+            end_col,
+            1 if outline_level is None else outline_level,
+            False if hidden is None else hidden,
+        )
     if action == "ungroup_rows":
         if start_row is None:
             raise ValueError("start_row is required for action='ungroup_rows'.")
@@ -155,7 +169,7 @@ def worksheet_print(
     file_path: str,
     sheet_name: str,
     print_area: str | None = None,
-    orientation: str | None = None,
+    orientation: Literal["portrait", "landscape"] | None = None,
     paper_size: int | None = None,
     fit_to_width: int | None = None,
     fit_to_height: int | None = None,
@@ -183,7 +197,12 @@ def worksheet_print(
         return _ws_ops.set_print_area(file_path, sheet_name, print_area)
     if action == "set_page_setup":
         return _ws_ops.set_page_setup(
-            file_path, sheet_name, orientation or "portrait", paper_size or 1, fit_to_width, fit_to_height
+            file_path,
+            sheet_name,
+            "portrait" if orientation is None else orientation,
+            1 if paper_size is None else paper_size,
+            fit_to_width,
+            fit_to_height,
         )
     if action == "set_print_titles":
         return _ws_ops.set_print_titles(file_path, sheet_name, title_rows, title_cols)
@@ -208,7 +227,7 @@ def worksheet_transfer(
     dest_sheet_name: str | None = None,
     source_files: list[str] | None = None,
     output_file: str | None = None,
-    conflict_strategy: str = "rename",
+    conflict_strategy: Literal["rename", "overwrite"] = "rename",
     sheet_names: list[str] | None = None,
     dest_sheet: str | None = None,
     include_header: bool = True,
