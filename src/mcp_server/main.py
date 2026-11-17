@@ -14,6 +14,8 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
+import urllib.parse
 from collections.abc import Callable
 from logging import Logger
 from typing import Any
@@ -49,48 +51,61 @@ class _NoopMCP:
         return None
 
 
-mcp: Any
-if __import__("os").environ.get("MCP_SERVER_DISABLE_TOOL_REGISTRATION") == "1":
-    mcp = _NoopMCP()
-else:
-    from mcp.server.mcpserver import MCPServer, ResourceSecurity
-
-    mcp = MCPServer(
-        name="excel-mcp-server",
-        version="0.1.0",
-        description="MCP server for Excel automation and data manipulation",
-        resource_security=ResourceSecurity(exempt_params={"file_path"}),
-    )
-
-app: Any = mcp.streamable_http_app(stateless_http=True) if hasattr(mcp, "streamable_http_app") else None
-
 logger: Logger = configure_logging("mcp_server.main")
 
 # ── Resources ────────────────────────────────────────────────────────────────
 
 import mcp_server.tools.workbook as _workbook  # noqa: E402
 import mcp_server.tools.cell_ops as _cell_ops  # noqa: E402
+from mcp_server.prompts import register_prompts as _register_prompts  # noqa: E402
+from mcp_server.routes import register_all_routes  # noqa: E402
 
 
-@mcp.resource("excel://workbook/{file_path}/sheets", mime_type="application/json")
 def resource_list_sheets(file_path: str) -> str:
     """List all sheets in a workbook as JSON."""
-    metadata = _workbook.get_workbook_metadata(file_path)
+    decoded_path = urllib.parse.unquote(file_path)
+    metadata = _workbook.get_workbook_metadata(decoded_path)
     return json.dumps([s.model_dump() for s in metadata.sheets], indent=2)
 
 
-@mcp.resource("excel://workbook/{file_path}/sheet/{sheet_name}/preview", mime_type="application/json")
 def resource_sheet_preview(file_path: str, sheet_name: str) -> str:
     """Preview the first 20 rows of a sheet as JSON."""
-    data = _cell_ops.read_range(file_path, sheet_name, "A1", "Z20")
+    decoded_path = urllib.parse.unquote(file_path)
+    decoded_sheet = urllib.parse.unquote(sheet_name)
+    data = _cell_ops.read_range(decoded_path, decoded_sheet, "A1", "Z20")
     return json.dumps(data, indent=2, default=str)
 
 
-# ── Tool Registration ────────────────────────────────────────────────────────
+def create_server(disable_registration: bool | None = None) -> Any:
+    """Create and configure an MCPServer (or _NoopMCP when registration is disabled)."""
+    is_disabled = (
+        os.environ.get("MCP_SERVER_DISABLE_TOOL_REGISTRATION") == "1"
+        if disable_registration is None
+        else disable_registration
+    )
+    if is_disabled:
+        server: Any = _NoopMCP()
+    else:
+        from mcp.server.mcpserver import MCPServer, ResourceSecurity
 
-from mcp_server.routes import register_all_routes  # noqa: E402
+        server = MCPServer(
+            name="excel-mcp-server",
+            version="0.1.0",
+            description="MCP server for Excel automation and data manipulation",
+            resource_security=ResourceSecurity(exempt_params={"file_path"}),
+        )
 
-register_all_routes(mcp)
+    server.resource("excel://workbook/{file_path}/sheets", mime_type="application/json")(resource_list_sheets)
+    server.resource("excel://workbook/{file_path}/sheet/{sheet_name}/preview", mime_type="application/json")(
+        resource_sheet_preview
+    )
+    register_all_routes(server)
+    _register_prompts(server)
+    return server
+
+
+mcp: Any = create_server()
+app: Any = mcp.streamable_http_app(stateless_http=True) if hasattr(mcp, "streamable_http_app") else None
 
 # ── Backward-compatible exports ──────────────────────────────────────────────
 # Tests and external code may import tool functions from main.py directly.
@@ -135,16 +150,10 @@ import mcp_server.tools.statistical as _statistical  # noqa: E402
 import mcp_server.tools.solver as _solver  # noqa: E402
 import mcp_server.tools.cleaning as _cleaning  # noqa: E402
 
-# ── Prompt Registration ──────────────────────────────────────────────────────
-
-from mcp_server.prompts import register_prompts as _register_prompts  # noqa: E402
-
-_register_prompts(mcp)
-
 # ── Entry Point ──────────────────────────────────────────────────────────────
 
 
-def run() -> None:
+def run(argv: list[str] | None = None) -> None:
     """Launch the MCP server.
 
     Supports two transport modes selected via --transport:
@@ -161,7 +170,7 @@ def run() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.transport in ("http", "streamable-http"):
         logger.info("Starting MCP server in streamable-http mode on %s:%s", args.host, args.port)

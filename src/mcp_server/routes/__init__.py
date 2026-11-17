@@ -6,9 +6,14 @@ Each module exports a ``register(mcp)`` function that binds
 
 from __future__ import annotations
 
+import binascii
 import functools
 import inspect
+import re
 from typing import Any, Callable, cast
+
+import httpx
+from openpyxl.utils.exceptions import InvalidFileException
 
 try:
     from mcp.server.mcpserver.exceptions import ToolError
@@ -20,6 +25,19 @@ except ImportError:  # pragma: no cover
         pass
 
 
+_TOOL_ERROR_TYPES = (
+    ValueError,
+    FileNotFoundError,
+    PermissionError,
+    KeyError,
+    OSError,
+    re.error,
+    binascii.Error,
+    httpx.HTTPError,
+    InvalidFileException,
+)
+
+
 def _wrap_tool_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap tool handler so domain exceptions surface as ToolError in MCP v2."""
     if inspect.iscoroutinefunction(fn):
@@ -28,7 +46,7 @@ def _wrap_tool_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
         async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
             try:
                 return await fn(*args, **kwargs)
-            except (ValueError, FileNotFoundError, PermissionError, KeyError) as e:
+            except _TOOL_ERROR_TYPES as e:
                 raise ToolError(str(e)) from e
 
         return async_wrapped
@@ -37,7 +55,7 @@ def _wrap_tool_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
         try:
             return fn(*args, **kwargs)
-        except (ValueError, FileNotFoundError, PermissionError, KeyError) as e:
+        except _TOOL_ERROR_TYPES as e:
             raise ToolError(str(e)) from e
 
     return sync_wrapped

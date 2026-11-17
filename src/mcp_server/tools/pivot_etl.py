@@ -316,7 +316,7 @@ def add_computed_column(
     if column_type == "cumsum":
         if source_col is None:
             raise ValueError("source_col is required when column_type='cumsum'")
-        df = read_sheet_df(file_path, sheet_name, header_row=has_header)
+        df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
         if source_col not in df.columns:
             raise ValueError(f"source_col '{source_col}' not found. Available: {list(df.columns)}")
         df[new_column_name] = df[source_col].cumsum()
@@ -355,7 +355,7 @@ def add_computed_column(
             raise ValueError("window is required for column_type='rolling'.")
         if rolling_func not in ("mean", "sum"):
             raise ValueError("rolling_func must be 'mean' or 'sum'.")
-        df = read_sheet_df(file_path, sheet_name, header_row=has_header)
+        df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
         if source_col not in df.columns:
             raise ValueError(f"source_col '{source_col}' not found in sheet columns.")
 
@@ -382,7 +382,7 @@ def add_computed_column(
         return f"Added rolling {rolling_func} column '{new_column_name}' (window={window}) from source column '{source_col}' to sheet '{sheet_name}'."
 
     # column_type == "formula" (default path)
-    df = read_sheet_df(file_path, sheet_name, header_row=has_header)
+    df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
     validate_expression(expression)
 
     # Build column-to-letter map from original columns before adding the new one

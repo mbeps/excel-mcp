@@ -7,11 +7,14 @@ session-backed temporary-file lifecycle for tool workflows.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import os
 import re
+import socket
 import tempfile
 import threading
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -24,6 +27,18 @@ import httpx
 
 _CLOUD_URI_PATTERN: re.Pattern[str] = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]+://")
 _HTTP_SCHEMES: tuple[str, ...] = ("http://", "https://")
+_DEFAULT_HTTP_TIMEOUT: float = 30.0
+_MAX_REDIRECTS: int = 5
+_DEFAULT_MAX_FILE_BYTES: int = 50 * 1024 * 1024  # 50 MiB
+
+
+def _get_max_file_bytes() -> int:
+    """Return the configured maximum file size in bytes."""
+    raw = os.environ.get("EXCEL_MCP_MAX_FILE_BYTES", "").strip()
+    if raw:
+        return int(raw)
+    return _DEFAULT_MAX_FILE_BYTES
+
 
 # ---------------------------------------------------------------------------
 # Input detection
@@ -50,20 +65,26 @@ def detect_input_type(
     Returns:
         A literal string identifying the detected input type.
     """
+    if not value or not value.strip():
+        return "local_path"
+
     if value.startswith(_HTTP_SCHEMES):
         return "http_url"
 
-    if _CLOUD_URI_PATTERN.match(value) and not value.startswith(_HTTP_SCHEMES):
+    if _CLOUD_URI_PATTERN.match(value):
         return "cloud_url"
+
+    try:
+        if Path(value).exists():
+            return "local_path"
+    except OSError:
+        pass
 
     try:
         base64.b64decode(value, validate=True)
         return "base64"
     except Exception:
         pass
-
-    if os.sep in value or value.startswith((".", "/")) or Path(value).exists():
-        return "local_path"
 
     return "local_path"
 
@@ -132,8 +153,34 @@ def resolve_to_local(
     return _decode_base64(value, filename_hint)
 
 
+def _validate_url_target(url: str) -> None:
+    """Validate that *url* uses HTTP(S) and does not resolve to private/local IP ranges."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError(f"Invalid HTTP(S) URL: {url}")
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        addr_infos = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise ValueError(f"Failed to resolve host '{parsed.hostname}': {e}") from e
+
+    for _family, _type, _proto, _canonname, sockaddr in addr_infos:
+        ip_str = str(sockaddr[0]).split("%", 1)[0]
+        ip = ipaddress.ip_address(ip_str)
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError(f"Blocked URL resolving to disallowed IP address: {ip}")
+
+
 def _download_http(url: str, filename_hint: str) -> tuple[str, bool]:
-    """Stream-download an HTTP URL to a temp file.
+    """Stream-download an HTTP URL to a temp file with SSRF, redirect, timeout, and size guards.
 
     Args:
         url: The HTTP or HTTPS URL to download.
@@ -143,20 +190,49 @@ def _download_http(url: str, filename_hint: str) -> tuple[str, bool]:
         ``(temp_path, True)`` on success.
 
     Raises:
+        ValueError: On disallowed IP targets, excessive redirects, or size limit exceeded.
         httpx.HTTPStatusError: On non-2xx HTTP responses.
         Exception: On any other download error, after cleaning up the temp file.
     """
+    max_bytes = _get_max_file_bytes()
+    current_url = url
+    _validate_url_target(current_url)
+
     temp_path = _make_temp_path(filename_hint)
     try:
-        with httpx.stream("GET", url, follow_redirects=True) as response:
-            response.raise_for_status()
-            with open(temp_path, "wb") as fh:
-                for chunk in response.iter_bytes(chunk_size=8192):
-                    fh.write(chunk)
+        for _ in range(_MAX_REDIRECTS + 1):
+            with httpx.stream(
+                "GET",
+                current_url,
+                follow_redirects=False,
+                timeout=_DEFAULT_HTTP_TIMEOUT,
+            ) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get("location")
+                    if not location:
+                        raise ValueError("Redirect response missing Location header")
+                    current_url = urllib.parse.urljoin(current_url, location)
+                    _validate_url_target(current_url)
+                    continue
+
+                response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if isinstance(content_length, str) and content_length.isdigit() and int(content_length) > max_bytes:
+                    raise ValueError(f"Remote file exceeds max allowed size ({max_bytes} bytes)")
+
+                total_bytes = 0
+                with open(temp_path, "wb") as fh:
+                    for chunk in response.iter_bytes(chunk_size=8192):
+                        total_bytes += len(chunk)
+                        if total_bytes > max_bytes:
+                            raise ValueError(f"Downloaded file exceeds max allowed size ({max_bytes} bytes)")
+                        fh.write(chunk)
+                return temp_path, True
+
+        raise ValueError(f"Exceeded maximum redirects ({_MAX_REDIRECTS})")
     except Exception:
         _safe_remove(temp_path)
         raise
-    return temp_path, True
 
 
 def _decode_base64(encoded: str, filename_hint: str) -> tuple[str, bool]:
@@ -170,11 +246,15 @@ def _decode_base64(encoded: str, filename_hint: str) -> tuple[str, bool]:
         ``(temp_path, True)`` on success.
 
     Raises:
+        ValueError: If decoded payload exceeds ``EXCEL_MCP_MAX_FILE_BYTES``.
         Exception: On decoding failure, after cleaning up the temp file.
     """
+    max_bytes = _get_max_file_bytes()
     temp_path = _make_temp_path(filename_hint)
     try:
-        data = base64.b64decode(encoded)
+        data = base64.b64decode(encoded, validate=True)
+        if len(data) > max_bytes:
+            raise ValueError(f"Decoded payload exceeds max allowed size ({max_bytes} bytes)")
         with open(temp_path, "wb") as fh:
             fh.write(data)
     except Exception:
@@ -208,7 +288,13 @@ def encode_file_to_base64(path: str) -> str:
 
     Returns:
         A base64-encoded string of the file's binary contents.
+
+    Raises:
+        ValueError: If file size exceeds ``EXCEL_MCP_MAX_FILE_BYTES``.
     """
+    max_bytes = _get_max_file_bytes()
+    if os.path.getsize(path) > max_bytes:
+        raise ValueError(f"File exceeds max allowed size ({max_bytes} bytes)")
     with open(path, "rb") as fh:
         return base64.b64encode(fh.read()).decode("ascii")
 
