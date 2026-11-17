@@ -11,6 +11,7 @@ from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
     save_workbook_safe,
+    validate_single_cell,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -25,6 +26,7 @@ def add_comment(
     author: str = "Excel MCP",
 ) -> str:
     """Add a comment/note to a cell."""
+    validate_single_cell(cell_ref)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -64,6 +66,7 @@ def list_comments(file_path: str, sheet_name: str) -> list[CommentInfo]:
 
 def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> CommentInfo | None:
     """Read comment from a cell. Returns CommentInfo with text/author or None."""
+    validate_single_cell(cell_ref)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -77,6 +80,7 @@ def read_comment(file_path: str, sheet_name: str, cell_ref: str) -> CommentInfo 
 
 def delete_comment(file_path: str, sheet_name: str, cell_ref: str) -> str:
     """Delete comment from a cell."""
+    validate_single_cell(cell_ref)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)

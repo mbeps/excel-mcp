@@ -63,6 +63,10 @@ def unprotect_sheet(file_path: str, sheet_name: str, password: str | None = None
 
         ws.protection.sheet = False
         ws.protection._password = None  # noqa: SLF001  # clear without triggering hash
+        ws.protection.algorithmName = None
+        ws.protection.hashValue = None
+        ws.protection.saltValue = None
+        ws.protection.spinCount = None
 
         save_workbook_safe(wb, file_path)
         logger.info("Unprotected sheet '%s' in %s", sheet_name, file_path)
@@ -85,17 +89,22 @@ def protect_cells(
     try:
         ws = get_sheet(wb, sheet_name)
 
-        for row in ws[locked_range]:
-            for cell in row:
-                cell.protection = Protection(locked=True)
+        locked_target = f"{locked_range}:{locked_range}" if ":" not in locked_range else locked_range
+        for row in ws[locked_target]:
+            cells = row if isinstance(row, tuple) else (row,)
+            for cell in cells:
+                existing_hidden = bool(cell.protection.hidden) if cell.protection else False
+                cell.protection = Protection(locked=True, hidden=existing_hidden)
 
         if unlocked_ranges:
             for ur in unlocked_ranges:
                 # Normalise single-cell refs to range format so ws[] returns a tuple
                 target = f"{ur}:{ur}" if ":" not in ur else ur
                 for row in ws[target]:
-                    for cell in row:
-                        cell.protection = Protection(locked=False)
+                    cells = row if isinstance(row, tuple) else (row,)
+                    for cell in cells:
+                        existing_hidden = bool(cell.protection.hidden) if cell.protection else False
+                        cell.protection = Protection(locked=False, hidden=existing_hidden)
 
         save_workbook_safe(wb, file_path)
         locked_msg = f"Locked '{locked_range}'"

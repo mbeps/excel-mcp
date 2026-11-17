@@ -303,6 +303,17 @@ def _validate_single_cell(ref: str) -> ValidationRangeResult:
     return {"valid": True, "column": col_letters, "row": row_num, "col_index": col_idx}
 
 
+def validate_single_cell(cell_ref: str) -> str:
+    """Validate that *cell_ref* is a single A1 cell reference (not a multi-cell range)."""
+    cleaned = cell_ref.strip()
+    if ":" in cleaned:
+        raise ValueError(f"Expected a single cell reference, got range '{cell_ref}'.")
+    res = validate_excel_range(cleaned)
+    if not res["valid"]:
+        raise ValueError(f"Invalid cell reference '{cell_ref}': {res['message']}")
+    return cleaned.upper()
+
+
 def validate_excel_range(range_str: str) -> ValidationRangeResult:
     """Validate A1-style range notation.
 

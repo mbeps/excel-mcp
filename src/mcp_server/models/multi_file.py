@@ -21,22 +21,6 @@ class MultiFilePerFileResult(TypedDict):
     value: float
 
 
-class MultiFileAggResult(TypedDict):
-    """Aggregate result from bulk aggregation across multiple files.
-
-    Keys:
-        column (str): Column aggregated.
-        operation (str): Aggregation operation (sum, mean, etc.).
-        aggregate (float): Global aggregate.
-        per_file (list[MultiFilePerFileResult]): Per-file breakdown.
-    """
-
-    column: str
-    operation: str
-    aggregate: float
-    per_file: list[MultiFilePerFileResult]
-
-
 class MultiFileFilterPerFileResult(TypedDict):
     """Per-file filter result used by bulk filter operations.
 

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import Any
+
+from openpyxl.worksheet.hyperlink import Hyperlink
 
 from mcp_server.models.hyperlinks import HyperlinkInfo, HyperlinkReadResult
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
     save_workbook_safe,
+    validate_single_cell,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -25,16 +27,17 @@ def add_hyperlink(
     tooltip: str | None = None,
 ) -> str:
     """Add a hyperlink to a cell."""
+    validate_single_cell(cell_ref)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
         cell = ws[cell_ref]
-        cell.hyperlink = url
+        if url.startswith("#"):
+            cell.hyperlink = Hyperlink(ref=cell_ref, location=url[1:], tooltip=tooltip)
+        else:
+            cell.hyperlink = Hyperlink(ref=cell_ref, target=url, tooltip=tooltip)
         if display_text is not None:
             cell.value = display_text
-        if tooltip is not None:
-            link: Any = cell.hyperlink  # openpyxl returns a Hyperlink object here
-            link.tooltip = tooltip
         save_workbook_safe(wb, file_path)
         logger.info("Added hyperlink to %s!%s in %s", sheet_name, cell_ref, file_path)
         return f"Hyperlink added to cell {cell_ref} on sheet '{sheet_name}'."
@@ -44,6 +47,7 @@ def add_hyperlink(
 
 def read_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> HyperlinkReadResult | None:
     """Read hyperlink from a cell. Returns dict with target/location/tooltip/display_text or None."""
+    validate_single_cell(cell_ref)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -63,6 +67,7 @@ def read_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> HyperlinkR
 
 def delete_hyperlink(file_path: str, sheet_name: str, cell_ref: str) -> str:
     """Delete hyperlink from a cell."""
+    validate_single_cell(cell_ref)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)

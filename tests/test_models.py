@@ -50,7 +50,10 @@ def test_column_stats():
 def test_workbook_metadata():
     si = SheetInfo(name="Sheet1")
     wm = WorkbookMetadata(
-        file_path="/path/test.xlsx", sheets=[si], active_sheet="Sheet1", named_ranges=[{"name": "test", "range": "A1"}]
+        file_path="/path/test.xlsx",
+        sheets=[si],
+        active_sheet="Sheet1",
+        named_ranges=[{"name": "test", "destination": "A1", "scope": "workbook"}],
     )
     assert wm.active_sheet == "Sheet1"
     assert wm.sheets[0].name == "Sheet1"

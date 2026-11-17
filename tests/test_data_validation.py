@@ -222,8 +222,8 @@ def test_add_date_between(sample_xlsx: str) -> None:
 
     wb = load_workbook(sample_xlsx)
     dv = wb["Sheet1"].data_validations.dataValidation[0]
-    assert dv.formula1 == "2024-01-01"
-    assert dv.formula2 == "2024-12-31"
+    assert dv.formula1 == "DATE(2024,1,1)"
+    assert dv.formula2 == "DATE(2024,12,31)"
     wb.close()
 
 

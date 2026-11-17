@@ -63,7 +63,18 @@ def get_workbook_metadata(file_path: str) -> WorkbookMetadata:
                 )
             )
 
-        named_ranges = [{"name": nr.name, "destination": str(nr.attr_text)} for nr in wb.defined_names.values()]
+        named_ranges = [
+            {
+                "name": nr.name,
+                "destination": str(nr.attr_text),
+                "scope": (
+                    wb.sheetnames[nr.localSheetId]
+                    if nr.localSheetId is not None and 0 <= nr.localSheetId < len(wb.sheetnames)
+                    else "workbook"
+                ),
+            }
+            for nr in wb.defined_names.values()
+        ]
 
         return WorkbookMetadata(
             file_path=file_path,

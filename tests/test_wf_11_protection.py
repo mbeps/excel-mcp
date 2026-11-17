@@ -536,6 +536,6 @@ class TestDateValidationBetween:
         dv = ws.data_validations.dataValidation[0]
         assert dv.type == "date"
         assert dv.operator == "between"
-        assert dv.formula1 == "2020-01-01"
-        assert dv.formula2 == "2025-12-31"
+        assert dv.formula1 == "DATE(2020,1,1)"
+        assert dv.formula2 == "DATE(2025,12,31)"
         wb.close()

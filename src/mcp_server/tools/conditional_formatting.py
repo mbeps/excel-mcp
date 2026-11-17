@@ -8,6 +8,7 @@ from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule, Fo
 from openpyxl.styles import Font, PatternFill
 from openpyxl.styles.differential import DifferentialStyle
 
+from mcp_server.tools.formatting import _normalize_hex_color
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -36,6 +37,11 @@ def apply_conditional_formatting(
     """Apply conditional formatting rule to a range."""
     if format_type not in VALID_FORMAT_TYPES:
         raise ValueError(f"Invalid format_type '{format_type}'. Must be one of: {VALID_FORMAT_TYPES}")
+
+    start_color = _normalize_hex_color(start_color) or "FF0000"
+    mid_color = _normalize_hex_color(mid_color) or "FFFF00"
+    end_color = _normalize_hex_color(end_color) or "00FF00"
+    bar_color = _normalize_hex_color(bar_color) or "FF638EC6"
 
     wb = load_workbook_safe(file_path)
     try:
@@ -71,10 +77,16 @@ def apply_conditional_formatting(
                 color=bar_color,
             )
         else:
+            if icon_style.startswith("5"):
+                icon_values = [0, 20, 40, 60, 80]
+            elif icon_style.startswith("4"):
+                icon_values = [0, 25, 50, 75]
+            else:
+                icon_values = [0, 33, 67]
             rule = IconSetRule(
                 icon_style=icon_style,
                 type="percent",
-                values=[33, 67],
+                values=icon_values,
             )
 
         rule.stopIfTrue = stop_if_true
@@ -97,6 +109,8 @@ def add_highlight_rule(
     stop_if_true: bool = False,
 ) -> str:
     """Add a cell highlight conditional format rule."""
+    font_color = _normalize_hex_color(font_color) or "9C0006"
+    bg_color = _normalize_hex_color(bg_color) or "FFC7CE"
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -106,7 +120,7 @@ def add_highlight_rule(
             formula=[formula],
             stopIfTrue=stop_if_true,
             font=Font(color=font_color),
-            fill=PatternFill(bgColor=bg_color),
+            fill=PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid"),
         )
         ws.conditional_formatting.add(cell_range, rule)
         save_workbook_safe(wb, file_path)
@@ -131,10 +145,10 @@ def remove_conditional_formatting(file_path: str, sheet_name: str, cell_range: s
             msg = f"Removed all conditional formatting from sheet '{sheet_name}'."
         else:
             cf_rules = ws.conditional_formatting._cf_rules  # pyright: ignore[reportAttributeAccessIssue]
-            key = cell_range.upper()
-            matched = next((k for k in cf_rules if str(k.sqref).upper() == key), None)
-            if matched is not None:
-                del cf_rules[matched]
+            key = cell_range.strip().replace("$", "").upper()
+            matched = [k for k in cf_rules if str(k.sqref).replace("$", "").upper() == key]
+            for k in matched:
+                del cf_rules[k]
             logger.info(
                 "Removed conditional formatting for range '%s' from sheet '%s' in %s", cell_range, sheet_name, file_path
             )
@@ -152,16 +166,20 @@ def add_formula_rule(
     formula: str,
     font_color: str = "9C0006",
     bg_color: str = "FFC7CE",
+    stop_if_true: bool = False,
 ) -> str:
     """Add a formula-based conditional formatting rule."""
+    font_color = _normalize_hex_color(font_color) or "9C0006"
+    bg_color = _normalize_hex_color(bg_color) or "FFC7CE"
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
 
         rule = FormulaRule(
             formula=[formula],
+            stopIfTrue=stop_if_true,
             font=Font(color=font_color),
-            fill=PatternFill(bgColor=bg_color),
+            fill=PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid"),
         )
         ws.conditional_formatting.add(cell_range, rule)
         save_workbook_safe(wb, file_path)
@@ -186,12 +204,17 @@ def add_top_bottom_rule(
         raise ValueError(f"rank must be a positive integer, got {rank}")
     if percent and rank > 100:
         raise ValueError(f"rank as percentage must be 0-100, got {rank}")
+    bg_color = _normalize_hex_color(bg_color) or "FFFF00"
+    font_color = _normalize_hex_color(font_color)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
 
         font = Font(color=font_color) if font_color else None
-        dxf = DifferentialStyle(fill=PatternFill(bgColor=bg_color), font=font)
+        dxf = DifferentialStyle(
+            fill=PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid"),
+            font=font,
+        )
         rule = Rule(
             type="top10",
             dxf=dxf,
@@ -217,12 +240,17 @@ def add_above_below_average_rule(
     font_color: str | None = None,
 ) -> dict:
     """Add an above/below average conditional formatting rule."""
+    bg_color = _normalize_hex_color(bg_color) or "FFFF00"
+    font_color = _normalize_hex_color(font_color)
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
 
         font = Font(color=font_color) if font_color else None
-        dxf = DifferentialStyle(fill=PatternFill(bgColor=bg_color), font=font)
+        dxf = DifferentialStyle(
+            fill=PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid"),
+            font=font,
+        )
         rule = Rule(
             type="aboveAverage",
             dxf=dxf,
@@ -254,7 +282,7 @@ def list_conditional_formatting(file_path: str, sheet_name: str | None = None) -
             for rule in cf_rule.rules:
                 rules.append(
                     {
-                        "range": str(cf_rule),
+                        "range": str(cf_rule.sqref),
                         "type": rule.type,
                         "priority": rule.priority,
                         "formula": list(rule.formula) if rule.formula else [],
