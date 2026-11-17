@@ -14,6 +14,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from logging import Logger
 from pathlib import Path
 from typing import Any
@@ -117,9 +118,24 @@ def load_workbook_safe(
         raise ValueError(f"Failed to open workbook '{file_path}': {e}") from e
 
 
+_FILE_LOCKS_GUARD: threading.Lock = threading.Lock()
+# ponytail: in-process per-file mutex. Ceiling: single process only. Upgrade path: use filelock if multi-process MCP deployment needed.
+_FILE_LOCKS: dict[Path, threading.Lock] = {}
+
+
+def _get_file_lock(path: Path) -> threading.Lock:
+    """Return a per-file threading Lock to serialize concurrent writes to the same workbook."""
+    with _FILE_LOCKS_GUARD:
+        lock = _FILE_LOCKS.get(path)
+        if lock is None:
+            lock = threading.Lock()
+            _FILE_LOCKS[path] = lock
+        return lock
+
+
 def save_workbook_safe(wb: Workbook, file_path: str) -> None:
     """
-    Save an openpyxl `Workbook` to disk with validation and error wrapping.
+    Save an openpyxl `Workbook` to disk with validation and robust atomic error handling.
 
     Args:
         wb (openpyxl.workbook.Workbook): Workbook instance to save.
@@ -132,10 +148,22 @@ def save_workbook_safe(wb: Workbook, file_path: str) -> None:
         ValueError: If the path validation fails or saving raises an exception.
     """
     path = validate_file_path(file_path, must_exist=False)
-    try:
-        wb.save(str(path))
-    except Exception as e:
-        raise ValueError(f"Failed to save workbook '{file_path}': {e}") from e
+    lock = _get_file_lock(path)
+    with lock:
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False, suffix=".tmp") as tmp:
+                tmp_path = Path(tmp.name)
+            wb.save(str(tmp_path))
+            os.replace(tmp_path, path)
+        except Exception as e:
+            raise ValueError(f"Failed to save workbook '{file_path}': {e}") from e
+        finally:
+            if tmp_path is not None and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
 
 
 def get_sheet(wb: Workbook, sheet_name: str) -> Worksheet:
@@ -202,7 +230,10 @@ def read_sheet_df(file_path: str, sheet_name: str, header_row: int | bool = 1) -
             return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="calamine")
         except Exception:
             pass
-    return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="openpyxl")
+    try:
+        return pd.read_excel(path, sheet_name=sheet_name, header=header, engine="openpyxl")
+    except Exception as e:
+        raise ValueError(f"Failed to read sheet '{sheet_name}' from '{file_path}': {e}") from e
 
 
 _CELL_REF_RE: re.Pattern[str] = re.compile(r"^([A-Z]{1,3})(\d+)$", re.IGNORECASE)
