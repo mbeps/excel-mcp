@@ -31,7 +31,7 @@ def _eval_expression_vars(expr: str, variables: dict[str, float]) -> float:
     """Evaluate a validated expression with multiple named variables."""
     tree = validate_expression(expr, allowed_names=frozenset(set(variables.keys()) | set(SAFE_MATH_FUNCS.keys())))
     code = compile(tree, "<expression>", "eval")
-    namespace = {**variables, **SAFE_MATH_FUNCS}
+    namespace = {**SAFE_MATH_FUNCS, **variables}
     return float(eval(code, {"__builtins__": {}}, namespace))
 
 
@@ -74,27 +74,39 @@ def goal_seek(
             maxiter=max_iterations,
             xtol=tolerance,
         )
-        x_found = result.root
+        x_found = float(result.root)
         converged = bool(result.converged)
         iterations = int(result.iterations)
     except Exception as e:
         raise ValueError(f"Goal seek failed to converge: {e}") from e
 
-    achieved = _eval_expression(expression, x_found)
+    if converged and math.isfinite(x_found):
+        achieved = _eval_expression(expression, x_found)
+        residual_tol = max(tolerance * 1000, 1e-3, abs(target_value) * 1e-4)
+        if not math.isfinite(achieved) or abs(achieved - target_value) > residual_tol:
+            converged = False
+    else:
+        converged = False
+        achieved = float("nan")
 
-    wb = load_workbook_safe(file_path)
-    try:
-        ws = get_sheet(wb, sheet_name)
-        ws[variable_cell] = float(x_found)
-        save_workbook_safe(wb, file_path)
-    finally:
-        wb.close()
+    if converged:
+        wb = load_workbook_safe(file_path)
+        try:
+            ws = get_sheet(wb, sheet_name)
+            ws[variable_cell] = x_found
+            save_workbook_safe(wb, file_path)
+        finally:
+            wb.close()
 
-    logger.info("Goal seek: x=%.6f, achieved=%.6f, target=%.6f", x_found, achieved, target_value)
+    found_out = x_found if math.isfinite(x_found) else None
+    achieved_out = float(achieved) if math.isfinite(achieved) else None
+    logger.info(
+        "Goal seek: x=%s, achieved=%s, target=%.6f, converged=%s", found_out, achieved_out, target_value, converged
+    )
     return {
         "variable_cell": variable_cell,
-        "found_value": float(x_found),
-        "achieved_result": float(achieved),
+        "found_value": found_out,
+        "achieved_result": achieved_out,
         "target_value": target_value,
         "converged": converged,
         "iterations": iterations,
@@ -109,29 +121,42 @@ def loan_amortization(
     max_periods: int | None = None,
 ) -> dict:
     """Generate a loan amortization schedule."""
+    if years <= 0:
+        raise ValueError("years must be positive.")
+    if payments_per_year <= 0:
+        raise ValueError("payments_per_year must be positive.")
+    if max_periods is not None and max_periods < 0:
+        raise ValueError("max_periods must be non-negative.")
+
     periodic_rate = annual_rate / payments_per_year
     total_periods = years * payments_per_year
     payment = float(-npf.pmt(periodic_rate, total_periods, principal))
 
     schedule = []
-    balance = principal
+    balance = float(principal)
     total_interest = 0.0
 
     periods_to_show = total_periods if max_periods is None else min(max_periods, total_periods)
     for period in range(1, total_periods + 1):
         interest = balance * periodic_rate
-        principal_paid = payment - interest
-        balance -= principal_paid
+        if period == total_periods:
+            principal_paid = balance
+            period_payment = principal_paid + interest
+            balance = 0.0
+        else:
+            principal_paid = payment - interest
+            period_payment = payment
+            balance -= principal_paid
         total_interest += interest
 
         if period <= periods_to_show:
             schedule.append(
                 {
                     "period": period,
-                    "payment": round(payment, 2),
+                    "payment": round(period_payment, 2),
                     "principal": round(principal_paid, 2),
                     "interest": round(interest, 2),
-                    "balance": round(max(balance, 0), 2),
+                    "balance": round(max(balance, 0.0), 2),
                 }
             )
 
@@ -162,6 +187,8 @@ def dcf_analysis(
     initial_investment: float = 0.0,
 ) -> dict:
     """Discounted Cash Flow valuation with terminal value (Gordon Growth Model)."""
+    if discount_rate <= -1.0:
+        raise ValueError("Discount rate must be greater than -1.0.")
     if discount_rate <= terminal_growth_rate:
         raise ValueError("Discount rate must be greater than terminal growth rate.")
     if not cash_flows:
@@ -180,7 +207,8 @@ def dcf_analysis(
 
     all_cfs = [-initial_investment] + list(cash_flows)
     try:
-        irr_value = float(npf.irr(all_cfs))
+        irr_raw = float(npf.irr(all_cfs))
+        irr_value = irr_raw if math.isfinite(irr_raw) else None
     except Exception:
         irr_value = None
 
@@ -194,6 +222,22 @@ def dcf_analysis(
         "net_value": round(net_value, 2),
         "irr": round(irr_value, 6) if irr_value is not None else None,
     }
+
+
+def _classify_variance(budget: float, variance: float) -> tuple[float | None, str]:
+    """Return (variance_pct, status) handling zero-budget rows cleanly."""
+    if budget == 0:
+        if variance == 0:
+            return None, "on_budget"
+        return None, "over_budget" if variance > 0 else "under_budget"
+    variance_pct = variance / budget * 100
+    if abs(variance_pct) < 0.5:
+        status = "on_budget"
+    elif variance > 0:
+        status = "over_budget"
+    else:
+        status = "under_budget"
+    return variance_pct, status
 
 
 def budget_variance_analysis(
@@ -222,18 +266,16 @@ def budget_variance_analysis(
 
             if cat_val is None or bud_val is None or act_val is None:
                 continue
+            if isinstance(bud_val, bool) or isinstance(act_val, bool):
+                continue
+            try:
+                budget = float(bud_val)
+                actual = float(act_val)
+            except (TypeError, ValueError):
+                continue
 
-            budget = float(bud_val)
-            actual = float(act_val)
             variance = actual - budget
-            variance_pct = (variance / budget * 100) if budget != 0 else 0.0
-
-            if abs(variance_pct) < 0.5:
-                status = "on_budget"
-            elif variance > 0:
-                status = "over_budget"
-            else:
-                status = "under_budget"
+            variance_pct, status = _classify_variance(budget, variance)
 
             items.append(
                 {
@@ -241,7 +283,7 @@ def budget_variance_analysis(
                     "budget": round(budget, 2),
                     "actual": round(actual, 2),
                     "variance": round(variance, 2),
-                    "variance_pct": round(variance_pct, 2),
+                    "variance_pct": round(variance_pct, 2) if variance_pct is not None else None,
                     "status": status,
                 }
             )
@@ -251,7 +293,7 @@ def budget_variance_analysis(
     total_budget = sum(i["budget"] for i in items)
     total_actual = sum(i["actual"] for i in items)
     total_variance = total_actual - total_budget
-    total_variance_pct = (total_variance / total_budget * 100) if total_budget != 0 else 0.0
+    total_variance_pct, total_status = _classify_variance(total_budget, total_variance)
 
     result: dict[str, object] = {
         "items": items,
@@ -259,7 +301,7 @@ def budget_variance_analysis(
             "total_budget": round(total_budget, 2),
             "total_actual": round(total_actual, 2),
             "total_variance": round(total_variance, 2),
-            "total_variance_pct": round(total_variance_pct, 2),
+            "total_variance_pct": round(total_variance_pct, 2) if total_variance_pct is not None else None,
         },
     }
 
@@ -268,31 +310,48 @@ def budget_variance_analysis(
 
         if os.path.realpath(output_file) == os.path.realpath(file_path):
             out_wb = load_workbook_safe(file_path)
-            if "Variance Analysis" in out_wb.sheetnames:
-                del out_wb["Variance Analysis"]
-            out_ws = out_wb.create_sheet(title="Variance Analysis")
+        elif os.path.exists(output_file):
+            out_wb = load_workbook_safe(output_file)
         else:
             out_wb = openpyxl.Workbook()
-            out_ws = out_wb.active
-            out_ws.title = "Variance Analysis"
-        headers = ["Category", "Budget", "Actual", "Variance", "Variance %", "Status"]
-        out_ws.append(headers)
-        for item in items:
+        try:
+            if "Variance Analysis" in out_wb.sheetnames:
+                del out_wb["Variance Analysis"]
+                out_ws = out_wb.create_sheet(title="Variance Analysis")
+            elif os.path.realpath(output_file) != os.path.realpath(file_path) and not os.path.exists(output_file):
+                out_ws = out_wb.active
+                out_ws.title = "Variance Analysis"
+            else:
+                out_ws = out_wb.create_sheet(title="Variance Analysis")
+
+            headers = ["Category", "Budget", "Actual", "Variance", "Variance %", "Status"]
+            out_ws.append(headers)
+            for item in items:
+                out_ws.append(
+                    [
+                        item["category"],
+                        item["budget"],
+                        item["actual"],
+                        item["variance"],
+                        item["variance_pct"],
+                        item["status"],
+                    ]
+                )
+            out_ws.append([])
             out_ws.append(
                 [
-                    item["category"],
-                    item["budget"],
-                    item["actual"],
-                    item["variance"],
-                    item["variance_pct"],
-                    item["status"],
+                    "TOTAL",
+                    round(total_budget, 2),
+                    round(total_actual, 2),
+                    round(total_variance, 2),
+                    round(total_variance_pct, 2) if total_variance_pct is not None else None,
+                    total_status,
                 ]
             )
-        out_ws.append([])
-        out_ws.append(["TOTAL", total_budget, total_actual, total_variance, total_variance_pct])
-        save_workbook_safe(out_wb, output_file)
-        result["output_file"] = output_file
-        out_wb.close()
+            save_workbook_safe(out_wb, output_file)
+            result["output_file"] = output_file
+        finally:
+            out_wb.close()
 
     logger.info("Budget variance analysis: %d categories processed", len(items))
     return result
@@ -414,6 +473,13 @@ def break_even_analysis(
     }
 
 
+def _validate_when(when: str) -> int:
+    """Validate annuity timing parameter ('end' or 'begin') and return numpy_financial flag."""
+    if when not in ("end", "begin"):
+        raise ValueError(f"when must be 'end' or 'begin', got '{when}'.")
+    return 0 if when == "end" else 1
+
+
 def calculate_fv(
     rate: float,
     nper: int,
@@ -429,7 +495,7 @@ def calculate_fv(
     pv:  present value (negative = outflow)
     when: 'end' (ordinary annuity) or 'begin' (annuity due)
     """
-    when_int = 0 if when == "end" else 1
+    when_int = _validate_when(when)
     result = float(npf.fv(rate, nper, pmt, pv, when=when_int))
     logger.info("calculate_fv: rate=%.4f nper=%d pmt=%.2f pv=%.2f -> fv=%.4f", rate, nper, pmt, pv, result)
     return {"rate": rate, "nper": nper, "pmt": pmt, "pv": pv, "when": when, "fv": round(result, 4)}
@@ -450,7 +516,7 @@ def calculate_pv(
     fv:  future value
     when: 'end' or 'begin'
     """
-    when_int = 0 if when == "end" else 1
+    when_int = _validate_when(when)
     result = float(npf.pv(rate, nper, pmt, fv, when=when_int))
     logger.info("calculate_pv: rate=%.4f nper=%d pmt=%.2f fv=%.2f -> pv=%.4f", rate, nper, pmt, fv, result)
     return {"rate": rate, "nper": nper, "pmt": pmt, "fv": fv, "when": when, "pv": round(result, 4)}
@@ -471,7 +537,7 @@ def calculate_nper(
     fv:  future value
     when: 'end' or 'begin'
     """
-    when_int = 0 if when == "end" else 1
+    when_int = _validate_when(when)
     result = float(npf.nper(rate, pmt, pv, fv, when=when_int))
     logger.info("calculate_nper: rate=%.4f pmt=%.2f pv=%.2f fv=%.2f -> nper=%.4f", rate, pmt, pv, fv, result)
     return {"rate": rate, "pmt": pmt, "pv": pv, "fv": fv, "when": when, "nper": round(result, 4)}
@@ -494,7 +560,7 @@ def calculate_rate(
     when: 'end' or 'begin'
     guess: starting guess for iteration
     """
-    when_int = 0 if when == "end" else 1
+    when_int = _validate_when(when)
     result = float(npf.rate(nper, pmt, pv, fv, when=when_int, guess=guess))
     if math.isnan(result):
         raise ValueError(
@@ -533,6 +599,8 @@ def calculate_depreciation(
              'ddb' / 'double_declining' / 'double_declining_balance'
     period:  required for 'syd' and 'ddb' (1-based period number)
     """
+    if life <= 0:
+        raise ValueError("life must be positive.")
     method = _DEPRECIATION_METHOD_ALIASES.get(method.lower(), method.lower())
     if method == "sln":
         result = (cost - salvage) / life
@@ -628,6 +696,11 @@ def create_sensitivity_table(
     from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
 
     # Validate expression
+    if not var1_values:
+        raise ValueError("var1_values must not be empty.")
+    if bool(var2_name) != bool(var2_values):
+        raise ValueError("Both var2_name and var2_values must be provided together.")
+
     all_vars = {var1_name}
     if var2_name:
         all_vars.add(var2_name)
@@ -643,10 +716,7 @@ def create_sensitivity_table(
                 row.append(round(val, 4))
             table.append(row)
     else:
-        for v1 in var1_values:
-            val = _eval_expression_vars(expression, {var1_name: v1})
-            single_row: list[float | str] = [round(val, 4)]
-            table.append(single_row)
+        table.append([round(_eval_expression_vars(expression, {var1_name: v1}), 4) for v1 in var1_values])
 
     # Write to workbook
     col_str, start_row = coordinate_from_string(output_cell)

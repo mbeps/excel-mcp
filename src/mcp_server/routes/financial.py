@@ -34,7 +34,7 @@ def goal_seek(
         file_path: Workbook path.
         sheet_name: Worksheet containing the expression.
         variable_cell: Cell reference to adjust (e.g. "B2").
-        expression: Arithmetic expression referencing worksheet cells (string).
+        expression: Arithmetic expression using ``x`` as the variable (e.g. ``"1000 * (1 + x)**10"``).
         target_value: Numeric target value for the expression.
         initial_value: Starting guess for the solver.
         tolerance: Convergence tolerance.
@@ -44,8 +44,7 @@ def goal_seek(
         dict: Result with solved value, status, and iterations used.
 
     Notes:
-        - Destructive: writes the solved value back to the workbook.
-        - Recommend adding a short example expression in docs.
+        - Destructive: writes the solved value back to the workbook when converged.
     """
     return _financial.goal_seek(
         file_path,
@@ -64,6 +63,7 @@ def loan_amortization(
     annual_rate: float,
     years: int,
     payments_per_year: int = 12,
+    max_periods: int | None = None,
 ) -> dict:
     """Generate a loan amortization schedule for given principal, rate and term.
 
@@ -72,11 +72,12 @@ def loan_amortization(
         annual_rate: Annual interest rate (fractional, e.g. 0.05 for 5%).
         years: Term in years.
         payments_per_year: Payment frequency (default 12).
+        max_periods: Optional cap on schedule rows returned.
 
     Returns:
         dict: Schedule rows and totals including payment amount, interest, principal breakdown.
     """
-    return _financial.loan_amortization(principal, annual_rate, years, payments_per_year)
+    return _financial.loan_amortization(principal, annual_rate, years, payments_per_year, max_periods)
 
 
 def dcf_analysis(
@@ -291,10 +292,10 @@ def time_value_calc(
 def register(mcp: Any) -> None:
     """Register financial tools on *mcp*."""
     mcp.tool()(goal_seek)
-    mcp.tool()(loan_amortization)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(loan_amortization)
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(dcf_analysis)
     mcp.tool()(budget_variance_analysis)
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(financial_ratio_analysis)
-    mcp.tool()(break_even_analysis)
+    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(break_even_analysis)
     mcp.tool()(create_sensitivity_table)
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(time_value_calc)

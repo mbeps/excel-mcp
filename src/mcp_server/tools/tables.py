@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from logging import Logger
+from typing import Any
 
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
-from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.worksheet.table import Table, TableColumn, TableStyleInfo
 
 from mcp_server.models.common import CellScalar
 from mcp_server.models.tables import TableInfo
@@ -20,6 +22,25 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 
+_TABLE_NAME_RE = re.compile(r"^[A-Za-z_\\][A-Za-z0-9_.]*$")
+
+
+def _get_table(ws: Any, table_name: str) -> tuple[str, Table]:
+    """Locate a table on *ws* by dict key or ``displayName``."""
+    if table_name in ws.tables:
+        return table_name, ws.tables[table_name]
+    for tbl in ws.tables.values():
+        if tbl.displayName == table_name:
+            key = tbl.name or tbl.displayName
+            return key, tbl
+    raise ValueError(f"Table '{table_name}' not found in sheet '{ws.title}'.")
+
+
+def _ranges_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+    """Return True if two (min_col, min_row, max_col, max_row) rectangles overlap."""
+    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
 def create_table(
     file_path: str,
     sheet_name: str,
@@ -28,9 +49,31 @@ def create_table(
     style_name: str = "TableStyleMedium9",
 ) -> str:
     """Create a native Excel table (ListObject)."""
+    if not table_name or not _TABLE_NAME_RE.match(table_name):
+        raise ValueError(
+            f"Invalid table name '{table_name}'. Must start with a letter, '_', or '\\' and contain no spaces."
+        )
+    bounds = range_boundaries(data_range)
+    if any(b is None for b in bounds):
+        raise ValueError(f"Invalid table range '{data_range}': must be a bounded A1 range.")
+    new_rect = (int(bounds[0]), int(bounds[1]), int(bounds[2]), int(bounds[3]))
+    if new_rect[0] > new_rect[2] or new_rect[1] > new_rect[3]:
+        raise ValueError(f"Invalid table range '{data_range}': reversed bounds.")
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
+
+        lower_name = table_name.lower()
+        for existing in ws.tables.values():
+            if (existing.displayName or "").lower() == lower_name or (existing.name or "").lower() == lower_name:
+                raise ValueError(f"Table '{table_name}' already exists on sheet '{sheet_name}'.")
+            ex_bounds = range_boundaries(existing.ref)
+            ex_rect = (int(ex_bounds[0]), int(ex_bounds[1]), int(ex_bounds[2]), int(ex_bounds[3]))
+            if _ranges_overlap(new_rect, ex_rect):
+                raise ValueError(
+                    f"Range '{data_range}' overlaps existing table '{existing.displayName}' ({existing.ref})."
+                )
 
         style = TableStyleInfo(
             name=style_name,
@@ -68,14 +111,52 @@ def list_tables(file_path: str, sheet_name: str) -> list[TableInfo]:
 
 
 def resize_table(file_path: str, sheet_name: str, table_name: str, new_range: str) -> str:
-    """Change the cell reference range of a table."""
+    """Change the cell reference range of a table and synchronize tableColumns."""
+    bounds = range_boundaries(new_range)
+    if any(b is None for b in bounds):
+        raise ValueError(f"Invalid table range '{new_range}': must be a bounded A1 range.")
+    min_col, min_row, max_col, max_row = int(bounds[0]), int(bounds[1]), int(bounds[2]), int(bounds[3])
+    if min_col > max_col or min_row > max_row:
+        raise ValueError(f"Invalid table range '{new_range}': reversed bounds.")
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        if table_name not in ws.tables:
-            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
-        old_ref = ws.tables[table_name].ref
-        ws.tables[table_name].ref = new_range
+        _, table = _get_table(ws, table_name)
+        old_ref = table.ref
+        table.ref = new_range
+
+        new_col_count = max_col - min_col + 1
+        old_cols = list(table.tableColumns or [])
+        synced_cols: list[TableColumn] = []
+        used_names: set[str] = set()
+        for i in range(new_col_count):
+            header_val = ws.cell(row=min_row, column=min_col + i).value
+            if header_val is not None and str(header_val).strip():
+                base_name = str(header_val).strip()
+            elif i < len(old_cols) and old_cols[i].name:
+                base_name = old_cols[i].name
+            else:
+                base_name = f"Column{i + 1}"
+
+            col_name = base_name
+            suffix = 2
+            while col_name in used_names:
+                col_name = f"{base_name}{suffix}"
+                suffix += 1
+            used_names.add(col_name)
+
+            prev = old_cols[i] if i < len(old_cols) else None
+            synced_cols.append(
+                TableColumn(
+                    id=i + 1,
+                    name=col_name,
+                    totalsRowFunction=prev.totalsRowFunction if prev else None,
+                    totalsRowLabel=prev.totalsRowLabel if prev else None,
+                )
+            )
+        table.tableColumns = synced_cols
+
         save_workbook_safe(wb, file_path)
         logger.info("Resized table '%s' from %s to %s in %s", table_name, old_ref, new_range, file_path)
         return f"Resized table '{table_name}' from '{old_ref}' to '{new_range}' on sheet '{sheet_name}'."
@@ -108,9 +189,7 @@ def set_table_totals_row(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        if table_name not in ws.tables:
-            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
-        table = ws.tables[table_name]
+        _, table = _get_table(ws, table_name)
 
         min_col, min_row, max_col, max_row = range_boundaries(table.ref)
 
@@ -123,16 +202,24 @@ def set_table_totals_row(
                 totals_row = max_row  # ref already includes totals row
 
             table.totalsRowCount = 1
+            table.totalsRowShown = True
 
             if column_totals and table.tableColumns:
                 for col_idx, col in enumerate(table.tableColumns, start=min_col):
                     if col.name in column_totals:
                         func = column_totals[col.name]
-                        col.totalsRowFunction = func
-                        subtotal_id = _SUBTOTAL_IDS.get(func)
-                        if subtotal_id is not None:
-                            cell = ws.cell(row=totals_row, column=col_idx)
-                            cell.value = f"=SUBTOTAL({subtotal_id},[{col.name}])"
+                        if func == "none":
+                            col.totalsRowFunction = None
+                            ws.cell(row=totals_row, column=col_idx).value = None
+                        elif func in _SUBTOTAL_IDS:
+                            col.totalsRowFunction = func
+                            ws.cell(
+                                row=totals_row, column=col_idx
+                            ).value = f"=SUBTOTAL({_SUBTOTAL_IDS[func]},[{col.name}])"
+                        else:
+                            raise ValueError(
+                                f"Unsupported totals function '{func}'. Valid: {sorted(_SUBTOTAL_IDS) + ['none']}."
+                            )
         else:
             # Disable totals
             if table.totalsRowCount:
@@ -144,6 +231,7 @@ def set_table_totals_row(
                     for col in table.tableColumns:
                         col.totalsRowFunction = None
             table.totalsRowCount = None
+            table.totalsRowShown = False
 
         save_workbook_safe(wb, file_path)
         logger.info("Set totals row for table '%s': show=%s", table_name, show_totals)
@@ -161,12 +249,11 @@ def get_table_data(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        if table_name not in ws.tables:
-            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
-        table = ws.tables[table_name]
+        _, table = _get_table(ws, table_name)
         cell_rows = list(ws[table.ref])
+        end_idx = len(cell_rows) - (table.totalsRowCount or 0)
         headers = [cell.value for cell in cell_rows[0]]
-        rows = [[cell.value for cell in row] for row in cell_rows[1:]]
+        rows = [[cell.value for cell in row] for row in cell_rows[1:end_idx]]
         logger.info("Read table '%s' data: %d rows from %s", table_name, len(rows), file_path)
         return {
             "table_name": table_name,
@@ -187,38 +274,40 @@ def convert_table_to_range(file_path: str, sheet_name: str, table_name: str) -> 
     because openpyxl cannot resolve structured references once the table
     definition is removed.
     """
-    import re as _re
-
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        if table_name not in ws.tables:
-            raise ValueError(f"Table '{table_name}' not found in sheet '{sheet_name}'.")
+        table_key, table = _get_table(ws, table_name)
 
-        table_ref = ws.tables[table_name].ref
+        table_ref = table.ref
         min_col, min_row, max_col, max_row = range_boundaries(table_ref)
 
         # Collect cells with structured references before deleting the table
-        struct_ref_pattern = _re.compile(r"\[.*?\]")
+        inside_pattern = re.compile(r"\[.*?\]")
+        table_names = {n for n in (table_key, table.displayName) if n}
+        outside_pattern = re.compile(r"(?:" + "|".join(re.escape(n) for n in table_names) + r")\[.*?\]")
         converted_cells: list[str] = []
 
         # Open a data_only copy to read cached values
-        from mcp_server.utils.excel_helpers import load_workbook_safe as _load_safe
-
-        wb_data = _load_safe(file_path, data_only=True)
+        wb_data = load_workbook_safe(file_path, data_only=True)
         try:
             ws_data = get_sheet(wb_data, sheet_name)
-            for row in ws.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
+            for row in ws.iter_rows():
                 for cell in row:
                     val = cell.value
-                    if isinstance(val, str) and val.startswith("=") and struct_ref_pattern.search(val):
+                    if not (isinstance(val, str) and val.startswith("=")):
+                        continue
+                    in_table = (min_row <= cell.row <= max_row) and (min_col <= cell.column <= max_col)
+                    pattern = inside_pattern if in_table else outside_pattern
+                    if pattern.search(val):
                         cached = ws_data.cell(row=cell.row, column=cell.column).value
-                        cell.value = cached
-                        converted_cells.append(cell.coordinate)
+                        if cached is not None:
+                            cell.value = cached
+                            converted_cells.append(cell.coordinate)
         finally:
             wb_data.close()
 
-        del ws.tables[table_name]
+        del ws.tables[table_key]
         save_workbook_safe(wb, file_path)
         logger.info("Converted table '%s' to range in %s", table_name, sheet_name)
 
