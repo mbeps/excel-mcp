@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from logging import Logger
 
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -17,6 +18,21 @@ from mcp_server.utils.logger import configure_logging
 logger: Logger = configure_logging(__name__)
 
 BETWEEN_OPERATORS = {"between", "notBetween"}
+_EXCEL_INLINE_LIST_MAX_CHARS = 255
+
+
+def _to_excel_date_formula(date_str: str) -> str:
+    """Convert an ISO YYYY-MM-DD date string to an Excel DATE(Y,M,D) formula."""
+    cleaned = date_str.strip()
+    if not cleaned:
+        raise ValueError("Date value cannot be empty.")
+    if cleaned.upper().startswith("DATE("):
+        return cleaned
+    try:
+        parsed = date.fromisoformat(cleaned)
+    except ValueError as exc:
+        raise ValueError(f"Invalid date '{date_str}'. Expected YYYY-MM-DD format.") from exc
+    return f"DATE({parsed.year},{parsed.month},{parsed.day})"
 
 
 def add_dropdown_validation(
@@ -33,11 +49,23 @@ def add_dropdown_validation(
     prompt_message: str | None = None,
 ) -> str:
     """Add a dropdown list data validation."""
+    if not source_range:
+        if not options:
+            raise ValueError("options must be a non-empty list when source_range is not provided.")
+        joined = ",".join(options)
+        if len(joined) > _EXCEL_INLINE_LIST_MAX_CHARS:
+            raise ValueError(
+                f"Dropdown options exceed Excel's {_EXCEL_INLINE_LIST_MAX_CHARS}-character inline limit "
+                f"({len(joined)} chars). Use source_range instead."
+            )
+        formula = f'"{joined}"'
+    else:
+        formula = source_range
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
 
-        formula = source_range if source_range else '"' + ",".join(options) + '"'
         dv = DataValidation(type="list", formula1=formula, allow_blank=allow_blank)
         dv.errorStyle = error_style
         dv.errorTitle = error_title or "Invalid Input"
@@ -76,7 +104,11 @@ def add_numeric_validation(
     try:
         ws = get_sheet(wb, sheet_name)
 
-        val_type = "decimal" if isinstance(value1, float) and not value1.is_integer() else "whole"
+        val_type = (
+            "decimal"
+            if any(isinstance(v, float) and not v.is_integer() for v in (value1, value2) if v is not None)
+            else "whole"
+        )
         dv = DataValidation(
             type=val_type,
             operator=operator,
@@ -118,6 +150,9 @@ def add_date_validation(
     if operator in BETWEEN_OPERATORS and not date2:
         raise ValueError(f"date2 is required for operator '{operator}'.")
 
+    formula1 = _to_excel_date_formula(date1)
+    formula2 = _to_excel_date_formula(date2) if date2 else None
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
@@ -125,8 +160,8 @@ def add_date_validation(
         dv = DataValidation(
             type="date",
             operator=operator,
-            formula1=date1,
-            formula2=date2,
+            formula1=formula1,
+            formula2=formula2,
             allow_blank=allow_blank,
         )
         dv.errorStyle = error_style
@@ -150,7 +185,12 @@ def remove_validation(file_path: str, sheet_name: str, cell_range: str) -> str:
     try:
         ws = get_sheet(wb, sheet_name)
 
-        to_remove = [dv for dv in ws.data_validations.dataValidation if str(dv.sqref) == cell_range]
+        target_norm = cell_range.strip().replace("$", "").upper()
+        to_remove = [
+            dv
+            for dv in ws.data_validations.dataValidation
+            if str(dv.sqref).strip().replace("$", "").upper() == target_norm
+        ]
 
         for dv in to_remove:
             ws.data_validations.dataValidation.remove(dv)

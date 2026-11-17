@@ -225,7 +225,7 @@ def test_data_validation_protection_chart(monkeypatch):
     monkeypatch.setattr(main._charts, "update_chart", lambda *args, **kwargs: "U")
 
     assert main.chart("create", "foo.xlsx", "Sheet1", data_range="A1:B2") == "C"
-    assert main.chart("delete", "foo.xlsx", "Sheet1") == "D"
+    assert main.chart("delete", "foo.xlsx", "Sheet1", chart_index=0) == "D"
     assert main.chart("list", "foo.xlsx", "Sheet1") == []
     assert main.chart("add_series", "foo.xlsx", "Sheet1", chart_index=0, data_range="A1:B2") == "AS"
     assert main.chart("set_axes", "foo.xlsx", "Sheet1") == "AX"

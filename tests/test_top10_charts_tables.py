@@ -291,9 +291,15 @@ class TestConvertTableToRange:
 
     def test_only_target_table_removed_when_multiple_exist(self, tmp_path: Path) -> None:
         path = _make_table_workbook(tmp_path)
+        wb = openpyxl.load_workbook(path)
+        ws = wb["Sheet1"]
+        ws.append(["Item", "Count", "Cost"])
+        ws.append(["Widget", 5, 3.0])
+        wb.save(path)
+        wb.close()
         # Two non-overlapping tables on the same sheet
         create_table(path, "Sheet1", "A1:C2", "TableA")
-        create_table(path, "Sheet1", "A3:C4", "TableB")
+        create_table(path, "Sheet1", "A5:C6", "TableB")
         convert_table_to_range(path, "Sheet1", "TableA")
         tables = list_tables(path, "Sheet1")
         names = [t["name"] for t in tables]

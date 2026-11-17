@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from logging import Logger
+from typing import Any
 
 import pandas as pd
 
@@ -14,6 +16,7 @@ from mcp_server.models.multi_file import (
 from mcp_server.utils.excel_helpers import (
     load_workbook_safe,
     read_sheet_df,
+    sanitize_excel_value,
     validate_file_path,
 )
 from mcp_server.utils.logger import configure_logging
@@ -52,12 +55,14 @@ def bulk_aggregate_multi_files(
     sheet_name: str = "Sheet1",
     header_row: int = 1,
     output_file: str | None = None,
-) -> dict[str, str | float | int | list[MultiFilePerFileResult]]:
+) -> dict[str, Any]:
     """Aggregate the same column across multiple files."""
     if operation not in AGGREGATE_OPS:
         raise ValueError(f"Unsupported operation '{operation}'. Allowed: {AGGREGATE_OPS}")
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
+    for fp in file_paths:
+        validate_file_path(fp)
 
     per_file: list[MultiFilePerFileResult] = []
     all_values: list[float] = []
@@ -67,37 +72,39 @@ def bulk_aggregate_multi_files(
         if column not in df.columns:
             raise ValueError(f"Column '{column}' not found in '{fp}'. Available: {list(df.columns)}")
 
-        col_data = pd.to_numeric(df[column], errors="coerce").dropna()
+        non_bool = df[column].where(~df[column].apply(lambda v: isinstance(v, bool)))
+        col_data = pd.to_numeric(non_bool, errors="coerce").dropna()
         values = col_data.tolist()
         all_values.extend(values)
 
-        file_value: float
+        file_value: float | None
         if operation == "sum":
             file_value = float(col_data.sum())
         elif operation == "mean":
-            file_value = float(col_data.mean()) if len(col_data) > 0 else 0.0
+            file_value = float(col_data.mean()) if len(col_data) > 0 else None
         elif operation == "min":
-            file_value = float(col_data.min()) if len(col_data) > 0 else 0.0
+            file_value = float(col_data.min()) if len(col_data) > 0 else None
         elif operation == "max":
-            file_value = float(col_data.max()) if len(col_data) > 0 else 0.0
+            file_value = float(col_data.max()) if len(col_data) > 0 else None
         else:  # count
             file_value = float(len(col_data))
 
-        per_file.append(MultiFilePerFileResult(file=fp, row_count=len(df), value=file_value))
+        per_file.append(MultiFilePerFileResult(file=fp, row_count=len(df), value=file_value))  # type: ignore[typeddict-item]
 
-    series = pd.Series(all_values)
+    series = pd.Series(all_values, dtype=float)
+    aggregate: float | int | None
     if operation == "sum":
         aggregate = float(series.sum())
     elif operation == "mean":
-        aggregate = float(series.mean()) if len(series) > 0 else 0.0
+        aggregate = float(series.mean()) if len(series) > 0 else None
     elif operation == "min":
-        aggregate = float(series.min()) if len(series) > 0 else 0.0
+        aggregate = float(series.min()) if len(series) > 0 else None
     elif operation == "max":
-        aggregate = float(series.max()) if len(series) > 0 else 0.0
+        aggregate = float(series.max()) if len(series) > 0 else None
     else:  # count
         aggregate = len(series)
 
-    result: dict[str, str | float | int | list[MultiFilePerFileResult]] = {
+    result: dict[str, Any] = {
         "column": column,
         "operation": operation,
         "per_file": per_file,
@@ -118,6 +125,15 @@ def bulk_aggregate_multi_files(
     return result
 
 
+def _try_float(val: Any) -> float | None:
+    if isinstance(val, bool):
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def bulk_filter_multi_files(
     file_paths: list[str],
     column: str,
@@ -126,13 +142,15 @@ def bulk_filter_multi_files(
     sheet_name: str = "Sheet1",
     header_row: int = 1,
     output_file: str | None = None,
-) -> dict[str, str | float | int | list[MultiFileFilterPerFileResult]]:
+) -> dict[str, Any]:
     """Filter rows across multiple files based on a condition."""
     operator = OPERATOR_ALIASES.get(operator, operator)
     if operator not in FILTER_OPERATORS:
         raise ValueError(f"Unsupported operator '{operator}'. Allowed: {FILTER_OPERATORS}")
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
+    for fp in file_paths:
+        validate_file_path(fp)
 
     per_file: list[MultiFileFilterPerFileResult] = []
     matched_frames: list[pd.DataFrame] = []
@@ -143,10 +161,24 @@ def bulk_filter_multi_files(
             raise ValueError(f"Column '{column}' not found in '{fp}'. Available: {list(df.columns)}")
 
         col = df[column]
+        num_val = _try_float(value)
+        is_num_col = pd.api.types.is_numeric_dtype(col) and not pd.api.types.is_bool_dtype(col)
         if operator == "equals":
-            mask = col.astype(str) == str(value)
+            if num_val is not None and (
+                is_num_col or (isinstance(value, (int, float)) and not isinstance(value, bool))
+            ):
+                num_col = pd.to_numeric(col.where(~col.apply(lambda v: isinstance(v, bool))), errors="coerce")
+                mask = num_col == num_val
+            else:
+                mask = col.notna() & (col.astype(str) == str(value))
         elif operator == "not_equals":
-            mask = col.astype(str) != str(value)
+            if num_val is not None and (
+                is_num_col or (isinstance(value, (int, float)) and not isinstance(value, bool))
+            ):
+                num_col = pd.to_numeric(col.where(~col.apply(lambda v: isinstance(v, bool))), errors="coerce")
+                mask = num_col != num_val
+            else:
+                mask = col.isna() | (col.astype(str) != str(value))
         elif operator == "greater_than":
             mask = pd.to_numeric(col, errors="coerce") > float(value)
         elif operator == "less_than":
@@ -156,7 +188,8 @@ def bulk_filter_multi_files(
         elif operator == "less_than_or_equal":
             mask = pd.to_numeric(col, errors="coerce") <= float(value)
         else:  # contains
-            mask = col.astype(str).str.contains(str(value), case=False, na=False)
+            str_col = col.where(col.notna(), other=pd.NA).astype("string")
+            mask = str_col.str.contains(str(value), case=False, na=False, regex=False)
 
         matched = df[mask]
         per_file.append(
@@ -164,7 +197,7 @@ def bulk_filter_multi_files(
                 "file": fp,
                 "total_rows": len(df),
                 "matched_rows": len(matched),
-                "data": matched.values.tolist(),
+                "data": [[sanitize_excel_value(v) for v in row] for row in matched.values.tolist()],
             }
         )
         if not matched.empty:
@@ -191,13 +224,26 @@ def bulk_filter_multi_files(
     return result
 
 
+def _coarse_dtype(series: pd.Series) -> str:
+    """Return a coarse dtype category for cross-file schema comparison."""
+    if series.dropna().empty:
+        return "empty"
+    if pd.api.types.is_bool_dtype(series):
+        return "bool"
+    if pd.api.types.is_numeric_dtype(series):
+        return "numeric"
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "datetime"
+    return "text"
+
+
 def validate_data_consistency(
     file_paths: list[str],
     key_column: str,
     check_columns: list[str] | None = None,
     sheet_name: str = "Sheet1",
     header_row: int = 1,
-) -> dict[str, bool | int | dict[str, list[str]] | list[dict[str, str | dict[str, str]]]]:
+) -> dict[str, Any]:
     """Cross-file schema and referential integrity check.
 
     Performs two layers of validation:
@@ -210,6 +256,8 @@ def validate_data_consistency(
     """
     if not file_paths:
         raise ValueError("file_paths must not be empty.")
+    for fp in file_paths:
+        validate_file_path(fp)
 
     # --- Phase 1: Schema validation ---
     file_data: list[tuple[str, pd.DataFrame]] = []
@@ -263,6 +311,26 @@ def validate_data_consistency(
                     }
                 )
 
+    # Check inferred dtypes for shared columns across files
+    cols_to_check_dtype = (
+        check_columns if check_columns else sorted({c for cols in file_schemas.values() for c in cols})
+    )
+    for col_name in cols_to_check_dtype:
+        dtypes_by_file: dict[str, str] = {}
+        for fp, df in file_data:
+            if col_name in df.columns:
+                cat = _coarse_dtype(df[col_name])
+                if cat != "empty":
+                    dtypes_by_file[fp] = cat
+        if len(set(dtypes_by_file.values())) > 1:
+            schema_mismatches.append(
+                {
+                    "issue": "dtype_mismatch",
+                    "column": col_name,
+                    "dtypes_by_file": dtypes_by_file,
+                }
+            )
+
     # --- Phase 2: Referential integrity (only if key_column exists in all files) ---
     all_keys: set = set()
     key_valid_files = [(fp, df) for fp, df in file_data if key_column in df.columns]
@@ -281,38 +349,37 @@ def validate_data_consistency(
             if missing:
                 missing_keys[fp] = missing
 
-    # Check value consistency across files for matching keys
+    # Check value consistency across files for matching keys (preserving duplicate-key rows)
     mismatched_values: list[dict] = []
     effective_check_cols = check_columns or []
     if effective_check_cols and key_valid_files:
-        key_values: dict[str, dict[str, dict[str, object]]] = {}
+        key_values: dict[str, dict[str, dict[str, list[str]]]] = {}
         for fp, df in key_valid_files:
             for _, row in df.iterrows():
                 key = row[key_column]
                 if pd.isna(key):
                     continue
                 key_str = str(key)
-                if key_str not in key_values:
-                    key_values[key_str] = {}
-                vals = {}
+                file_map = key_values.setdefault(key_str, {}).setdefault(fp, {})
                 for cc in effective_check_cols:
                     if cc in df.columns:
                         v = row[cc]
-                        vals[cc] = v if not pd.isna(v) else None
-                key_values[key_str][fp] = vals
+                        v_str = str(v) if not pd.isna(v) else "<empty>"
+                        file_map.setdefault(cc, []).append(v_str)
 
         for key_str, file_vals in key_values.items():
             if len(file_vals) < 2:
                 continue
             files_list = list(file_vals.keys())
             for cc in effective_check_cols:
-                seen_values = {}
+                seen_values: dict[str, str] = {}
+                all_seen: set[str] = set()
                 for fp in files_list:
-                    v = file_vals[fp].get(cc)
-                    v_str = str(v) if v is not None else "<empty>"
-                    seen_values[fp] = v_str
-                unique_vals = set(seen_values.values())
-                if len(unique_vals) > 1:
+                    vals_list = file_vals[fp].get(cc, ["<empty>"])
+                    unique_for_file = sorted(set(vals_list))
+                    all_seen.update(unique_for_file)
+                    seen_values[fp] = unique_for_file[0] if len(unique_for_file) == 1 else ", ".join(unique_for_file)
+                if len(all_seen) > 1:
                     mismatched_values.append(
                         {
                             "key": key_str,
@@ -333,12 +400,23 @@ def validate_data_consistency(
     }
 
 
+def _cells_equal(val_a: Any, val_b: Any) -> bool:
+    """Compare two cell values handling NaN equality and bool-vs-int distinction."""
+    if isinstance(val_a, float) and isinstance(val_b, float) and math.isnan(val_a) and math.isnan(val_b):
+        return True
+    if isinstance(val_a, bool) != isinstance(val_b, bool):
+        return False
+    return bool(val_a == val_b)
+
+
 def compare_workbooks(
     file_path_a: str,
     file_path_b: str,
     sheet_name: str | None = None,
     output_file: str | None = None,
     sheet_name_b: str | None = None,
+    compare_values: bool = True,
+    compare_formulas: bool = False,
 ) -> dict[str, list[WorkbookDiff] | int | list[str] | bool]:
     """Compare two workbooks cell-by-cell.
 
@@ -347,8 +425,13 @@ def compare_workbooks(
     If only sheet_name is given, compare that sheet in both workbooks (must exist in both).
     If neither is given, auto-detect common sheet names.
     """
-    wb_a = load_workbook_safe(file_path_a, data_only=True)
-    wb_b = load_workbook_safe(file_path_b, data_only=True)
+    validate_file_path(file_path_a)
+    validate_file_path(file_path_b)
+
+    wb_a = load_workbook_safe(file_path_a, data_only=compare_values and not compare_formulas)
+    wb_b = load_workbook_safe(file_path_b, data_only=compare_values and not compare_formulas)
+    wb_a_val = load_workbook_safe(file_path_a, data_only=True) if (compare_values and compare_formulas) else None
+    wb_b_val = load_workbook_safe(file_path_b, data_only=True) if (compare_values and compare_formulas) else None
     try:
         if sheet_name and sheet_name_b:
             if sheet_name not in wb_a.sheetnames:
@@ -368,15 +451,35 @@ def compare_workbooks(
         for sn_a, sn_b in sheet_pairs:
             ws_a = wb_a[sn_a]
             ws_b = wb_b[sn_b]
+            ws_a_val = wb_a_val[sn_a] if wb_a_val is not None else ws_a
+            ws_b_val = wb_b_val[sn_b] if wb_b_val is not None else ws_b
             label = sn_a if sn_a == sn_b else f"{sn_a} vs {sn_b}"
             sheets_compared.append(label)
             max_row = max(ws_a.max_row or 0, ws_b.max_row or 0)
             max_col = max(ws_a.max_column or 0, ws_b.max_column or 0)
             for row in range(1, max_row + 1):
                 for col in range(1, max_col + 1):
-                    val_a = ws_a.cell(row=row, column=col).value
-                    val_b = ws_b.cell(row=row, column=col).value
-                    if val_a != val_b:
+                    raw_a = ws_a.cell(row=row, column=col).value
+                    raw_b = ws_b.cell(row=row, column=col).value
+                    val_a = ws_a_val.cell(row=row, column=col).value
+                    val_b = ws_b_val.cell(row=row, column=col).value
+
+                    diff_found = False
+                    out_a: Any = val_a
+                    out_b: Any = val_b
+                    if compare_formulas and (
+                        (isinstance(raw_a, str) and raw_a.startswith("="))
+                        or (isinstance(raw_b, str) and raw_b.startswith("="))
+                        or not compare_values
+                    ):
+                        if not _cells_equal(raw_a, raw_b):
+                            diff_found = True
+                            out_a, out_b = raw_a, raw_b
+                    if not diff_found and compare_values and not _cells_equal(val_a, val_b):
+                        diff_found = True
+                        out_a, out_b = val_a, val_b
+
+                    if diff_found:
                         from openpyxl.utils import get_column_letter
 
                         cell_ref = f"{get_column_letter(col)}{row}"
@@ -384,8 +487,8 @@ def compare_workbooks(
                             {
                                 "sheet": label,
                                 "cell": cell_ref,
-                                "value_a": val_a,
-                                "value_b": val_b,
+                                "value_a": sanitize_excel_value(out_a),
+                                "value_b": sanitize_excel_value(out_b),
                             }
                         )
 
@@ -406,3 +509,7 @@ def compare_workbooks(
     finally:
         wb_a.close()
         wb_b.close()
+        if wb_a_val is not None:
+            wb_a_val.close()
+        if wb_b_val is not None:
+            wb_b_val.close()

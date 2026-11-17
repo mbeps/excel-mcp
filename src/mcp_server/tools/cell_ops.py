@@ -5,13 +5,19 @@ Functions mutate workbooks when writing and use ``load_workbook_safe()``/``save_
 
 from __future__ import annotations
 
+import copy
 import math
+from datetime import date, datetime
 from logging import Logger
+from typing import Any
+
+from openpyxl.cell.cell import MergedCell
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.formula import ArrayFormula
 
 from mcp_server.models.cell_ops import CellStyleInfo
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
-    copy_cell_style,
     get_sheet,
     load_workbook_safe,
     save_workbook_safe,
@@ -52,13 +58,14 @@ def read_cell(
     try:
         ws = get_sheet(wb, sheet_name)
         cell = ws[cell_ref]
+        val = getattr(cell.value, "text", cell.value)
         result = {
             "cell_ref": cell_ref,
-            "value": cell.value,
+            "value": val,
             "data_type": cell.data_type,
         }
-        if include_formula and isinstance(cell.value, str) and cell.value.startswith("="):
-            result["formula"] = cell.value
+        if include_formula and isinstance(val, str) and val.startswith("="):
+            result["formula"] = val
         elif include_formula:
             result["formula"] = None
         if include_metadata:
@@ -76,7 +83,7 @@ def write_cell(
     file_path: str,
     sheet_name: str,
     cell_ref: str,
-    value: str | int | float | bool | None,
+    value: str | int | float | bool | datetime | date | None,
 ) -> str:
     """Write a Python scalar value to a single cell and save the workbook.
 
@@ -84,13 +91,14 @@ def write_cell(
         file_path (str): Path to workbook.
         sheet_name (str): Worksheet to write.
         cell_ref (str): A1 cell reference.
-        value (scalar): Value to write (int/float/str/bool/None).
+        value (scalar): Value to write (int/float/str/bool/datetime/date/None).
 
     Returns:
         str: Success message.
 
     Raises:
         FileNotFoundError, PermissionError: on save.
+        ValueError: if cell_ref is a non-top-left merged cell.
 
     Remarks:
         - Mutates workbook; uses ``load_workbook_safe()`` and ``save_workbook_safe()``.
@@ -98,6 +106,8 @@ def write_cell(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
+        if isinstance(ws[cell_ref], MergedCell):
+            raise ValueError(f"Cannot write to merged cell '{cell_ref}' (not top-left of merged range).")
         ws[cell_ref] = value
         save_workbook_safe(wb, file_path)
         logger.info("Wrote to %s!%s", sheet_name, cell_ref)
@@ -138,65 +148,77 @@ def read_range(
         - Uses ``load_workbook_safe()`` with read_only=False when styles requested.
         - Be cautious with very large ranges (use ``max_cells`` to limit memory usage).
     """
-    from openpyxl.utils import coordinate_to_tuple, get_column_letter
+    from openpyxl.utils import coordinate_to_tuple
 
-    wb = load_workbook_safe(file_path, read_only=not show_style)
+    validation = validate_excel_range(f"{start_cell}:{end_cell}")
+    if not validation["valid"]:
+        raise ValueError(validation.get("message", "Invalid cell range."))
+    norm_start = str(validation["start_cell"])
+    norm_end = str(validation["end_cell"])
+
+    if max_cells is not None and max_cells < 0:
+        raise ValueError("max_cells must be >= 0.")
+
+    wb = load_workbook_safe(file_path, read_only=not show_style, data_only=not show_formula)
     try:
         ws = get_sheet(wb, sheet_name)
 
-        start_r, start_c = coordinate_to_tuple(start_cell)
-        end_r, end_c = coordinate_to_tuple(end_cell)
+        start_r, start_c = coordinate_to_tuple(norm_start)
+        end_r, end_c = coordinate_to_tuple(norm_end)
         total_rows_available = end_r - start_r + 1
         col_count_available = end_c - start_c + 1
         total_cells_available = total_rows_available * col_count_available
 
-        read_end_cell = end_cell
+        read_end_cell = norm_end
         truncated = False
         if max_cells is not None and total_cells_available > max_cells:
-            max_rows = max(1, max_cells // col_count_available)
-            new_end_r = start_r + max_rows - 1
-            read_end_cell = f"{get_column_letter(end_c)}{new_end_r}"
             truncated = True
+            if max_cells > 0:
+                if max_cells < col_count_available:
+                    read_end_cell = f"{get_column_letter(start_c + max_cells - 1)}{start_r}"
+                else:
+                    max_rows = max_cells // col_count_available
+                    new_end_r = start_r + max_rows - 1
+                    read_end_cell = f"{get_column_letter(end_c)}{new_end_r}"
 
         rows: list[list[CellScalar]] = []
         styles: list[list[CellStyleInfo]] = []
-        for row in ws[f"{start_cell}:{read_end_cell}"]:
-            row_values: list[CellScalar] = []
-            row_styles: list[CellStyleInfo] = []
-            for cell in row:
-                if show_formula and isinstance(cell.value, str) and cell.value.startswith("="):
-                    row_values.append(cell.value)
-                else:
-                    row_values.append(cell.value)
+        if max_cells != 0:
+            for row in ws[f"{norm_start}:{read_end_cell}"]:
+                row_values: list[CellScalar] = []
+                row_styles: list[CellStyleInfo] = []
+                for cell in row:
+                    val = getattr(cell.value, "text", cell.value)
+                    row_values.append(val)
+                    if show_style:
+                        font = cell.font
+                        fill = cell.fill
+                        alignment = cell.alignment
+                        fg_color = None
+                        if fill and fill.fgColor and fill.fgColor.rgb and fill.fgColor.rgb != "00000000":
+                            fg_color = str(fill.fgColor.rgb)
+                        font_color = None
+                        if font and font.color and font.color.rgb:
+                            font_color = str(font.color.rgb)
+                        row_styles.append(
+                            {
+                                "font_name": font.name if font else None,
+                                "font_size": font.size if font else None,
+                                "bold": font.bold if font else False,
+                                "italic": font.italic if font else False,
+                                "font_color": font_color,
+                                "fill_color": fg_color,
+                                "number_format": cell.number_format,
+                                "alignment": {
+                                    "horizontal": alignment.horizontal if alignment else None,
+                                    "vertical": alignment.vertical if alignment else None,
+                                    "wrap_text": alignment.wrap_text if alignment else None,
+                                },
+                            }
+                        )
+                rows.append(row_values)
                 if show_style:
-                    font = cell.font
-                    fill = cell.fill
-                    alignment = cell.alignment
-                    fg_color = None
-                    if fill and fill.fgColor and fill.fgColor.rgb and fill.fgColor.rgb != "00000000":
-                        fg_color = str(fill.fgColor.rgb)
-                    font_color = None
-                    if font and font.color and font.color.rgb:
-                        font_color = str(font.color.rgb)
-                    row_styles.append(
-                        {
-                            "font_name": font.name if font else None,
-                            "font_size": font.size if font else None,
-                            "bold": font.bold if font else False,
-                            "italic": font.italic if font else False,
-                            "font_color": font_color,
-                            "fill_color": fg_color,
-                            "number_format": cell.number_format,
-                            "alignment": {
-                                "horizontal": alignment.horizontal if alignment else None,
-                                "vertical": alignment.vertical if alignment else None,
-                                "wrap_text": alignment.wrap_text if alignment else None,
-                            },
-                        }
-                    )
-            rows.append(row_values)
-            if show_style:
-                styles.append(row_styles)
+                    styles.append(row_styles)
 
         if output_format == "html":
             html_parts = ["<table>"]
@@ -265,7 +287,12 @@ def write_range(file_path: str, sheet_name: str, start_cell: str, data: list[lis
 
         for r_offset, row_data in enumerate(data):
             for c_offset, value in enumerate(row_data):
-                ws.cell(row=start_row + r_offset, column=start_col + c_offset, value=value)
+                target = ws.cell(row=start_row + r_offset, column=start_col + c_offset)
+                if isinstance(target, MergedCell):
+                    raise ValueError(
+                        f"Cannot write to merged cell '{target.coordinate}' (not top-left of merged range)."
+                    )
+                target.value = value
 
         save_workbook_safe(wb, file_path)
         rows_written = len(data)
@@ -400,14 +427,23 @@ def copy_range(
         - When ``paste_values_only`` is True the function reads the source sheet with ``data_only=True`` to obtain computed values.
         - Uses ``load_workbook_safe()``/``save_workbook_safe()`` and always closes workbooks.
     """
-    if ":" in source_range:
-        src_start, src_end = source_range.split(":")
-    else:
-        src_start = src_end = source_range
+    from openpyxl.formula.translate import Translator
+
+    src_val = validate_excel_range(source_range)
+    if not src_val["valid"]:
+        raise ValueError(src_val.get("message", "Invalid source_range."))
+    src_start = str(src_val["start_cell"])
+    src_end = str(src_val["end_cell"] or src_start)
     range_key = f"{src_start}:{src_end}"
 
+    dest_anchor_raw = dest_range.split(":")[0]
+    dest_val = validate_excel_range(dest_anchor_raw)
+    if not dest_val["valid"]:
+        raise ValueError(dest_val.get("message", "Invalid dest_range."))
+    dest_anchor = str(dest_val["start_cell"])
+
     # Pre-read computed values when paste_values_only is requested
-    computed: list[list] | None = None
+    computed: list[list[Any]] | None = None
     if paste_values_only:
         wb_data = load_workbook_safe(file_path, data_only=True)
         try:
@@ -421,28 +457,49 @@ def copy_range(
         ws_src = get_sheet(wb, source_sheet)
         ws_dst = get_sheet(wb, dest_sheet)
 
-        src_cells = list(ws_src[range_key])
-
-        # Parse destination top-left cell
-        dest_cell = ws_dst[dest_range.split(":")[0]]
+        dest_cell = ws_dst[dest_anchor]
         dest_start_row = dest_cell.row
         dest_start_col = dest_cell.column
 
-        cells_copied = 0
-        for r_offset, row in enumerate(src_cells):
+        # Buffer values and styles before writing so overlapping same-sheet copies do not smear
+        buffered: list[tuple[int, int, Any, tuple[Any, Any, Any, Any, str] | None]] = []
+        for r_offset, row in enumerate(ws_src[range_key]):
             for c_offset, cell in enumerate(row):
-                dst = ws_dst.cell(
-                    row=dest_start_row + r_offset,
-                    column=dest_start_col + c_offset,
-                )
+                val: Any = None
                 if copy_values:
                     if paste_values_only and computed is not None:
-                        dst.value = computed[r_offset][c_offset]
+                        val = computed[r_offset][c_offset]
                     else:
-                        dst.value = cell.value
-                if copy_styles:
-                    copy_cell_style(cell, dst)
-                cells_copied += 1
+                        raw_val = getattr(cell.value, "text", cell.value)
+                        if isinstance(raw_val, str) and raw_val.startswith("="):
+                            dest_coord = f"{get_column_letter(dest_start_col + c_offset)}{dest_start_row + r_offset}"
+                            val = Translator(raw_val, origin=cell.coordinate).translate_formula(dest_coord)
+                        else:
+                            val = raw_val
+                style_snapshot: tuple[Any, Any, Any, Any, str] | None = None
+                if copy_styles and cell.has_style:
+                    style_snapshot = (
+                        copy.copy(cell.font),
+                        copy.copy(cell.fill),
+                        copy.copy(cell.border),
+                        copy.copy(cell.alignment),
+                        cell.number_format,
+                    )
+                buffered.append((r_offset, c_offset, val, style_snapshot))
+
+        cells_copied = 0
+        for r_offset, c_offset, val, style_snapshot in buffered:
+            dst = ws_dst.cell(
+                row=dest_start_row + r_offset,
+                column=dest_start_col + c_offset,
+            )
+            if copy_values:
+                if isinstance(dst, MergedCell):
+                    raise ValueError(f"Cannot write to merged cell '{dst.coordinate}' (not top-left of merged range).")
+                dst.value = val
+            if style_snapshot is not None:
+                dst.font, dst.fill, dst.border, dst.alignment, dst.number_format = style_snapshot
+            cells_copied += 1
 
         save_workbook_safe(wb, file_path)
         logger.info(
@@ -491,9 +548,11 @@ def fill_series(
     """
     import re as _re
 
-    from openpyxl.utils import column_index_from_string, get_column_letter
+    from openpyxl.utils import column_index_from_string
     from openpyxl.utils.cell import coordinate_from_string
 
+    if count < 1:
+        raise ValueError("count must be >= 1")
     if direction not in ("down", "right"):
         raise ValueError("direction must be 'down' or 'right'")
 
@@ -510,6 +569,8 @@ def fill_series(
         values_written: list[CellScalar] = []
 
         if series_type == "number":
+            if isinstance(step, bool) or isinstance(start_val, bool):
+                raise ValueError("Boolean values cannot be used in numeric series")
             step_val = float(step)
             if start_val is None:
                 start_val = 0
@@ -528,7 +589,10 @@ def fill_series(
 
             if start_val is None:
                 raise ValueError("start_cell must contain a date value for series_type='date'")
-            dates = pd.date_range(start=start_val, periods=count, freq=str(step))
+            if isinstance(step, bool):
+                raise ValueError("Boolean step is not valid for date series")
+            freq = f"{int(step)}D" if isinstance(step, (int, float)) else str(step)
+            dates = pd.date_range(start=start_val, periods=count, freq=freq)
             for i, dt in enumerate(dates):
                 val = dt.to_pydatetime()
                 if direction == "down":
@@ -556,6 +620,8 @@ def fill_series(
                 values_written.append(val_str)
 
         elif series_type == "custom":
+            if step is None or (isinstance(step, str) and step == "") or isinstance(step, bool):
+                raise ValueError("step must be a non-empty string or number for series_type='custom'")
             for i in range(count):
                 if direction == "down":
                     ws.cell(row=row_num + i, column=col_idx, value=step)
@@ -581,12 +647,12 @@ def fill_series(
 
 
 def merge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str, str]:
-    """Merge or unmerge a given range of cells.
+    """Merge a given range of cells.
 
     Args:
         file_path (str): Path to workbook.
         sheet_name (str): Worksheet to modify.
-        range_string (str): Range to merge/unmerge (e.g. 'A1:D1').
+        range_string (str): Range to merge (e.g. 'A1:D1').
 
     Returns:
         dict: status/message.
@@ -609,12 +675,12 @@ def merge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str,
 
 
 def unmerge_cells(file_path: str, sheet_name: str, range_string: str) -> dict[str, str]:
-    """Merge or unmerge a given range of cells.
+    """Unmerge a given range of cells.
 
     Args:
         file_path (str): Path to workbook.
         sheet_name (str): Worksheet to modify.
-        range_string (str): Range to merge/unmerge (e.g. 'A1:D1').
+        range_string (str): Range to unmerge (e.g. 'A1:D1').
 
     Returns:
         dict: status/message.
@@ -678,6 +744,8 @@ def fill_formula(
         filled = 0
         for row in ws[range_key]:
             for cell in row:
+                if isinstance(cell, MergedCell):
+                    raise ValueError(f"Cannot write to merged cell '{cell.coordinate}' (not top-left of merged range).")
                 cell.value = translator.translate_formula(cell.coordinate)
                 filled += 1
 
@@ -686,6 +754,33 @@ def fill_formula(
         return {"cells_filled": filled, "source_formula": source_formula}
     finally:
         wb.close()
+
+
+def _coerce_replaced_value(original: Any, new_text: str) -> Any:
+    """Preserve numeric/bool types when replacing values on originally typed cells."""
+    if isinstance(original, bool):
+        low = new_text.strip().lower()
+        if low == "true":
+            return True
+        if low == "false":
+            return False
+        return new_text
+    if isinstance(original, int):
+        try:
+            return int(new_text)
+        except ValueError:
+            try:
+                f = float(new_text)
+                return f if math.isfinite(f) else new_text
+            except ValueError:
+                return new_text
+    if isinstance(original, float):
+        try:
+            f = float(new_text)
+            return f if math.isfinite(f) else new_text
+        except ValueError:
+            return new_text
+    return new_text
 
 
 def find_replace(
@@ -729,34 +824,37 @@ def find_replace(
 
         for row in ws.iter_rows():
             for cell in row:
-                val = cell.value
-                if val is None:
+                raw_val = cell.value
+                if raw_val is None:
                     continue
+                is_array = isinstance(raw_val, ArrayFormula)
+                val = getattr(raw_val, "text", raw_val)
                 is_formula = isinstance(val, str) and val.startswith("=")
                 if not search_formulas and is_formula:
                     continue  # skip formula cells when not searching formulas
                 content = str(val)
 
+                new_text: str | None = None
                 if pattern is not None:
                     if match_entire_cell:
-                        m = pattern.fullmatch(content)
-                        if m:
-                            cell.value = replace_text
-                            modified.append(cell.coordinate)
-                    else:
-                        if pattern.search(content):
-                            cell.value = pattern.sub(replace_text, content)
-                            modified.append(cell.coordinate)
+                        if pattern.fullmatch(content):
+                            new_text = replace_text
+                    elif pattern.search(content):
+                        new_text = pattern.sub(replace_text, content)
                 else:
                     compare = content if match_case else content.lower()
                     if match_entire_cell:
                         if compare == needle:
-                            cell.value = replace_text
-                            modified.append(cell.coordinate)
+                            new_text = replace_text
+                    elif needle in compare:
+                        new_text = _re.sub(_re.escape(find_text), lambda _m: replace_text, content, flags=flags)
+
+                if new_text is not None:
+                    if is_array:
+                        cell.value = ArrayFormula(raw_val.ref, new_text) if new_text.startswith("=") else new_text
                     else:
-                        if needle in compare:
-                            cell.value = _re.sub(_re.escape(find_text), replace_text, content, flags=flags)
-                            modified.append(cell.coordinate)
+                        cell.value = _coerce_replaced_value(val, new_text)
+                    modified.append(cell.coordinate)
 
         if modified:
             save_workbook_safe(wb, file_path)
@@ -816,13 +914,27 @@ def transpose_range(
 
         for r in range(n_rows):
             for c in range(n_cols):
-                ws_dst.cell(row=dst_row + c, column=dst_col + r, value=data[r][c])
+                target = ws_dst.cell(row=dst_row + c, column=dst_col + r)
+                if isinstance(target, MergedCell):
+                    raise ValueError(
+                        f"Cannot write to merged cell '{target.coordinate}' (not top-left of merged range)."
+                    )
+                target.value = data[r][c]
 
         save_workbook_safe(wb, file_path)
         logger.info("transpose_range: %dx%d → %dx%d in %s", n_rows, n_cols, n_cols, n_rows, sheet_name)
         return {"source_shape": [n_rows, n_cols], "target_shape": [n_cols, n_rows]}
     finally:
         wb.close()
+
+
+def _is_summable(val: Any) -> bool:
+    """Return True if *val* is a non-bool number or a formula string."""
+    if isinstance(val, bool):
+        return False
+    if isinstance(val, (int, float)):
+        return True
+    return isinstance(val, str) and val.startswith("=")
 
 
 def auto_sum(
@@ -848,7 +960,7 @@ def auto_sum(
     Remarks:
         - Mutates workbook and saves change.
     """
-    from openpyxl.utils import column_index_from_string, get_column_letter
+    from openpyxl.utils import column_index_from_string
     from openpyxl.utils.cell import coordinate_from_string
 
     cell_upper = cell.upper()
@@ -871,18 +983,18 @@ def auto_sum(
     try:
         ws = get_sheet(wb, sheet_name)
 
-        # Scan upward for consecutive numeric cells
+        # Scan upward for consecutive numeric/formula cells
         top = row_num - 1
-        while top >= 1 and isinstance(ws.cell(row=top, column=col_idx).value, (int, float)):
+        while top >= 1 and _is_summable(ws.cell(row=top, column=col_idx).value):
             top -= 1
         top += 1  # first numeric row, or row_num if none found
 
         if top < row_num:
             range_str = f"{col_letter}{top}:{col_letter}{row_num - 1}"
         else:
-            # Scan left for consecutive numeric cells in the same row
+            # Scan left for consecutive numeric/formula cells in the same row
             left = col_idx - 1
-            while left >= 1 and isinstance(ws.cell(row=row_num, column=left).value, (int, float)):
+            while left >= 1 and _is_summable(ws.cell(row=row_num, column=left).value):
                 left -= 1
             left += 1
 

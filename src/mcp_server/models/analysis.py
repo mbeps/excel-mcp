@@ -5,6 +5,8 @@ Used by analysis tools to return structured results (filter hits, aggregates, co
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .common import CellScalar
@@ -32,7 +34,7 @@ class FilterCondition(BaseModel):
     """
 
     column: str = Field(..., description="Column name to filter on.")
-    operator: str = Field(
+    operator: Literal["==", "!=", ">", "<", ">=", "<=", "contains", "startswith", "endswith"] = Field(
         ...,
         description="Comparison operator: '==', '!=', '>', '<', '>=', '<=', 'contains', 'startswith', 'endswith'.",
     )

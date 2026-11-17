@@ -29,7 +29,7 @@ def read_cells(
     include_metadata: bool = False,
     show_formula: bool = False,
     show_style: bool = False,
-    output_format: str = "json",
+    output_format: Literal["json", "html"] = "json",
     max_cells: int | None = None,
     start_row: int = 0,
     chunk_size: int = 1000,
@@ -94,13 +94,13 @@ def write_cells(
     file_path: str,
     sheet_name: str,
     cell_ref: str | None = None,
-    value: str | int | float | bool | None = None,
+    value: str | int | float | bool | datetime | date | None = None,
     start_cell: str | None = None,
     data: list[list[str | int | float | bool | datetime | date | None]] | None = None,
-    series_type: str = "number",
+    series_type: Literal["number", "date", "text_increment", "custom"] = "number",
     count: int | None = None,
     step: float | str = 1,
-    direction: str = "down",
+    direction: Literal["down", "right"] = "down",
     start_value: float | int | None = None,
     range_string: str | None = None,
 ) -> str | dict:
@@ -244,7 +244,7 @@ def find_replace(
         regex: Treat find_text as a regular expression when True.
 
     Returns:
-        dict: {"count": int, "cells": ["A1", ...]} detailing replacements.
+        dict: {"replacements_made": int, "cells_modified": ["A1", ...]} detailing replacements.
 
     Notes:
         - Destructive: modifies cells in-place.
@@ -299,8 +299,8 @@ def transpose_range(
 def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
     mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(read_cells)
-    mcp.tool()(write_cells)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(write_cells)
     mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(clear_range)
-    mcp.tool()(copy_range)
-    mcp.tool()(find_replace)
-    mcp.tool()(transpose_range)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(copy_range)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(find_replace)
+    mcp.tool(annotations=ToolAnnotations(destructive_hint=True))(transpose_range)

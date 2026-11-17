@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from logging import Logger
 
 from openpyxl.drawing.image import Image
@@ -12,6 +11,7 @@ from mcp_server.utils.excel_helpers import (
     load_workbook_safe,
     save_workbook_safe,
     validate_file_path,
+    validate_single_cell,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -42,22 +42,33 @@ def insert_image(
         Dict with status, message, and image_path.
     """
     validate_file_path(file_path)
-
-    if not os.path.isfile(image_path):
-        raise FileNotFoundError(f"Image file not found: {image_path}")
-
-    ext = os.path.splitext(image_path)[1].lower()
-    if ext not in VALID_IMAGE_EXTENSIONS:
-        raise ValueError(f"Unsupported image extension '{ext}'. Allowed: {sorted(VALID_IMAGE_EXTENSIONS)}")
+    validate_single_cell(cell)
+    validated_image = validate_file_path(image_path, allowed_extensions=VALID_IMAGE_EXTENSIONS)
+    if width is not None and width <= 0:
+        raise ValueError(f"width must be positive, got {width}")
+    if height is not None and height <= 0:
+        raise ValueError(f"height must be positive, got {height}")
 
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
-        img = Image(image_path)
-        if width is not None:
+        try:
+            img = Image(str(validated_image))
+        except Exception as exc:
+            raise ValueError(f"Failed to load image '{image_path}': {exc}") from exc
+
+        if width is not None and height is not None:
             img.width = width
-        if height is not None:
             img.height = height
+        elif width is not None:
+            if img.width and img.height:
+                img.height = max(1, round(img.height * (width / img.width)))
+            img.width = width
+        elif height is not None:
+            if img.width and img.height:
+                img.width = max(1, round(img.width * (height / img.height)))
+            img.height = height
+
         ws.add_image(img, cell)
         save_workbook_safe(wb, file_path)
         logger.info("Inserted image '%s' at %s in sheet '%s'", image_path, cell, sheet)

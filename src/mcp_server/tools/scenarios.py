@@ -39,6 +39,7 @@ from mcp_server.utils.excel_helpers import (
     load_workbook_safe,
     save_hidden_json,
     save_workbook_safe,
+    validate_single_cell,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -79,6 +80,8 @@ def add_scenario(
     wb = load_workbook_safe(file_path)
     try:
         for sheet_name, cells in cell_values.items():
+            if sheet_name == _SCENARIOS_SHEET:
+                raise ValueError(f"Cannot target internal sheet '{_SCENARIOS_SHEET}' in a scenario.")
             if not isinstance(cells, dict):
                 raise ValueError(
                     f"cell_values must be {{sheet_name: {{cell_ref: value}}}}. "
@@ -91,6 +94,8 @@ def add_scenario(
                     f"Available sheets: {wb.sheetnames}. "
                     "cell_values must be structured as {sheet_name: {cell_ref: value}}."
                 )
+            for cell_ref in cells:
+                validate_single_cell(cell_ref)
         scenarios = _load_scenarios(wb)
         scenarios[name] = {
             "name": name,

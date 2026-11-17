@@ -1,10 +1,8 @@
-"""Schemas for table metadata and data validation rule descriptions."""
+"""Schemas for table metadata."""
 
 from __future__ import annotations
 
 from typing import TypedDict
-
-from .common import ValidationOperator
 
 
 class TableInfo(TypedDict):
@@ -19,24 +17,3 @@ class TableInfo(TypedDict):
     name: str
     ref: str
     style: str | None
-
-
-class ValidationRuleInfo(TypedDict, total=False):
-    """A data validation rule applied to a range.
-
-    Keys (total=False):
-        range (str): A1-style range string.
-        type (str): Validation type (e.g., 'list', 'whole', 'decimal', 'date').
-        operator (ValidationOperator): Operator used (see common.ValidationOperator).
-        formula1, formula2 (str | None): Formula bounds.
-        allow_blank (bool): Allow blank values when True.
-        show_dropdown (bool): Show dropdown for list validations.
-    """
-
-    range: str
-    type: str
-    operator: ValidationOperator
-    formula1: str | None
-    formula2: str | None
-    allow_blank: bool
-    show_dropdown: bool

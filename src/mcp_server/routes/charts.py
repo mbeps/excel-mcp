@@ -24,8 +24,8 @@ def chart(
     x_axis_title: str = "",
     y_axis_title: str = "",
     style: int = 10,
-    width: float = 15,
-    height: float = 10,
+    width: float | None = None,
+    height: float | None = None,
     title_from_data: bool = True,
     x_title: str | None = None,
     y_title: str | None = None,
@@ -40,9 +40,11 @@ def chart(
     name: str | None = None,
     periods_forward: int = 0,
     periods_backward: int = 0,
+    order: int = 2,
+    period: int = 2,
     bar_columns: list[int] | None = None,
     line_columns: list[int] | None = None,
-    anchor_cell: str = "F1",
+    anchor_cell: str | None = None,
     x_axis_column: int = 0,
     chart_title: str | None = None,
     show_value: bool = True,
@@ -99,12 +101,19 @@ def chart(
             x_axis_title,
             y_axis_title,
             style,
-            width,
-            height,
+            width if width is not None else 15,
+            height if height is not None else 10,
             categories_range=categories_range,
         )
     if action == "delete":
-        return _charts.delete_chart(file_path, sheet_name, chart_index or 0, chart_title=chart_title)
+        if chart_index is None and chart_title is None:
+            raise ValueError("chart_index or chart_title is required for action='delete'.")
+        return _charts.delete_chart(
+            file_path,
+            sheet_name,
+            chart_index if chart_index is not None else 0,
+            chart_title=chart_title,
+        )
     if action == "list":
         return _charts.list_charts(file_path, sheet_name)
     if action == "add_series":
@@ -117,7 +126,7 @@ def chart(
         return _charts.set_chart_axes(
             file_path,
             sheet_name,
-            chart_index or 0,
+            chart_index if chart_index is not None else 0,
             x_title,
             y_title,
             x_min,
@@ -132,12 +141,14 @@ def chart(
         return _charts.add_chart_trendline(
             file_path,
             sheet_name,
-            chart_index or 0,
+            chart_index if chart_index is not None else 0,
             series_index,
             trendline_type,
             name,
             periods_forward,
             periods_backward,
+            order=order,
+            period=period,
         )
     if action == "combo":
         if not data_range:
@@ -153,10 +164,10 @@ def chart(
             bar_columns,
             line_columns,
             title,
-            target_cell,
+            anchor_cell if anchor_cell is not None else target_cell,
             x_axis_column,
-            width,
-            height,
+            width if width is not None else 15,
+            height if height is not None else 10,
         )
     if action == "data_labels":
         if not chart_title:
@@ -179,11 +190,11 @@ def chart(
         return _charts.update_chart(
             file_path,
             sheet_name,
-            chart_index or 0,
+            chart_index if chart_index is not None else 0,
             title,
-            width if width != 15 else None,
-            height if height != 10 else None,
-            anchor_cell if anchor_cell != "F1" else None,
+            width,
+            height,
+            anchor_cell,
         )
     raise ValueError(f"Unknown action: {action}")
 

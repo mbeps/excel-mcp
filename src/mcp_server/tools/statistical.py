@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import os
 from logging import Logger
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -14,6 +16,7 @@ from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
     read_sheet_df,
+    sanitize_excel_value,
     save_workbook_safe,
     validate_file_path,
 )
@@ -122,6 +125,8 @@ def run_regression(
     Uses statsmodels for full inference (p-values, t-stats, confidence
     intervals); falls back to numpy if statsmodels is unavailable.
     """
+    if output_file:
+        validate_file_path(output_file, must_exist=False)
     df = read_sheet_df(file_path, sheet_name, header_row)
 
     missing = [c for c in [y_column, *x_columns] if c not in df.columns]
@@ -139,6 +144,9 @@ def run_regression(
 
     y_clean = y[valid_idx].values
     X_clean = X.loc[valid_idx].values
+
+    if np.all(y_clean == y_clean[0]):
+        raise ValueError("Dependent variable has zero variance (constant values); cannot fit regression.")
 
     if _HAS_STATSMODELS:
         coefficients, extras = _regression_statsmodels(y_clean, X_clean, x_columns)
@@ -266,6 +274,17 @@ def run_exponential_smoothing(
     if method not in valid_methods:
         raise ValueError(f"method must be one of {valid_methods}, got '{method}'.")
 
+    if isinstance(forecast_steps, bool) or forecast_steps < 0:
+        raise ValueError("forecast_steps must be a non-negative integer.")
+    if seasonal_periods is not None and (isinstance(seasonal_periods, bool) or seasonal_periods < 2):
+        raise ValueError("seasonal_periods must be an integer >= 2.")
+    if smoothing_trend is not None and not (0 <= smoothing_trend <= 1):
+        raise ValueError("smoothing_trend must be between 0 and 1 (inclusive).")
+    if smoothing_seasonal is not None and not (0 <= smoothing_seasonal <= 1):
+        raise ValueError("smoothing_seasonal must be between 0 and 1 (inclusive).")
+    if output_file:
+        validate_file_path(output_file, must_exist=False)
+
     df = read_sheet_df(file_path, sheet_name, header_row)
     if value_column not in df.columns:
         raise ValueError(f"Column '{value_column}' not found. Available: {list(df.columns)}")
@@ -309,18 +328,22 @@ def run_exponential_smoothing(
                 all_provided = False
         fit_kwargs["optimized"] = not all_provided
         fit = hw_model.fit(**fit_kwargs)
-        values = fit.fittedvalues.tolist()
+        fitted_series = pd.Series(np.nan, index=df.index, dtype=float)
+        fitted_series.loc[numeric_series.index] = fit.fittedvalues
+        values = fitted_series.tolist()
 
         if forecast_steps > 0:
             forecast_values = fit.forecast(forecast_steps).tolist()
 
+        aic_val = float(fit.aic) if hasattr(fit, "aic") else None
+        bic_val = float(fit.bic) if hasattr(fit, "bic") else None
         model_info = {
             "method": method,
             "trend": "add",
             "seasonal": seasonal or "none",
             "seasonal_periods": sp,
-            "aic": round(float(fit.aic), 4) if hasattr(fit, "aic") else None,
-            "bic": round(float(fit.bic), 4) if hasattr(fit, "bic") else None,
+            "aic": round(aic_val, 4) if aic_val is not None and math.isfinite(aic_val) else None,
+            "bic": round(bic_val, 4) if bic_val is not None and math.isfinite(bic_val) else None,
         }
     elif method in ("holt", "holt_winters") and not _HAS_STATSMODELS:
         logger.warning("statsmodels not available; falling back to simple EWM.")
@@ -346,13 +369,18 @@ def run_exponential_smoothing(
 
         wb = _opx.Workbook()
         ws_src = wb.active
-        ws_src.title = sheet_name
+        if ws_src is None:  # pragma: no cover
+            ws_src = wb.create_sheet(sheet_name)
+        else:
+            ws_src.title = sheet_name
         src_wb = load_workbook_safe(file_path, data_only=True)
-        src_ws = get_sheet(src_wb, sheet_name)
-        for row in src_ws.iter_rows(values_only=False):
-            for cell in row:
-                ws_src.cell(row=cell.row, column=cell.column, value=cell.value)
-        src_wb.close()
+        try:
+            src_ws = get_sheet(src_wb, sheet_name)
+            for row in src_ws.iter_rows(values_only=False):
+                for cell in row:
+                    ws_src.cell(row=cell.row, column=cell.column, value=sanitize_excel_value(cell.value))
+        finally:
+            src_wb.close()
     else:
         wb = load_workbook_safe(file_path)
     try:
@@ -420,7 +448,7 @@ def correlation_matrix(
             raise ValueError(f"Columns not found: {missing}")
         df = df[columns]
 
-    numeric_df = df.select_dtypes(include="number")
+    numeric_df = df.select_dtypes(include="number", exclude="bool")
     if numeric_df.empty:
         raise ValueError("No numeric columns found for correlation matrix.")
 
@@ -429,7 +457,12 @@ def correlation_matrix(
     matrix = [[round(v, 6) if pd.notna(v) else None for v in row] for row in corr.values.tolist()]
 
     if output_sheet:
-        wb = load_workbook_safe(dest_path)
+        if Path(dest_path).exists():
+            wb = load_workbook_safe(dest_path)
+        else:
+            wb = Workbook()
+            if wb.active is not None:
+                wb.active.title = output_sheet
         try:
             if output_sheet in wb.sheetnames:
                 ws = wb[output_sheet]

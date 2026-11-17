@@ -34,12 +34,9 @@ _SAFE_NODES = (
     ast.Constant,
     ast.Name,
     ast.Call,
-    ast.Attribute,
     ast.Compare,
     ast.BoolOp,
     ast.IfExp,
-    ast.Subscript,
-    ast.Index,
     ast.Load,
     ast.Store,
     ast.Tuple,
@@ -85,6 +82,24 @@ SAFE_MATH_FUNCS: dict[str, object] = {
     "abs": abs,
     "pow": pow,
 }
+
+
+_MAX_EXPONENT = 1000
+
+
+def _extract_numeric_constant(expr: ast.expr) -> int | float | None:
+    """Return numeric value if *expr* is a numeric literal (with optional unary +/-)."""
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, (int, float)) and not isinstance(expr.value, bool):
+        return expr.value
+    if (
+        isinstance(expr, ast.UnaryOp)
+        and isinstance(expr.op, (ast.UAdd, ast.USub))
+        and isinstance(expr.operand, ast.Constant)
+        and isinstance(expr.operand.value, (int, float))
+        and not isinstance(expr.operand.value, bool)
+    ):
+        return -expr.operand.value if isinstance(expr.op, ast.USub) else expr.operand.value
+    return None
 
 
 def validate_expression(
@@ -135,8 +150,20 @@ def validate_expression(
                     f"Unknown variable '{node.id}'. Allowed: {sorted(allowed_names)}, "
                     f"math functions: {list(SAFE_MATH_FUNCS)}"
                 )
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            if (isinstance(node.left, ast.BinOp) and isinstance(node.left.op, ast.Pow)) or (
+                isinstance(node.right, ast.BinOp) and isinstance(node.right.op, ast.Pow)
+            ):
+                raise ValueError("Chained exponentiation is not allowed.")
+            exp_val = _extract_numeric_constant(node.right)
+            if exp_val is not None and abs(exp_val) > _MAX_EXPONENT:
+                raise ValueError(f"Exponent {exp_val} exceeds allowed limit ({_MAX_EXPONENT}).")
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name) or node.func.id not in SAFE_MATH_FUNCS:
                 raise ValueError(f"Unsafe function call. Only these are allowed: {list(SAFE_MATH_FUNCS)}")
+            if node.func.id == "pow" and len(node.args) >= 2:
+                exp_val = _extract_numeric_constant(node.args[1])
+                if exp_val is not None and abs(exp_val) > _MAX_EXPONENT:
+                    raise ValueError(f"Exponent {exp_val} exceeds allowed limit ({_MAX_EXPONENT}).")
 
     return tree

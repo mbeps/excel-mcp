@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.types import ToolAnnotations
-
 import mcp_server.tools.solver as _solver
 import mcp_server.tools.statistical as _statistical
 from mcp_server.models.solver import SolverConstraint, SolverResult, VariableCellBounds
@@ -176,7 +174,7 @@ def correlation_matrix(
 
 def register(mcp: Any) -> None:
     """Register tools on *mcp*."""
-    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(run_regression)
-    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(run_exponential_smoothing)
+    mcp.tool()(run_regression)
+    mcp.tool()(run_exponential_smoothing)
     mcp.tool()(run_solver)
-    mcp.tool(annotations=ToolAnnotations(read_only_hint=True))(correlation_matrix)
+    mcp.tool()(correlation_matrix)

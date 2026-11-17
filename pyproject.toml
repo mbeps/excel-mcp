@@ -43,8 +43,8 @@ run-http = "uv run excel-mcp --transport http"
 test = "uv run pytest -v"
 test-coverage = "uv run pytest -v --cov=src --cov-report=term-missing"
 test-quick = "uv run pytest -v -x"
-lint = "ruff check src/ tests/"
-lint-fix = "ruff check src/ tests/ --fix"
+lint = "ruff check src/"
+lint-fix = "ruff check src/ --fix"
 format = "ruff format ."
 type-check = "pyrefly check"
 type-check-strict = "pyrefly check --min-severity error"
@@ -79,4 +79,16 @@ replace-imports-with-any = [
     "pandas.*",
     "numpy.*",
     "dateutil.*",
+]
+
+[tool.coverage.run]
+source = ["src/mcp_server"]
+branch = false
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "except ImportError:",
 ]

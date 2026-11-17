@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import re
+import ast
+import operator
 from logging import Logger
+from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
 
 from mcp_server.models.common import CellScalar
 from mcp_server.utils.excel_helpers import (
@@ -15,11 +17,12 @@ from mcp_server.utils.excel_helpers import (
     load_hidden_json,
     load_workbook_safe,
     read_sheet_df,
+    sanitize_excel_value,
     save_hidden_json,
     save_workbook_safe,
-    validate_file_path,
+    write_dataframe_to_workbook,
 )
-from mcp_server.utils.expression_validator import validate_expression
+from mcp_server.utils.expression_validator import SAFE_MATH_FUNCS, validate_expression
 from mcp_server.utils.logger import configure_logging
 
 logger: Logger = configure_logging(__name__)
@@ -37,29 +40,83 @@ def _save_pivots(wb: Workbook, pivots: dict) -> None:
     save_hidden_json(wb, _PIVOTS_SHEET, pivots)
 
 
-def _try_build_excel_formula(
-    expression: str,
-    col_map: dict[str, str],
-    first_data_row: int,
-) -> str | None:
-    """Convert a pandas eval expression to an Excel formula for first_data_row.
+_BIN_OPS: dict[type[ast.operator], Any] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
 
-    Returns the formula string (starting with '='), or None if no column names match.
-    """
-    formula = expression
-    found_any = False
-    # Longest names first to avoid partial replacements (e.g. 'Revenue' before 'Rev')
-    sorted_cols = sorted(col_map.keys(), key=len, reverse=True)
-    for col_name in sorted_cols:
-        cell_ref = f"{col_map[col_name]}{first_data_row}"
-        backtick_token = f"`{col_name}`"
-        if backtick_token in formula:
-            formula = formula.replace(backtick_token, cell_ref)
-            found_any = True
-        elif re.search(r"\b" + re.escape(col_name) + r"\b", formula):
-            formula = re.sub(r"\b" + re.escape(col_name) + r"\b", cell_ref, formula)
-            found_any = True
-    return f"={formula}" if found_any else None
+_CMP_OPS: dict[type[ast.cmpop], Any] = {
+    ast.Gt: operator.gt,
+    ast.Lt: operator.lt,
+    ast.GtE: operator.ge,
+    ast.LtE: operator.le,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+}
+
+_VECTOR_MATH_FUNCS: dict[str, Any] = {
+    "sqrt": np.sqrt,
+    "log": np.log,
+    "log10": np.log10,
+    "exp": np.exp,
+    "sin": np.sin,
+    "cos": np.cos,
+    "tan": np.tan,
+    "abs": np.abs,
+    "pow": np.power,
+}
+
+
+def _eval_ast_node(node: ast.AST, df: pd.DataFrame) -> Any:
+    """Safely evaluate a validated AST node against a DataFrame."""
+    if isinstance(node, ast.Expression):
+        return _eval_ast_node(node.body, df)
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id in df.columns:
+            return df[node.id]
+        raise ValueError(f"Unknown column '{node.id}' in expression.")
+    if isinstance(node, ast.UnaryOp):
+        operand = _eval_ast_node(node.operand, df)
+        return -operand if isinstance(node.op, ast.USub) else operand
+    if isinstance(node, ast.BinOp):
+        left = _eval_ast_node(node.left, df)
+        right = _eval_ast_node(node.right, df)
+        return _BIN_OPS[type(node.op)](left, right)
+    if isinstance(node, ast.Compare):
+        left = _eval_ast_node(node.left, df)
+        result: Any = None
+        for op, comp in zip(node.ops, node.comparators):
+            right = _eval_ast_node(comp, df)
+            step = _CMP_OPS[type(op)](left, right)
+            result = step if result is None else (result & step)
+            left = right
+        return result
+    if isinstance(node, ast.BoolOp):
+        acc = _eval_ast_node(node.values[0], df)
+        for val_node in node.values[1:]:
+            rhs = _eval_ast_node(val_node, df)
+            acc = (acc & rhs) if isinstance(node.op, ast.And) else (acc | rhs)
+        return acc
+    if isinstance(node, ast.IfExp):
+        cond = _eval_ast_node(node.test, df)
+        return np.where(cond, _eval_ast_node(node.body, df), _eval_ast_node(node.orelse, df))
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in SAFE_MATH_FUNCS:
+        fn = _VECTOR_MATH_FUNCS.get(node.func.id, SAFE_MATH_FUNCS[node.func.id])
+        args = [_eval_ast_node(a, df) for a in node.args]
+        return fn(*args)  # type: ignore[operator]
+    raise ValueError(f"Unsupported AST construct in expression: {type(node).__name__}")
+
+
+def _records_sanitized(df: pd.DataFrame) -> list[dict[str, CellScalar]]:
+    """Convert DataFrame to records with NaN/Timestamp sanitized."""
+    return [{str(k): sanitize_excel_value(v) for k, v in rec.items()} for rec in df.to_dict(orient="records")]
 
 
 def _write_df_to_sheet(wb: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
@@ -69,12 +126,12 @@ def _write_df_to_sheet(wb: Workbook, sheet_name: str, df: pd.DataFrame) -> None:
 
     # Write headers
     for c_idx, col_name in enumerate(df.columns, start=1):
-        ws.cell(row=1, column=c_idx, value=col_name)
+        ws.cell(row=1, column=c_idx, value=sanitize_excel_value(col_name))
 
     # Write data
     for r_idx, row_data in enumerate(df.values.tolist(), start=2):
         for c_idx, val in enumerate(row_data, start=1):
-            ws.cell(row=r_idx, column=c_idx, value=val)
+            ws.cell(row=r_idx, column=c_idx, value=sanitize_excel_value(val))
 
 
 def create_pivot_table(
@@ -101,16 +158,13 @@ def create_pivot_table(
     if date_freq:
         new_index: list = []
         for col in index_cols:
-            if col in df.columns:
-                try:
-                    df[col] = pd.to_datetime(df[col], errors="coerce")
-                    if df[col].notna().any():
-                        new_index.append(pd.Grouper(key=col, freq=date_freq))
-                    else:
-                        new_index.append(col)
-                except Exception:
+            try:
+                df[col] = pd.to_datetime(df[col], errors="coerce", format="mixed")
+                if df[col].notna().any():
+                    new_index.append(pd.Grouper(key=col, freq=date_freq))
+                else:
                     new_index.append(col)
-            else:
+            except Exception:
                 new_index.append(col)
         pivot_index = new_index
     else:
@@ -129,8 +183,14 @@ def create_pivot_table(
         ]
 
     if output_file:
-        validate_file_path(output_file, must_exist=False)
-        pivot.to_excel(output_file, index=False, engine="openpyxl")
+        write_dataframe_to_workbook(
+            pivot,
+            file_path,
+            sheet_name=output_sheet or "Sheet1",
+            output_file=output_file,
+            start_row=1,
+            include_header=True,
+        )
         logger.info("Pivot table written to %s", output_file)
     elif output_sheet:
         wb = load_workbook_safe(file_path)
@@ -146,6 +206,7 @@ def create_pivot_table(
                 "output_sheet": output_sheet,
                 "include_margins": include_margins,
                 "column_field": column_field,
+                "date_freq": date_freq,
             }
             _save_pivots(wb, pivots)
             save_workbook_safe(wb, file_path)
@@ -154,7 +215,7 @@ def create_pivot_table(
             wb.close()
 
     return {
-        "data": pivot.to_dict(orient="records"),
+        "data": _records_sanitized(pivot),
         "index_columns": index_cols,
         "value_columns": value_cols,
         "column_field": column_field,
@@ -197,6 +258,7 @@ def refresh_pivot_table(
         output_file=None,
         include_margins=params.get("include_margins", False),
         column_field=params.get("column_field"),
+        date_freq=params.get("date_freq"),
     )
 
     data = result.get("data")
@@ -227,7 +289,7 @@ def unpivot_data(
 
     melted = pd.melt(df, id_vars=id_vars, value_vars=value_vars, var_name=var_name, value_name=value_name)
     return {
-        "data": melted.to_dict(orient="records"),
+        "data": _records_sanitized(melted),
         "row_count": len(melted),
     }
 
@@ -292,7 +354,7 @@ def merge_datasets(
             wb.close()
 
     return {
-        "data": merged.to_dict(orient="records"),
+        "data": _records_sanitized(merged),
         "row_count": len(merged),
     }
 
@@ -316,7 +378,7 @@ def add_computed_column(
     if column_type == "cumsum":
         if source_col is None:
             raise ValueError("source_col is required when column_type='cumsum'")
-        df = read_sheet_df(file_path, sheet_name, header_row=has_header)
+        df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
         if source_col not in df.columns:
             raise ValueError(f"source_col '{source_col}' not found. Available: {list(df.columns)}")
         df[new_column_name] = df[source_col].cumsum()
@@ -325,13 +387,13 @@ def add_computed_column(
         try:
             ws = get_sheet(wb, sheet_name)
 
-            new_col_idx = len(df.columns)
+            new_col_idx = list(df.columns).index(new_column_name) + 1
             if has_header:
                 ws.cell(row=1, column=new_col_idx, value=new_column_name)
 
             start_row = 2 if has_header else 1
             for r_idx, val in enumerate(df[new_column_name].tolist(), start=start_row):
-                ws.cell(row=r_idx, column=new_col_idx, value=val)
+                ws.cell(row=r_idx, column=new_col_idx, value=sanitize_excel_value(val))
 
             save_workbook_safe(wb, file_path)
             logger.info(
@@ -351,11 +413,11 @@ def add_computed_column(
     if column_type == "rolling":
         if source_col is None:
             raise ValueError("source_col is required for column_type='rolling'.")
-        if window is None:
-            raise ValueError("window is required for column_type='rolling'.")
+        if window is None or isinstance(window, bool) or window < 1:
+            raise ValueError("window must be an integer >= 1 for column_type='rolling'.")
         if rolling_func not in ("mean", "sum"):
             raise ValueError("rolling_func must be 'mean' or 'sum'.")
-        df = read_sheet_df(file_path, sheet_name, header_row=has_header)
+        df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
         if source_col not in df.columns:
             raise ValueError(f"source_col '{source_col}' not found in sheet columns.")
 
@@ -366,12 +428,14 @@ def add_computed_column(
         try:
             ws2 = get_sheet(wb2, sheet_name)
             header_offset = 1 if has_header else 0
-            new_col_idx = len(df.columns) + 1
+            new_col_idx = (
+                list(df.columns).index(new_column_name) + 1 if new_column_name in df.columns else len(df.columns) + 1
+            )
             if has_header:
                 ws2.cell(row=1, column=new_col_idx, value=new_column_name)
             for i, val in enumerate(rolled):
                 row_num = i + 1 + header_offset
-                ws2.cell(row=row_num, column=new_col_idx, value=None if (val != val) else round(float(val), 6))
+                ws2.cell(row=row_num, column=new_col_idx, value=None if pd.isna(val) else round(float(val), 6))
             save_workbook_safe(wb2, file_path)
         finally:
             wb2.close()
@@ -382,18 +446,17 @@ def add_computed_column(
         return f"Added rolling {rolling_func} column '{new_column_name}' (window={window}) from source column '{source_col}' to sheet '{sheet_name}'."
 
     # column_type == "formula" (default path)
-    df = read_sheet_df(file_path, sheet_name, header_row=has_header)
-    validate_expression(expression)
-
-    # Build column-to-letter map from original columns before adding the new one
-    col_map: dict[str, str] = {col_name: get_column_letter(idx) for idx, col_name in enumerate(df.columns, start=1)}
-    first_data_row = 2 if has_header else 1
-    excel_formula_base = _try_build_excel_formula(expression, col_map, first_data_row)
+    df = read_sheet_df(file_path, sheet_name, header_row=1 if has_header else 0)
+    tree = validate_expression(expression)
+    refs_column = any(isinstance(node, ast.Name) and node.id in df.columns for node in ast.walk(tree))
 
     try:
         df[new_column_name] = df.eval(expression, engine="numexpr")
     except (ImportError, NotImplementedError):
-        df[new_column_name] = df.eval(expression, engine="python")
+        try:
+            df[new_column_name] = _eval_ast_node(tree, df)
+        except Exception as e:
+            raise ValueError(f"Failed to evaluate expression '{expression}': {e}") from e
     except Exception as e:
         raise ValueError(f"Failed to evaluate expression '{expression}': {e}") from e
 
@@ -401,15 +464,14 @@ def add_computed_column(
     try:
         ws = get_sheet(wb, sheet_name)
 
-        # new_col_idx is after df.eval appended the new column
-        new_col_idx = len(df.columns)
+        new_col_idx = list(df.columns).index(new_column_name) + 1
         if has_header:
             ws.cell(row=1, column=new_col_idx, value=new_column_name)
 
         start_row = 2 if has_header else 1
-        mode = "formula" if excel_formula_base is not None else "static"
+        mode = "formula" if refs_column else "static"
         for r_idx, val in enumerate(df[new_column_name].tolist(), start=start_row):
-            ws.cell(row=r_idx, column=new_col_idx, value=val)
+            ws.cell(row=r_idx, column=new_col_idx, value=sanitize_excel_value(val))
 
         save_workbook_safe(wb, file_path)
         logger.info("Added column '%s' to %s!%s (mode=%s)", new_column_name, sheet_name, file_path, mode)
@@ -422,11 +484,19 @@ def deduplicate_data(
     file_path: str,
     sheet_name: str,
     columns: list[str] | None = None,
-    keep: str = "first",
+    keep: str | bool = "first",
 ) -> str:
     """Remove duplicate rows from a sheet."""
-    if keep not in ("first", "last", False):
-        raise ValueError(f"Invalid keep value '{keep}'. Allowed: 'first', 'last', or False.")
+    if isinstance(keep, bool):
+        if keep:
+            raise ValueError("Invalid keep value True. Allowed: 'first', 'last', 'none', or False.")
+        effective_keep: Literal["first", "last", False] = False
+    elif keep == "none":
+        effective_keep = False
+    elif keep in ("first", "last"):
+        effective_keep = keep  # type: ignore[assignment]
+    else:
+        raise ValueError(f"Invalid keep value '{keep}'. Allowed: 'first', 'last', 'none', or False.")
 
     df = read_sheet_df(file_path, sheet_name)
 
@@ -436,7 +506,7 @@ def deduplicate_data(
                 raise ValueError(f"Column '{c}' not found. Available: {list(df.columns)}")
 
     original_count = len(df)
-    df = df.drop_duplicates(subset=columns, keep=keep if keep else False)
+    df = df.drop_duplicates(subset=columns, keep=effective_keep)
     removed = original_count - len(df)
 
     wb = load_workbook_safe(file_path)
@@ -450,7 +520,7 @@ def deduplicate_data(
 
         for r_idx, row_data in enumerate(df.values.tolist(), start=2):
             for c_idx, val in enumerate(row_data, start=1):
-                ws.cell(row=r_idx, column=c_idx, value=val)
+                ws.cell(row=r_idx, column=c_idx, value=sanitize_excel_value(val))
 
         save_workbook_safe(wb, file_path)
         logger.info("Removed %d duplicates from %s!%s", removed, sheet_name, file_path)

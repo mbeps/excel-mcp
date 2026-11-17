@@ -93,7 +93,7 @@ Steps:
 1. Call `get_sheet_summary` first to confirm row/column counts and exact header names.
 2. If analysis_type is "profile" or "all":
    - Call `profile_data` for dtype, null %, unique count, min/max/mean per column.
-   - Call `column_statistics` for each numeric column to get IQR, p25, p75, p90.
+   - Call `column_statistics` for each numeric column to get count, mean, median, std, min, max, sum, q25, q75, skewness.
 3. If analysis_type is "filter" or "all":
    - Call `filter_data_advanced` with the user-specified conditions.
    - Set output_sheet when the filtered result exceeds 1,000 rows.
@@ -105,9 +105,7 @@ Steps:
 7. Summarise all findings in a concise report with concrete numbers.
 
 Constraints:
-- NEVER use `filter_data` — always use `filter_data_advanced` (filter_data has a
-  known numeric comparison bug).
-- Pass percentile params as decimals: 0.25 not 25.
+- Use `filter_data_advanced` for all filtering conditions.
 - Do not load raw data with read_cells before analysing — use analysis tools directly.
 - If analysis_type is "all", run phases in order: profile → filter → aggregate → sort → duplicates.
 """
@@ -202,8 +200,8 @@ Steps:
      width=15, height=10.
 4. Call chart (action="set_axes") to configure axis number format (e.g. "#,##0") and
    min/max bounds if needed.
-5. Call chart (action="data_labels") with show_value=true and appropriate label_position.
-6. Call chart (action="legend") with show=true, legend_position="b".
+5. Call chart (action="data_labels") with chart_title="{title}", show_value=true and appropriate label_position.
+6. Call chart (action="legend") with chart_title="{title}", show_legend=true, legend_position="b".
 7. For line or scatter charts: call chart (action="trendline") with
    trendline_type="linear", series_index=0.
 8. For additional data series: call chart (action="add_series") per series.
@@ -369,7 +367,7 @@ Steps:
 
 2. PIVOT (transform_type is "pivot" or "all"):
    - Call create_pivot_table with index_cols, value_cols, aggfunc,
-     output_sheet="{output_sheet}", include_margins=true.
+     output_sheet="{output_sheet}".
    - Call refresh_pivot_table if source data has changed since last build.
 
 3. UNPIVOT (transform_type is "unpivot" or "all"):
@@ -431,20 +429,20 @@ Steps:
 4. Call multi_file with action="{operation}" and the appropriate parameters:
 
    VALIDATE:
-   - Call multi_file (action="validate") on all files to detect schema mismatches
+   - Call multi_file (action="validate") with `file_paths` and `key_column` on all files to detect schema mismatches
      (missing/extra columns, type conflicts). Run this first for aggregate and filter ops.
 
    AGGREGATE:
    - Call multi_file (action="validate") first to confirm schema compatibility.
-   - Call multi_file (action="aggregate") — the result includes a source-file column.
+   - Call multi_file (action="aggregate") with `file_paths` and `column` (and `operation`) — the result includes a source-file column.
 
    FILTER:
    - Confirm schemas with validate first.
-   - Call multi_file (action="filter") with a common filter condition valid across all files.
+   - Call multi_file (action="filter") with `file_paths`, `column`, `operator`, `value` valid across all files.
 
    COMPARE:
-   - Use with exactly 2 files only.
-   - Call multi_file (action="compare") to diff row by row — identify added, removed,
+   - Use with exactly 2 files only (`file_a` and `file_b`).
+   - Call multi_file (action="compare") with `file_a` and `file_b` to diff row by row — identify added, removed,
      and changed rows.
 
 5. Write output to "{output_path}": call format_cells on the header row (bold, bg_color,
@@ -493,7 +491,7 @@ Steps:
    If nulls are found in the target column, STOP and ask user to run
    excel-data-cleaning first.
 2. Call column_statistics on target and feature columns for distributions
-   (mean, std, min, max, IQR, p25, p75, p90).
+   (count, mean, median, std, min, max, sum, q25, q75, skewness).
 
 3. REGRESSION (analysis_type is "regression" or "both"):
    - Parse feature_cols "{feature_cols}" as a comma-separated list.
@@ -564,8 +562,8 @@ Steps:
    - The Translator adjusts relative refs per row/column; $-prefixed refs are unchanged.
 
 5. AUTO_SUM (formula_type is "auto_sum"):
-   - Call formula_write (action="auto_sum") with the data range.
-   - SUM formulas are placed automatically at end of each column.
+   - Call formula_write (action="auto_sum") with `cell_ref` (destination cell) and optional `source_range`.
+   - SUM formulas are placed automatically at `cell_ref`.
 
 6. AUDIT (formula_type is "audit"):
    - Call formula_audit (action="errors") to list all error cells.
@@ -619,7 +617,7 @@ Steps:
    - Call data_validation (action="date") for date range constraints.
 
 4. PROTECTION — CRITICAL ORDER (governance_type is "protection" or "all"):
-   a. Call protection (action="protect_cells") with unlocked_ranges listing
+   a. Call protection (action="protect_cells") with `locked_range` and `unlocked_ranges` listing
       all ranges users MUST be able to edit — DO THIS FIRST.
    b. THEN call protection (action="protect_sheet") with optional password.
    c. Call protection (action="protect_workbook") only if sheet structure
@@ -627,12 +625,11 @@ Steps:
 
 5. NAMED_RANGES (governance_type is "named_ranges" or "all"):
    - Call named_range (action="list") to see existing names.
-   - Call named_range (action="create") for each key input cell or range;
+   - Call named_range (action="create") with `name` and `destination` (e.g. "Sheet1!$B$5") for each key input cell or range;
      use descriptive business-purpose names.
 
 6. SCENARIOS (governance_type is "scenarios" or "all"):
-   - Call scenario (action="add") for base, optimistic, pessimistic variants
-     with cell refs and values.
+   - Call scenario (action="add") with `name` and `cell_values` (`{{sheet_name: {{cell_ref: value}}}}`) for base, optimistic, pessimistic variants.
    - Call scenario (action="list") to verify.
    - Call scenario (action="apply") to switch the workbook to a target scenario.
 
@@ -719,7 +716,7 @@ Constraints:
 - Cleaning order is mandatory: profile → clean → analyse.
 - ALWAYS call data_cleaner(preview=true) before data_cleaner(preview=false).
 - NEVER pass fill_missing_strategy="forward" or "backward" — use "ffill" or "bfill" respectively.
-- Use filter_data_advanced — NOT filter_data (deprecated, has a numeric comparison bug).
+- Use filter_data_advanced for multi-condition filtering.
 """
 
 
@@ -933,7 +930,7 @@ style_name = `{style_name}`
 Steps:
 1. Call `get_sheet_summary` and `table` (action="list") first to confirm existing tables and exact headers.
 2. For `action="create"`, use `table` (action="create") with `table_name`
-   and `table_range`, then optionally apply totals or header formatting.
+   and `data_range`, then optionally apply totals or header formatting.
 3. For `action="list"` or `action="data"`, inspect table metadata and
    contents before any structural edits.
 4. For `action="resize"`, confirm the new range still includes the header row

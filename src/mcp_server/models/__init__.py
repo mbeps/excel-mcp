@@ -17,7 +17,6 @@ from .comments import CommentInfo
 from .common import CellScalar
 from .hyperlinks import HyperlinkInfo, HyperlinkReadResult
 from .multi_file import (
-    MultiFileAggResult,
     MultiFileFilterPerFileResult,
     MultiFilePerFileResult,
     WorkbookDiff,
@@ -26,7 +25,7 @@ from .named_ranges import FormulaErrorInfo, FormulaInfo, NamedRangeInfo
 from .scenarios import ScenarioApplyResult, ScenarioChangeInfo, ScenarioInfo
 from .solver import SolverResult
 from .statistics import RegressionResult
-from .tables import TableInfo, ValidationRuleInfo
+from .tables import TableInfo
 from .workbook import (
     SheetCreatedInfo,
     SheetDefinition,
@@ -62,11 +61,9 @@ __all__ = [
     "ScenarioChangeInfo",
     "ScenarioApplyResult",
     "TableInfo",
-    "ValidationRuleInfo",
     "SolverResult",
     "RegressionResult",
     "MultiFilePerFileResult",
-    "MultiFileAggResult",
     "MultiFileFilterPerFileResult",
     "WorkbookDiff",
 ]

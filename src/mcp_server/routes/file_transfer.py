@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from mcp.types import ToolAnnotations
 
-from mcp_server.utils.excel_helpers import validate_file_path
+from mcp_server.utils.excel_helpers import ALLOWED_EXTENSIONS, validate_file_path
 from mcp_server.utils.file_resolver import encode_file_to_base64, resolve_to_local, session_store
 
 __all__ = [
@@ -13,6 +14,22 @@ __all__ = [
     "download_file",
     "release_file",
 ]
+
+
+def _upload_single(content: str, name_hint: str) -> dict[str, str]:
+    """Validate hint extension, resolve content to local path, and register in session store."""
+    suffix = Path(name_hint).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise ValueError(f"Unsupported file type: {suffix}. Allowed: {ALLOWED_EXTENSIONS}")
+    path, is_temp = resolve_to_local(content, name_hint)
+    if not is_temp:
+        path = str(validate_file_path(path, must_exist=True))
+    session_id = session_store.register(path, is_temp=is_temp)
+    return {
+        "session_id": session_id,
+        "file_path": path,
+        "message": f"File '{os.path.basename(path)}' is ready for processing.",
+    }
 
 
 def upload_file(
@@ -51,32 +68,21 @@ def upload_file(
         else:
             filename_hints = [filename] * len(effective_content)
 
-        items: list[dict] = []
-        for content, name_hint in zip(effective_content, filename_hints, strict=True):
-            path, is_temp = resolve_to_local(content, name_hint)
-            session_id = session_store.register(path, is_temp=is_temp)
-            items.append(
-                {
-                    "session_id": session_id,
-                    "file_path": path,
-                    "message": f"File '{os.path.basename(path)}' is ready for processing.",
-                }
-            )
-
+        items = [
+            _upload_single(content, name_hint)
+            for content, name_hint in zip(effective_content, filename_hints, strict=True)
+        ]
         return {
             "files": items,
             "count": len(items),
             "message": f"Uploaded {len(items)} files.",
         }
 
-    filename_hint = filename[0] if isinstance(filename, list) and filename else "workbook.xlsx"
-    path, is_temp = resolve_to_local(effective_content, filename_hint)
-    session_id = session_store.register(path, is_temp=is_temp)
-    return {
-        "session_id": session_id,
-        "file_path": path,
-        "message": f"File '{os.path.basename(path)}' is ready for processing.",
-    }
+    if isinstance(filename, list):
+        filename_hint = filename[0] if filename else "workbook.xlsx"
+    else:
+        filename_hint = filename or "workbook.xlsx"
+    return _upload_single(effective_content, filename_hint)
 
 
 def download_file(file_path: str) -> dict:

@@ -221,7 +221,7 @@ def doc_properties(
 def conditional_format(
     action: Literal["apply", "highlight", "formula_rule", "remove", "top_bottom", "above_below_average", "list"],
     file_path: str,
-    sheet_name: str,
+    sheet_name: str | None = None,
     cell_range: str | None = None,
     format_type: str | None = None,
     start_color: str = "FF0000",
@@ -257,6 +257,10 @@ def conditional_format(
         - Removing rules is destructive to formatting state.
         - Consider documenting rule precedence and Excel-specific limitations.
     """
+    if action == "list":
+        return _cond_fmt.list_conditional_formatting(file_path, sheet_name)
+    if sheet_name is None:
+        raise ValueError(f"sheet_name is required for action='{action}'.")
     if action == "apply":
         if cell_range is None:
             raise ValueError("cell_range is required for action='apply'.")
@@ -296,7 +300,9 @@ def conditional_format(
             raise ValueError("cell_range is required for action='formula_rule'.")
         if formula is None:
             raise ValueError("formula is required for action='formula_rule'.")
-        return _cond_fmt.add_formula_rule(file_path, sheet_name, cell_range, formula, font_color, bg_color)
+        return _cond_fmt.add_formula_rule(
+            file_path, sheet_name, cell_range, formula, font_color, bg_color, stop_if_true=stop_if_true
+        )
     if action == "remove":
         return _cond_fmt.remove_conditional_formatting(file_path, sheet_name, cell_range)
     if action == "top_bottom":
@@ -324,8 +330,6 @@ def conditional_format(
             bg_color,
             font_color,
         )
-    if action == "list":
-        return _cond_fmt.list_conditional_formatting(file_path, sheet_name)
     raise ValueError(f"Unknown action: {action}")
 
 

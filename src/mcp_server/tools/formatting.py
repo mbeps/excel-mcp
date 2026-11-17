@@ -15,7 +15,7 @@ from typing import Any
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from mcp_server.models.formatting import BorderStyle
+from mcp_server.models.common import BorderStyle
 from mcp_server.utils.excel_helpers import (
     get_sheet,
     load_workbook_safe,
@@ -104,6 +104,18 @@ logger: Logger = configure_logging(__name__)
 _NAMED_STYLE_LOOKUP: dict[str, str] = {s.lower(): s for s in _VALID_NAMED_STYLES}
 
 
+def _normalize_hex_color(color: str | None) -> str | None:
+    """Normalize a hex color string (strip '#', expand 3-char shorthand, uppercase)."""
+    if color is None:
+        return None
+    cleaned = color.strip().lstrip("#").upper()
+    if len(cleaned) == 3 and all(c in "0123456789ABCDEF" for c in cleaned):
+        cleaned = "".join(c * 2 for c in cleaned)
+    if len(cleaned) not in (6, 8) or not all(c in "0123456789ABCDEF" for c in cleaned):
+        raise ValueError(f"Invalid hex color '{color}'. Expected 3, 6, or 8 hex digits (e.g. 'FF0000' or '#FF0000').")
+    return cleaned
+
+
 def _iter_range_cells(ws: Any, range_str: str) -> Iterator[Any]:
     """Yield every cell in a worksheet range, handling both single-cell and multi-row ranges."""
     range_data = ws[range_str]
@@ -169,27 +181,46 @@ def format_cells(
                 f"Unknown number_format_preset '{number_format_preset}'. Valid: {sorted(NUMBER_FORMAT_PRESETS)!r}"
             )
         number_format = NUMBER_FORMAT_PRESETS[number_format_preset]
+
+    font_color = _normalize_hex_color(font_color)
+    bg_color = _normalize_hex_color(bg_color)
+    border_color = _normalize_hex_color(border_color)
+
+    has_font = any(x is not None for x in (font_name, bold, italic, font_size, font_color, underline, strikethrough))
+    has_alignment = any(
+        x is not None
+        for x in (horizontal_alignment, vertical_alignment, wrap_text, text_rotation, indent, shrink_to_fit)
+    )
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
 
-        font = Font(
-            name=font_name,
-            bold=bold,
-            italic=italic,
-            size=font_size,
-            color=font_color,
-            underline=underline,
-            strike=strikethrough,
+        font = (
+            Font(
+                name=font_name,
+                bold=bold,
+                italic=italic,
+                size=font_size,
+                color=font_color,
+                underline=underline,
+                strike=strikethrough,
+            )
+            if has_font
+            else None
         )
         fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid") if bg_color else None
-        alignment = Alignment(
-            horizontal=horizontal_alignment,
-            vertical=vertical_alignment,
-            wrap_text=wrap_text,
-            textRotation=text_rotation if text_rotation is not None else 0,
-            indent=indent if indent is not None else 0,
-            shrinkToFit=shrink_to_fit,
+        alignment = (
+            Alignment(
+                horizontal=horizontal_alignment,
+                vertical=vertical_alignment,
+                wrap_text=wrap_text,
+                textRotation=text_rotation if text_rotation is not None else 0,
+                indent=indent if indent is not None else 0,
+                shrinkToFit=shrink_to_fit,
+            )
+            if has_alignment
+            else None
         )
         border = None
         has_per_side = any([top_border_style, bottom_border_style, left_border_style, right_border_style])
@@ -206,39 +237,43 @@ def format_cells(
 
         for cell in _iter_range_cells(ws, cell_range):
             if preserve_existing:
-                ef = cell.font
-                cell.font = Font(
-                    name=font_name if font_name is not None else ef.name,
-                    bold=bold if bold is not None else ef.bold,
-                    italic=italic if italic is not None else ef.italic,
-                    size=font_size if font_size is not None else ef.size,
-                    color=font_color if font_color is not None else ef.color,
-                    underline=underline if underline is not None else ef.underline,
-                    strike=strikethrough if strikethrough is not None else ef.strike,
-                )
-                if bg_color:
+                if has_font:
+                    ef = cell.font
+                    cell.font = Font(
+                        name=font_name if font_name is not None else ef.name,
+                        bold=bold if bold is not None else ef.bold,
+                        italic=italic if italic is not None else ef.italic,
+                        size=font_size if font_size is not None else ef.size,
+                        color=font_color if font_color is not None else ef.color,
+                        underline=underline if underline is not None else ef.underline,
+                        strike=strikethrough if strikethrough is not None else ef.strike,
+                    )
+                if fill is not None:
                     cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
-                ea = cell.alignment
-                cell.alignment = Alignment(
-                    horizontal=horizontal_alignment if horizontal_alignment is not None else ea.horizontal,
-                    vertical=vertical_alignment if vertical_alignment is not None else ea.vertical,
-                    wrap_text=wrap_text if wrap_text is not None else ea.wrap_text,
-                    textRotation=text_rotation if text_rotation is not None else (ea.textRotation or 0),
-                    indent=indent if indent is not None else (ea.indent or 0),
-                    shrinkToFit=shrink_to_fit if shrink_to_fit is not None else ea.shrinkToFit,
-                )
-                if border:
+                if has_alignment:
+                    ea = cell.alignment
+                    cell.alignment = Alignment(
+                        horizontal=horizontal_alignment if horizontal_alignment is not None else ea.horizontal,
+                        vertical=vertical_alignment if vertical_alignment is not None else ea.vertical,
+                        wrap_text=wrap_text if wrap_text is not None else ea.wrap_text,
+                        textRotation=text_rotation if text_rotation is not None else (ea.textRotation or 0),
+                        indent=indent if indent is not None else (ea.indent or 0),
+                        shrinkToFit=shrink_to_fit if shrink_to_fit is not None else ea.shrinkToFit,
+                    )
+                if border is not None:
                     cell.border = border
-                if number_format:
+                if number_format is not None:
                     cell.number_format = number_format
             else:
-                cell.font = font
-                if fill:
+                if font is not None:
+                    cell.font = font
+                if fill is not None:
                     cell.fill = fill
-                cell.alignment = alignment
-                if border:
+                if alignment is not None:
+                    cell.alignment = alignment
+                if border is not None:
                     cell.border = border
-                if number_format:
+                if number_format is not None:
                     cell.number_format = number_format
 
         save_workbook_safe(wb, file_path)
@@ -265,13 +300,22 @@ def auto_fit_columns(file_path: str, sheet_name: str) -> str:
     try:
         ws = get_sheet(wb, sheet_name)
 
+        merged_anchors: dict[tuple[int, int], int] = {
+            (m.min_row, m.min_col): (m.max_col - m.min_col + 1) for m in ws.merged_cells.ranges if m.max_col > m.min_col
+        }
+
         for col_cells in ws.columns:
             max_length = 0
             col_letter = get_column_letter(col_cells[0].column or 1)
             for cell in col_cells:
-                if cell.value is not None:
-                    max_length = max(max_length, len(str(cell.value)))
-            ws.column_dimensions[col_letter].width = max_length + 2
+                if cell.value is None:
+                    continue
+                lines = str(cell.value).splitlines()
+                line_len = max((len(line) for line in lines), default=0)
+                span = merged_anchors.get((cell.row, cell.column), 1)
+                effective_len = (line_len + span - 1) // span
+                max_length = max(max_length, effective_len)
+            ws.column_dimensions[col_letter].width = max(8, min(255, max_length + 2))
 
         save_workbook_safe(wb, file_path)
         logger.info("Auto-fitted columns in %s!%s", file_path, sheet_name)

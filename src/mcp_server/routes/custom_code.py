@@ -53,14 +53,12 @@ def execute_custom_code(
         output_file: Optional path to write results back to a workbook.
 
     Returns:
-        dict: Execution result, typically containing `result` (from user code), `stdout` and `errors`.
-
-    Raises:
-        ValueError: If code fails safety checks in the sandbox.
+        dict: Execution result containing ``status``, ``message``, and optionally ``result`` and ``stdout``.
 
     Notes:
-        - High-risk: sandbox uses AST checks — document the allowed AST nodes and forbidden names.
-        - Recommend returning a short example snippet of a safe operation in the route docs.
+        - Runs in an isolated Python subprocess (``-I``) with AST validation, timeout, and memory limits.
+        - Blocks imports, dunder attributes, ``.format``/``.format_map``, dangerous builtins, and pandas/numpy I/O methods.
+        - Example: ``df['Total'] = df['Price'] * df['Qty']; result = df``
     """
     return _custom_code.execute_custom_code(file_path, code, sheet, output_file)
 

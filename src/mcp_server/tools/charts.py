@@ -35,11 +35,31 @@ logger: Logger = configure_logging(__name__)
 CHART_TYPES = {"bar", "column", "line", "pie", "scatter", "area", "radar", "doughnut", "bubble", "stock"}
 
 
-def _strip_sheet_prefix(range_str: str) -> str:
-    """Strip optional sheet-qualified prefix (e.g. 'Sheet1!B1:B7' → 'B1:B7')."""
+def _parse_range_ref(wb: Any, default_ws: Any, range_str: str) -> tuple[Any, int, int, int, int]:
+    """Resolve optional ``Sheet!A1:B2`` prefix against *wb* and return ``(ws, min_col, min_row, max_col, max_row)``."""
     if "!" in range_str:
-        return range_str.split("!", 1)[1]
-    return range_str
+        sheet_part, cell_range = range_str.split("!", 1)
+        if sheet_part.startswith("'") and sheet_part.endswith("'") and len(sheet_part) >= 2:
+            sheet_part = sheet_part[1:-1].replace("''", "'")
+        target_ws = get_sheet(wb, sheet_part)
+    else:
+        target_ws = default_ws
+        cell_range = range_str
+    bounds = range_boundaries(cell_range)
+    if any(b is None for b in bounds):
+        raise ValueError(f"Range '{range_str}' must be a bounded cell range (e.g. 'A1:B10').")
+    min_col, min_row, max_col, max_row = bounds
+    return target_ws, int(min_col), int(min_row), int(max_col), int(max_row)
+
+
+def _get_chart_by_index(ws: Any, chart_index: int) -> Any:
+    """Return the chart at *chart_index* on *ws*, raising ValueError if missing or out of range."""
+    charts = ws._charts
+    if not charts:
+        raise ValueError(f"No charts found in sheet '{ws.title}'.")
+    if chart_index < 0 or chart_index >= len(charts):
+        raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
+    return charts[chart_index]
 
 
 def _make_chart(
@@ -117,7 +137,8 @@ def create_chart(
     try:
         ws = get_sheet(wb, sheet_name)
 
-        min_col, min_row, max_col, max_row = range_boundaries(_strip_sheet_prefix(data_range))
+        data_ws, min_col, min_row, max_col, max_row = _parse_range_ref(wb, ws, data_range)
+        num_cols = max_col - min_col + 1
 
         chart = _make_chart(chart_type)
         chart.title = title or None
@@ -127,45 +148,47 @@ def create_chart(
 
         if chart_type == "scatter":
             if categories_range is not None:
-                cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
-                x_values = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+                cat_ws, c_min_c, c_min_r, c_max_c, c_max_r = _parse_range_ref(wb, ws, categories_range)
+                x_values = Reference(cat_ws, min_col=c_min_c, min_row=c_min_r, max_col=c_max_c, max_row=c_max_r)
                 for col_idx in range(min_col, max_col + 1):
-                    y_values = Reference(ws, min_col=col_idx, min_row=min_row, max_row=max_row)
+                    y_values = Reference(data_ws, min_col=col_idx, min_row=min_row, max_row=max_row)
                     chart.add_data(y_values, titles_from_data=True)
                     chart.series[-1].xvalues = x_values
             else:
-                x_values = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
+                if num_cols < 2:
+                    raise ValueError("Scatter chart without categories_range requires at least 2 columns (X and Y).")
+                x_values = Reference(data_ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
                 for col_idx in range(min_col + 1, max_col + 1):
-                    y_values = Reference(ws, min_col=col_idx, min_row=min_row, max_row=max_row)
+                    y_values = Reference(data_ws, min_col=col_idx, min_row=min_row, max_row=max_row)
                     chart.add_data(y_values, titles_from_data=True)
                     chart.series[-1].xvalues = x_values
         elif chart_type == "bubble":
-            # Bubble chart needs x, y, size columns (at least 3 data columns)
-            x_values = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
-            y_values = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row)
-            size_values = Reference(ws, min_col=min_col + 2, min_row=min_row + 1, max_row=max_row)
+            if num_cols < 3:
+                raise ValueError("Bubble chart requires at least 3 columns (X, Y, and size).")
+            x_values = Reference(data_ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
+            y_values = Reference(data_ws, min_col=min_col + 1, min_row=min_row, max_row=max_row)
+            size_values = Reference(data_ws, min_col=min_col + 2, min_row=min_row + 1, max_row=max_row)
             chart.add_data(y_values, titles_from_data=True)
             chart.series[0].xvalues = x_values
             chart.series[0].zvalues = size_values
         elif chart_type == "stock":
-            # Stock chart expects Open/High/Low/Close data in columns
             if categories_range is not None:
-                data = Reference(ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
-                cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
-                categories = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+                data = Reference(data_ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
+                cat_ws, c_min_c, c_min_r, c_max_c, c_max_r = _parse_range_ref(wb, ws, categories_range)
+                categories = Reference(cat_ws, min_col=c_min_c, min_row=c_min_r, max_col=c_max_c, max_row=c_max_r)
             else:
-                data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
-                categories = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
+                data = Reference(data_ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
+                categories = Reference(data_ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(categories)
         else:
             if categories_range is not None:
-                data = Reference(ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
-                cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
-                categories = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+                data = Reference(data_ws, min_col=min_col, min_row=min_row, max_row=max_row, max_col=max_col)
+                cat_ws, c_min_c, c_min_r, c_max_c, c_max_r = _parse_range_ref(wb, ws, categories_range)
+                categories = Reference(cat_ws, min_col=c_min_c, min_row=c_min_r, max_col=c_max_c, max_row=c_max_r)
             else:
-                data = Reference(ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
-                categories = Reference(ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
+                data = Reference(data_ws, min_col=min_col + 1, min_row=min_row, max_row=max_row, max_col=max_col)
+                categories = Reference(data_ws, min_col=min_col, min_row=min_row + 1, max_row=max_row)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(categories)
 
@@ -206,15 +229,13 @@ def delete_chart(file_path: str, sheet_name: str, chart_index: int = 0, chart_ti
         ws = get_sheet(wb, sheet_name)
 
         charts = ws._charts
-        if not charts:
-            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
-
         if chart_title is not None:
+            if not charts:
+                raise ValueError(f"No charts found in sheet '{sheet_name}'.")
             target = _find_chart_by_title(ws, chart_title)
             chart_index = charts.index(target)
-
-        if chart_index < 0 or chart_index >= len(charts):
-            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
+        else:
+            _get_chart_by_index(ws, chart_index)
 
         removed = charts.pop(chart_index)
         save_workbook_safe(wb, file_path)
@@ -327,15 +348,9 @@ def add_chart_series(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        charts = ws._charts
-        if not charts:
-            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
-        if chart_index < 0 or chart_index >= len(charts):
-            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
-
-        chart = charts[chart_index]
-        min_col, min_row, max_col, max_row = range_boundaries(_strip_sheet_prefix(data_range))
-        ref = Reference(ws, min_col=min_col, min_row=min_row, max_col=max_col, max_row=max_row)
+        chart = _get_chart_by_index(ws, chart_index)
+        data_ws, min_col, min_row, max_col, max_row = _parse_range_ref(wb, ws, data_range)
+        ref = Reference(data_ws, min_col=min_col, min_row=min_row, max_col=max_col, max_row=max_row)
         try:
             chart.add_data(ref, titles_from_data=title_from_data)
         except Exception as exc:
@@ -386,12 +401,7 @@ def set_chart_axes(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        charts = ws._charts
-        if not charts:
-            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
-        if chart_index < 0 or chart_index >= len(charts):
-            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
-        chart = charts[chart_index]
+        chart = _get_chart_by_index(ws, chart_index)
         no_axis_types = {"PieChart", "DoughnutChart"}
         if type(chart).__name__ in no_axis_types:
             raise ValueError(f"Chart type '{type(chart).__name__}' does not support axes.")
@@ -414,8 +424,8 @@ def set_chart_axes(
             if log_scale_y:
                 chart.y_axis.scaling.logBase = 10
         if categories_range is not None:
-            cat_bounds = range_boundaries(_strip_sheet_prefix(categories_range))
-            cat_ref = Reference(ws, min_col=cat_bounds[0], min_row=cat_bounds[1], max_row=cat_bounds[3])
+            cat_ws, c_min_c, c_min_r, c_max_c, c_max_r = _parse_range_ref(wb, ws, categories_range)
+            cat_ref = Reference(cat_ws, min_col=c_min_c, min_row=c_min_r, max_col=c_max_c, max_row=c_max_r)
             chart.set_categories(cat_ref)
         save_workbook_safe(wb, file_path)
         logger.info("Updated axes for chart %d in %s", chart_index, sheet_name)
@@ -433,6 +443,8 @@ def add_chart_trendline(
     name: str | None = None,
     periods_forward: int = 0,
     periods_backward: int = 0,
+    order: int = 2,
+    period: int = 2,
 ) -> str:
     """Add a trendline to a specified series of an existing chart.
 
@@ -444,6 +456,8 @@ def add_chart_trendline(
         trendline_type (str): One of supported trendline types.
         name (str|None): Optional custom name for trendline.
         periods_forward/periods_backward (int): Forecasting horizons.
+        order (int): Polynomial order (2-6) when trendline_type='polynomial'.
+        period (int): Moving average window (>=2) when trendline_type='moving_average'.
 
     Returns:
         str: Confirmation message.
@@ -466,20 +480,24 @@ def add_chart_trendline(
     }
     if trendline_type not in _TYPE_MAP:
         raise ValueError(f"Invalid trendline_type '{trendline_type}'. Allowed: {list(_TYPE_MAP)}")
+    if trendline_type == "polynomial" and (order < 2 or order > 6):
+        raise ValueError("Polynomial trendline order must be between 2 and 6.")
+    if trendline_type == "moving_average" and period < 2:
+        raise ValueError("Moving average trendline period must be >= 2.")
+
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        charts = ws._charts
-        if not charts:
-            raise ValueError(f"No charts found in sheet '{sheet_name}'.")
-        if chart_index < 0 or chart_index >= len(charts):
-            raise ValueError(f"Chart index {chart_index} out of range (0-{len(charts) - 1}).")
-        chart = charts[chart_index]
+        chart = _get_chart_by_index(ws, chart_index)
         series = list(chart.series)
         if series_index < 0 or series_index >= len(series):
             raise ValueError(f"Series index {series_index} out of range (0-{len(series) - 1}).")
         tl = Trendline()
         tl.trendlineType = _TYPE_MAP[trendline_type]
+        if trendline_type == "polynomial":
+            tl.order = order
+        if trendline_type == "moving_average":
+            tl.period = period
         if name:
             tl.name = name
         if periods_forward:
@@ -549,9 +567,18 @@ def create_combo_chart(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        min_col, min_row, max_col, max_row = range_boundaries(_strip_sheet_prefix(data_range))
+        data_ws, min_col, min_row, max_col, max_row = _parse_range_ref(wb, ws, data_range)
+        num_cols = max_col - min_col + 1
+        if x_axis_column < 0 or x_axis_column >= num_cols:
+            raise ValueError(f"x_axis_column {x_axis_column} out of range for {num_cols} column(s) (0-{num_cols - 1}).")
+        for idx in bar_columns:
+            if idx > num_cols:
+                raise ValueError(f"bar_columns index {idx} exceeds data_range width ({num_cols} columns).")
+        for idx in line_columns:
+            if idx > num_cols:
+                raise ValueError(f"line_columns index {idx} exceeds data_range width ({num_cols} columns).")
         cat_col = min_col + x_axis_column
-        categories = Reference(ws, min_col=cat_col, min_row=min_row + 1, max_row=max_row)
+        categories = Reference(data_ws, min_col=cat_col, min_row=min_row + 1, max_row=max_row)
         bar_chart = BarChart()
         bar_chart.type = "col"
         bar_chart.title = title or None
@@ -559,13 +586,13 @@ def create_combo_chart(
         bar_chart.height = height
         for col_idx in bar_columns:
             actual_col = min_col + col_idx - 1
-            ref = Reference(ws, min_col=actual_col, min_row=min_row, max_row=max_row)
+            ref = Reference(data_ws, min_col=actual_col, min_row=min_row, max_row=max_row)
             bar_chart.add_data(ref, titles_from_data=True)
         bar_chart.set_categories(categories)
         line_chart = LineChart()
         for col_idx in line_columns:
             actual_col = min_col + col_idx - 1
-            ref = Reference(ws, min_col=actual_col, min_row=min_row, max_row=max_row)
+            ref = Reference(data_ws, min_col=actual_col, min_row=min_row, max_row=max_row)
             line_chart.add_data(ref, titles_from_data=True)
         line_chart.set_categories(categories)
         bar_chart += line_chart
@@ -630,6 +657,16 @@ def set_chart_data_labels(
         if position is not None and position in _VALID_LABEL_POSITIONS:
             dLbls.dLblPos = position
         chart.dLbls = dLbls
+        for sub_chart in getattr(chart, "_charts", [])[1:]:
+            sub_dLbls = DataLabelList(
+                showVal=show_value,
+                showCatName=show_category,
+                showSerName=show_series_name,
+                showPercent=show_percentage,
+            )
+            if position is not None and position in _VALID_LABEL_POSITIONS:
+                sub_dLbls.dLblPos = position
+            sub_chart.dLbls = sub_dLbls
         save_workbook_safe(wb, file_path)
         logger.info("Set data labels on chart '%s' in %s", chart_title, sheet_name)
         return {
@@ -670,16 +707,18 @@ def set_chart_legend(
     try:
         ws = get_sheet(wb, sheet_name)
         chart = _find_chart_by_title(ws, chart_title)
+        applied_position: str | None = None
         if not show:
             chart.legend = None
         else:
             legend = Legend()
             if position is not None and position in _VALID_LEGEND_POSITIONS:
                 legend.legendPos = position
+                applied_position = position
             chart.legend = legend
         save_workbook_safe(wb, file_path)
         logger.info("Set legend show=%s on chart '%s' in %s", show, chart_title, sheet_name)
-        return {"status": "ok", "chart_title": chart_title, "show": show, "position": position}
+        return {"status": "ok", "chart_title": chart_title, "show": show, "position": applied_position}
     finally:
         wb.close()
 
@@ -715,13 +754,7 @@ def update_chart(
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet_name)
-        charts = ws._charts
-        if not charts:
-            raise ValueError(f"No charts found on sheet '{sheet_name}'.")
-        if chart_index < 0 or chart_index >= len(charts):
-            raise ValueError(f"chart_index {chart_index} is out of range. Sheet has {len(charts)} chart(s).")
-
-        chart = charts[chart_index]
+        chart = _get_chart_by_index(ws, chart_index)
 
         if title is not None:
             chart.title = title if title else None

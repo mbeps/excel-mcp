@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import copy
 from logging import Logger
+from typing import Any
+
+from openpyxl.worksheet.worksheet import Worksheet
 
 from mcp_server.utils.excel_helpers import (
     copy_cell_style,
     get_sheet,
     load_workbook_safe,
+    read_sheet_df,
+    sanitize_excel_value,
     save_workbook_safe,
+    validate_excel_range,
     validate_file_path,
 )
 from mcp_server.utils.logger import configure_logging
@@ -65,25 +72,48 @@ def copy_range_across_sheets(
     from openpyxl.utils import column_index_from_string
     from openpyxl.utils.cell import coordinate_from_string
 
+    src_val = validate_excel_range(source_range)
+    if not src_val["valid"]:
+        raise ValueError(src_val.get("message", "Invalid source_range."))
+    src_start = str(src_val["start_cell"])
+    src_end = str(src_val["end_cell"] or src_start)
+    range_key = f"{src_start}:{src_end}"
+
+    tgt_val = validate_excel_range(target_start_cell)
+    if not tgt_val["valid"]:
+        raise ValueError(tgt_val.get("message", "Invalid target_start_cell."))
+    norm_target = str(tgt_val["start_cell"])
+
     wb = load_workbook_safe(file_path)
     try:
         src_ws = get_sheet(wb, source_sheet)
         tgt_ws = get_sheet(wb, target_sheet)
-        tgt_col_letter, tgt_row = coordinate_from_string(target_start_cell)
+        tgt_col_letter, tgt_row = coordinate_from_string(norm_target)
         tgt_col = column_index_from_string(tgt_col_letter)
-        cells = list(src_ws[source_range])
+
+        buffered: list[tuple[int, int, Any, tuple[Any, Any, Any, Any, str] | None]] = []
         row_count = 0
-        for row_cells in cells:
-            col_offset = 0
-            for cell in row_cells:
-                dest_col = tgt_col + col_offset
-                dest = tgt_ws.cell(row=tgt_row + row_count, column=dest_col)
-                if copy_values:
-                    dest.value = cell.value
-                if copy_styles and cell.has_style:
-                    copy_cell_style(cell, dest)
-                col_offset += 1
+        for r_offset, row_cells in enumerate(src_ws[range_key]):
             row_count += 1
+            for c_offset, cell in enumerate(row_cells):
+                style_snapshot: tuple[Any, Any, Any, Any, str] | None = None
+                if copy_styles and cell.has_style:
+                    style_snapshot = (
+                        copy.copy(cell.font),
+                        copy.copy(cell.fill),
+                        copy.copy(cell.border),
+                        copy.copy(cell.alignment),
+                        cell.number_format,
+                    )
+                buffered.append((r_offset, c_offset, cell.value, style_snapshot))
+
+        for r_offset, c_offset, val, style_snapshot in buffered:
+            dest = tgt_ws.cell(row=tgt_row + r_offset, column=tgt_col + c_offset)
+            if copy_values:
+                dest.value = val
+            if style_snapshot is not None:
+                dest.font, dest.fill, dest.border, dest.alignment, dest.number_format = style_snapshot
+
         save_workbook_safe(wb, file_path)
         logger.info(
             "Copied %s from '%s' to '%s'!%s",
@@ -101,6 +131,17 @@ def copy_range_across_sheets(
         wb.close()
 
 
+def _copy_worksheet_contents(src_ws: Worksheet, tgt_ws: Worksheet) -> None:
+    """Replicate cell values, styles, and column widths from *src_ws* to *tgt_ws*."""
+    for row in src_ws.iter_rows():
+        for cell in row:
+            dest_cell = tgt_ws.cell(row=cell.row, column=cell.column, value=cell.value)
+            if cell.has_style:
+                copy_cell_style(cell, dest_cell)
+    for col_letter, dim in src_ws.column_dimensions.items():
+        tgt_ws.column_dimensions[col_letter].width = dim.width
+
+
 def copy_sheet_across_workbooks(
     source_file: str,
     source_sheet: str,
@@ -108,15 +149,9 @@ def copy_sheet_across_workbooks(
     dest_sheet_name: str | None = None,
 ) -> str:
     """Copy a sheet from one workbook to another by replicating cell data and column widths."""
-    from pathlib import Path
-
     import openpyxl
 
-    dest_path = Path(dest_file).resolve()
-    from mcp_server.utils.excel_helpers import ALLOWED_EXTENSIONS
-
-    if dest_path.suffix.lower() not in ALLOWED_EXTENSIONS:
-        raise ValueError(f"Destination must have an allowed extension: {ALLOWED_EXTENSIONS}")
+    dest_path = validate_file_path(dest_file, must_exist=False)
     src_wb = load_workbook_safe(source_file)
     try:
         src_ws = get_sheet(src_wb, source_sheet)
@@ -130,13 +165,7 @@ def copy_sheet_across_workbooks(
             if new_name in dest_wb.sheetnames:
                 raise ValueError(f"Sheet '{new_name}' already exists in '{dest_file}'. Use dest_sheet_name to rename.")
             tgt_ws = dest_wb.create_sheet(new_name)
-            for row in src_ws.iter_rows():
-                for cell in row:
-                    dest_cell = tgt_ws.cell(row=cell.row, column=cell.column, value=cell.value)
-                    if cell.has_style:
-                        copy_cell_style(cell, dest_cell)
-            for col_letter, dim in src_ws.column_dimensions.items():
-                tgt_ws.column_dimensions[col_letter].width = dim.width
+            _copy_worksheet_contents(src_ws, tgt_ws)
             save_workbook_safe(dest_wb, dest_file)
             logger.info("Copied sheet '%s' from %s to %s as '%s'", source_sheet, source_file, dest_file, new_name)
             return f"Sheet '{source_sheet}' copied to '{dest_file}' as '{new_name}'."
@@ -155,65 +184,65 @@ def merge_workbooks(
 
     conflict_strategy: 'rename' (append _2, _3, ...) or 'overwrite'.
     """
-    from pathlib import Path
-
     import openpyxl
 
     if conflict_strategy not in ("rename", "overwrite"):
         raise ValueError("conflict_strategy must be 'rename' or 'overwrite'.")
-    out_path = Path(output_file).resolve()
-    from mcp_server.utils.excel_helpers import ALLOWED_EXTENSIONS
-
-    if out_path.suffix.lower() not in ALLOWED_EXTENSIONS:
-        raise ValueError(f"output_file must have an allowed extension: {ALLOWED_EXTENSIONS}")
+    out_path = validate_file_path(output_file, must_exist=False)
     if out_path.exists():
         out_wb = load_workbook_safe(output_file)
         sheet_names_used: list[str] = list(out_wb.sheetnames)
     else:
         out_wb = openpyxl.Workbook()
-        out_wb.remove(out_wb.active)
-        sheet_names_used = []
+        if source_files and out_wb.active is not None:
+            out_wb.remove(out_wb.active)
+            sheet_names_used = []
+        else:
+            sheet_names_used = list(out_wb.sheetnames)
+
     merged_files = 0
-    for src_file in source_files:
-        src_wb = load_workbook_safe(src_file)
-        try:
-            for sheet_name in src_wb.sheetnames:
-                src_ws = src_wb[sheet_name]
-                target_name = sheet_name
-                if target_name in sheet_names_used:
-                    if conflict_strategy == "overwrite":
-                        out_wb.remove(out_wb[target_name])
-                        sheet_names_used.remove(target_name)
-                    else:
-                        counter = 2
-                        while f"{sheet_name}_{counter}" in sheet_names_used:
-                            counter += 1
-                        target_name = f"{sheet_name}_{counter}"
-                tgt_ws = out_wb.create_sheet(target_name)
-                for row in src_ws.iter_rows():
-                    for cell in row:
-                        dest_cell = tgt_ws.cell(row=cell.row, column=cell.column, value=cell.value)
-                        if cell.has_style:
-                            copy_cell_style(cell, dest_cell)
-                for col_letter, dim in src_ws.column_dimensions.items():
-                    tgt_ws.column_dimensions[col_letter].width = dim.width
-                sheet_names_used.append(target_name)
-            merged_files += 1
-        finally:
-            src_wb.close()
-    save_workbook_safe(out_wb, output_file)
-    out_wb.close()
-    logger.info("Merged %d files into %s (%d sheets)", merged_files, output_file, len(sheet_names_used))
-    return {
-        "merged_files": merged_files,
-        "total_sheets": len(sheet_names_used),
-        "output_file": output_file,
-        "sheets": sheet_names_used,
-    }
+    try:
+        for src_file in source_files:
+            src_wb = load_workbook_safe(src_file)
+            try:
+                for sheet_name in src_wb.sheetnames:
+                    src_ws = src_wb[sheet_name]
+                    target_name = sheet_name
+                    if target_name in sheet_names_used:
+                        if conflict_strategy == "overwrite":
+                            out_wb.remove(out_wb[target_name])
+                            sheet_names_used.remove(target_name)
+                        else:
+                            counter = 2
+                            while True:
+                                suffix = f"_{counter}"
+                                candidate = f"{sheet_name[: 31 - len(suffix)]}{suffix}"
+                                if candidate not in sheet_names_used:
+                                    target_name = candidate
+                                    break
+                                counter += 1
+                    tgt_ws = out_wb.create_sheet(target_name)
+                    _copy_worksheet_contents(src_ws, tgt_ws)
+                    sheet_names_used.append(target_name)
+                merged_files += 1
+            finally:
+                src_wb.close()
+        save_workbook_safe(out_wb, output_file)
+        logger.info("Merged %d files into %s (%d sheets)", merged_files, output_file, len(sheet_names_used))
+        return {
+            "merged_files": merged_files,
+            "total_sheets": len(sheet_names_used),
+            "output_file": output_file,
+            "sheets": sheet_names_used,
+        }
+    finally:
+        out_wb.close()
 
 
 def insert_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[str, str]:
     """Insert one or more rows at the given row index, shifting existing rows down."""
+    if row < 1 or count < 1:
+        raise ValueError("row and count must be >= 1.")
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -227,6 +256,8 @@ def insert_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[st
 
 def delete_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[str, str]:
     """Delete one or more rows starting at the given row index."""
+    if row < 1 or count < 1:
+        raise ValueError("row and count must be >= 1.")
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -240,6 +271,8 @@ def delete_rows(file_path: str, sheet: str, row: int, count: int = 1) -> dict[st
 
 def insert_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[str, str]:
     """Insert one or more columns at the given column index, shifting existing columns right."""
+    if col < 1 or count < 1:
+        raise ValueError("col and count must be >= 1.")
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -253,6 +286,8 @@ def insert_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[st
 
 def delete_cols(file_path: str, sheet: str, col: int, count: int = 1) -> dict[str, str]:
     """Delete one or more columns starting at the given column index."""
+    if col < 1 or count < 1:
+        raise ValueError("col and count must be >= 1.")
     wb = load_workbook_safe(file_path)
     try:
         ws = get_sheet(wb, sheet)
@@ -378,6 +413,7 @@ def ungroup_rows(file_path: str, sheet: str, start_row: int, end_row: int) -> di
         for row in range(start_row, end_row + 1):
             ws.row_dimensions[row].outline_level = 0
             ws.row_dimensions[row].hidden = False
+        ws.row_dimensions[end_row + 1].collapsed = False
         save_workbook_safe(wb, file_path)
         logger.info("Ungrouped rows %d-%d in '%s' of %s", start_row, end_row, sheet, file_path)
         return {"status": "success", "message": f"Ungrouped rows {start_row}-{end_row}"}
@@ -396,6 +432,7 @@ def ungroup_cols(file_path: str, sheet: str, start_col: int, end_col: int) -> di
             letter = get_column_letter(col)
             ws.column_dimensions[letter].outline_level = 0
             ws.column_dimensions[letter].hidden = False
+        ws.column_dimensions[get_column_letter(end_col + 1)].collapsed = False
         save_workbook_safe(wb, file_path)
         logger.info("Ungrouped columns %d-%d in '%s' of %s", start_col, end_col, sheet, file_path)
         return {"status": "success", "message": f"Ungrouped columns {start_col}-{end_col}"}
@@ -456,8 +493,9 @@ def set_col_width(file_path: str, sheet_name: str, cols: list[str], width: float
 
         ws = get_sheet(wb, sheet_name)
         for c in cols:
-            column_index_from_string(c)  # raises ValueError on invalid column letter
-            ws.column_dimensions[c].width = width
+            letter = c.upper()
+            column_index_from_string(letter)  # raises ValueError on invalid column letter
+            ws.column_dimensions[letter].width = width
         save_workbook_safe(wb, file_path)
         logger.info("Set width=%s for %d col(s) in '%s' of %s", width, len(cols), sheet_name, file_path)
         return {"status": "ok", "sheet": sheet_name, "updated": len(cols)}
@@ -475,25 +513,23 @@ def stack_sheets(
     """Concatenate multiple sheets row-wise into a single destination sheet."""
     import pandas as pd
 
+    if not sheet_names:
+        raise ValueError("sheet_names must not be empty.")
     validate_file_path(file_path, must_exist=True)
-    frames: list[pd.DataFrame] = []
-    for name in sheet_names:
-        df = pd.read_excel(file_path, sheet_name=name, engine="calamine")
-        frames.append(df)
+    frames: list[pd.DataFrame] = [read_sheet_df(file_path, name) for name in sheet_names]
     combined = pd.concat(frames, ignore_index=True)
 
     target = output_path if output_path is not None else file_path
     if output_path is not None:
-        from pathlib import Path as _Path
+        import openpyxl as _openpyxl
 
-        validate_file_path(output_path, must_exist=False)
-        if _Path(output_path).resolve().exists():
+        out_path = validate_file_path(output_path, must_exist=False)
+        if out_path.exists():
             out_wb = load_workbook_safe(output_path)
         else:
-            import openpyxl as _openpyxl
-
             out_wb = _openpyxl.Workbook()
-            out_wb.remove(out_wb.active)
+            if out_wb.active is not None:
+                out_wb.remove(out_wb.active)
     else:
         out_wb = load_workbook_safe(file_path)
 
@@ -502,9 +538,9 @@ def stack_sheets(
             del out_wb[dest_sheet]
         dest_ws = out_wb.create_sheet(dest_sheet)
         if include_header:
-            dest_ws.append(list(combined.columns))
+            dest_ws.append([sanitize_excel_value(col) for col in combined.columns])
         for row_tuple in combined.itertuples(index=False, name=None):
-            dest_ws.append(list(row_tuple))
+            dest_ws.append([sanitize_excel_value(val) for val in row_tuple])
         save_workbook_safe(out_wb, target)
         total_rows = len(combined)
         logger.info(
@@ -584,12 +620,16 @@ def remove_page_break(
 ) -> dict[str, str]:
     """Remove a manual page break at a specific row or column.
 
-    row: remove the horizontal page break at this row number.
-    col: remove the vertical page break at this column index.
-    If row/col is None, all breaks of that type are cleared.
+    row: remove the horizontal page break at this row number (>= 1).
+    col: remove the vertical page break at this column index (>= 1).
+    At least one of row or col must be provided.
     """
     if row is None and col is None:
         raise ValueError("At least one of 'row' or 'col' must be provided.")
+    if row is not None and row < 1:
+        raise ValueError("row must be >= 1.")
+    if col is not None and col < 1:
+        raise ValueError("col must be >= 1.")
 
     wb = load_workbook_safe(file_path)
     try:

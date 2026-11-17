@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,7 @@ class SolverConstraint(BaseModel):
     """
 
     expression: str = Field(..., description="Arithmetic expression using cell refs, e.g. 'B2 + B3 <= 100'.")
-    type: str = Field("ineq", description="Constraint type: 'ineq' (inequality) or 'eq' (equality).")
+    type: Literal["ineq", "eq"] = Field("ineq", description="Constraint type: 'ineq' (inequality) or 'eq' (equality).")
 
 
 class SolverResult(TypedDict):

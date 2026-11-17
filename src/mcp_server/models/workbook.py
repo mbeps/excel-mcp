@@ -6,6 +6,8 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
+from .named_ranges import NamedRangeInfo
+
 
 class SheetInfo(BaseModel):
     """Basic dimensional info for a single worksheet.
@@ -62,13 +64,13 @@ class WorkbookMetadata(BaseModel):
         file_path (str): Absolute path to the workbook file. Required.
         sheets (list[SheetInfo]): Dimensional info for each sheet. Required.
         active_sheet (str | None): Name of the active sheet.
-        named_ranges (list[dict[str, str]]): Named ranges present in the workbook.
+        named_ranges (list[NamedRangeInfo]): Named ranges present in the workbook.
     """
 
     file_path: str = Field(..., description="Absolute path to the workbook file.")
     sheets: list[SheetInfo] = Field(..., description="Dimensional info for each sheet.")
     active_sheet: str | None = Field(..., description="Name of the currently active sheet.")
-    named_ranges: list[dict[str, str]] = Field(..., description="Named ranges defined in the workbook.")
+    named_ranges: list[NamedRangeInfo] = Field(..., description="Named ranges defined in the workbook.")
 
 
 class SheetCreatedInfo(TypedDict):

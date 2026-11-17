@@ -9,11 +9,13 @@ from logging import Logger
 import pandas as pd
 
 from mcp_server.utils.excel_helpers import (
-    col_letter_to_index,
     load_workbook_safe,
     read_sheet_df,
+    resolve_dataframe_column,
+    sanitize_excel_value,
     save_workbook_safe,
     validate_file_path,
+    write_dataframe_to_workbook,
 )
 from mcp_server.utils.logger import configure_logging
 
@@ -41,7 +43,7 @@ def _trim_whitespace(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataF
     count = 0
     for col in target_cols:
         col_dtype = df[col].dtype
-        if col_dtype is object:
+        if pd.api.types.is_object_dtype(col_dtype):
             # Object dtype may contain mixed types — only process actual strings
             str_mask = df[col].apply(lambda x: isinstance(x, str))
             if not str_mask.any():
@@ -73,7 +75,7 @@ def _remove_empty_columns(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.
     count = 0
     cols_to_drop = []
     for col in target_cols:
-        if df[col].isna().all() or df[col].apply(lambda x: isinstance(x, str) and x.strip() == "").all():
+        if df[col].apply(lambda x: pd.isna(x) or (isinstance(x, str) and x.strip() == "")).all():
             cols_to_drop.append(col)
             count += 1
     df = df.drop(columns=cols_to_drop)
@@ -83,18 +85,48 @@ def _remove_empty_columns(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.
 def _normalize_text(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataFrame, int]:
     count = 0
     for col in target_cols:
-        if df[col].dtype is not object and not isinstance(df[col].dtype, pd.StringDtype):
-            continue
-        original = df[col].copy()
-        # Vectorised: strip whitespace, lowercase, collapse internal whitespace
-        cleaned = df[col].astype(str).where(df[col].notna(), other=pd.NA)
-        cleaned = cleaned.str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
-        # Restore non-string / NA values
-        cleaned = cleaned.where(original.notna(), other=original)
-        changed = (original != cleaned) & original.notna()
-        count += int(changed.sum())
-        df[col] = cleaned
+        col_dtype = df[col].dtype
+        if pd.api.types.is_object_dtype(col_dtype):
+            str_mask = df[col].apply(lambda x: isinstance(x, str))
+            if not str_mask.any():
+                continue
+            original = df[col][str_mask]
+            cleaned = original.str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
+            count += int((original != cleaned).sum())
+            df.loc[str_mask, col] = cleaned
+        elif isinstance(col_dtype, pd.StringDtype):
+            original = df[col]
+            cleaned = original.str.strip().str.lower().str.replace(r"\s+", " ", regex=True)
+            changed = original.notna() & (original != cleaned)
+            count += int(changed.sum())
+            df[col] = cleaned
     return df, count
+
+
+def _parse_numeric_string(raw: str) -> int | float | None:
+    """Parse a currency/formatted/scientific numeric string, or return None."""
+    cleaned = raw.strip()
+    for sym in ("$", "€", "£", "¥"):
+        cleaned = cleaned.replace(sym, "")
+    cleaned = cleaned.strip()
+    if cleaned == "":
+        return None
+    if "." in cleaned and "," in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif "," in cleaned:
+        if cleaned.count(",") == 1 and len(cleaned.split(",")[1]) != 3:
+            cleaned = cleaned.replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    try:
+        if "." in cleaned or "e" in cleaned.lower():
+            return float(cleaned)
+        return int(cleaned)
+    except ValueError:
+        return None
 
 
 def _fix_numbers(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataFrame, int]:
@@ -105,19 +137,16 @@ def _fix_numbers(df: pd.DataFrame, target_cols: list[str]) -> tuple[pd.DataFrame
             val = df.at[idx, col]
             if not isinstance(val, str):
                 continue
-            cleaned = val.strip().replace(",", "").replace("$", "").replace("€", "").replace("£", "")
-            if cleaned == "":
-                continue
-            try:
-                num = int(cleaned) if "." not in cleaned else float(cleaned)
+            num = _parse_numeric_string(val)
+            if num is not None:
                 conversions.append((idx, num))
-            except ValueError:
-                continue
         if conversions:
             df[col] = df[col].astype(object)
             for idx, num in conversions:
                 df.at[idx, col] = num
             count += len(conversions)
+            if all(pd.isna(v) or (isinstance(v, (int, float)) and not isinstance(v, bool)) for v in df[col]):
+                df[col] = pd.to_numeric(df[col])
     return df, count
 
 
@@ -163,18 +192,22 @@ def _fill_missing_with_strategy(
         count = before - after
     elif strategy == "mean":
         for col in target_cols:
-            if pd.api.types.is_numeric_dtype(df[col]):
+            if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_bool_dtype(df[col]):
                 na_count = int(df[col].isna().sum())
                 if na_count > 0:
-                    df[col] = df[col].fillna(df[col].mean())
-                    count += na_count
+                    fill_val = df[col].mean()
+                    if pd.notna(fill_val):
+                        df[col] = df[col].fillna(fill_val)
+                        count += na_count
     elif strategy == "median":
         for col in target_cols:
-            if pd.api.types.is_numeric_dtype(df[col]):
+            if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_bool_dtype(df[col]):
                 na_count = int(df[col].isna().sum())
                 if na_count > 0:
-                    df[col] = df[col].fillna(df[col].median())
-                    count += na_count
+                    fill_val = df[col].median()
+                    if pd.notna(fill_val):
+                        df[col] = df[col].fillna(fill_val)
+                        count += na_count
     elif strategy == "mode":
         for col in target_cols:
             mode_series = df[col].mode()
@@ -260,13 +293,7 @@ def data_cleaner(
     if columns is None:
         col_names = None
     else:
-        all_cols = list(df.columns)
-        col_names = []
-        for letter in columns:
-            idx = col_letter_to_index(letter) - 1
-            if idx < 0 or idx >= len(all_cols):
-                raise ValueError(f"Column letter '{letter}' is out of range. Sheet has {len(all_cols)} columns.")
-            col_names.append(all_cols[idx])
+        col_names = [str(resolve_dataframe_column(df, col_ref)) for col_ref in columns]
     changes: dict[str, int] = {}
 
     for op in ops:
@@ -298,98 +325,17 @@ def data_cleaner(
         return result
 
     # Write output
-    save_path = output_file if output_file else file_path
-    if output_file:
-        validate_file_path(output_file, must_exist=False)
-
-    if save_path == file_path:
-        wb = load_workbook_safe(file_path)
-        # Clear and rewrite the target sheet
-        if sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            for row in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column):
-                for cell in row:
-                    cell.value = None
-        else:
-            ws = wb.create_sheet(title=sheet_name)
-    else:
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = sheet_name
-
-    try:
-        # Write headers
-        for c_idx, col_name in enumerate(df.columns, start=1):
-            ws.cell(row=1, column=c_idx, value=col_name)
-
-        # Write data
-        for r_idx, row_data in enumerate(df.values.tolist(), start=2):
-            for c_idx, val in enumerate(row_data, start=1):
-                # Convert numpy types to native Python for openpyxl
-                if hasattr(val, "item"):
-                    val = val.item()
-                ws.cell(row=r_idx, column=c_idx, value=val)
-
-        save_workbook_safe(wb, save_path)
-        logger.info("Cleaned data written to %s", save_path)
-    finally:
-        wb.close()
+    save_path = write_dataframe_to_workbook(
+        df,
+        file_path,
+        sheet_name=sheet_name,
+        output_file=output_file,
+        start_row=header_row,
+        include_header=True,
+    )
+    logger.info("Cleaned data written to %s", save_path)
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Private helpers for new standalone functions
-# ---------------------------------------------------------------------------
-
-
-def _write_df_to_workbook(
-    df: pd.DataFrame,
-    file_path: str,
-    sheet_name: str,
-    output_file: str | None,
-) -> str:
-    """Write DataFrame back to a workbook sheet; returns the save path."""
-    save_path = output_file if output_file else file_path
-    if output_file:
-        validate_file_path(output_file, must_exist=False)
-
-    if save_path == file_path:
-        wb = load_workbook_safe(file_path)
-    else:
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-
-    try:
-        if save_path == file_path:
-            if sheet_name in wb.sheetnames:
-                ws = wb[sheet_name]
-                for row in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column):
-                    for cell in row:
-                        cell.value = None
-            else:
-                ws = wb.create_sheet(title=sheet_name)
-        else:
-            ws = wb.active
-            ws.title = sheet_name
-
-        for c_idx, col_name in enumerate(df.columns, start=1):
-            ws.cell(row=1, column=c_idx, value=col_name)
-
-        for r_idx, row_data in enumerate(df.values.tolist(), start=2):
-            for c_idx, val in enumerate(row_data, start=1):
-                if hasattr(val, "item"):
-                    val = val.item()
-                ws.cell(row=r_idx, column=c_idx, value=val)
-
-        save_workbook_safe(wb, save_path)
-    finally:
-        wb.close()
-
-    return save_path
 
 
 # ---------------------------------------------------------------------------
@@ -413,18 +359,10 @@ def split_column(
     """
     validate_file_path(file_path)
     df = read_sheet_df(file_path, sheet_name, header_row)
-    if column not in df.columns:
-        if re.match(r"^[A-Za-z]+$", column):
-            all_cols = list(df.columns)
-            idx = col_letter_to_index(column) - 1
-            if idx < 0 or idx >= len(all_cols):
-                raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
-            column = all_cols[idx]
-        else:
-            raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
-    col_name = column
+    col_name = str(resolve_dataframe_column(df, column))
 
-    split_df = df[col_name].astype(str).str.split(delimiter, expand=True)
+    str_series = df[col_name].where(df[col_name].notna(), other=pd.NA).astype("string")
+    split_df = str_series.str.split(delimiter, expand=True)
     num_parts = split_df.shape[1]
 
     if new_columns:
@@ -437,14 +375,23 @@ def split_column(
 
     split_df.columns = pd.Index(names)
 
-    col_idx = df.columns.get_loc(col_name)
+    col_idx = int(df.columns.get_loc(col_name))
     for i, new_col in enumerate(names):
         df.insert(col_idx + 1 + i, new_col, split_df[new_col])
 
     if drop_original:
         df = df.drop(columns=[col_name])
 
-    save_path = _write_df_to_workbook(df, file_path, sheet_name, output_file)
+    save_path = str(
+        write_dataframe_to_workbook(
+            df,
+            file_path,
+            sheet_name=sheet_name,
+            output_file=output_file,
+            start_row=header_row,
+            include_header=True,
+        )
+    )
     logger.info("split_column: split '%s' into %d columns in %s", col_name, num_parts, save_path)
 
     return {
@@ -468,28 +415,25 @@ def parse_date_column(
 
     from dateutil import parser as dateutil_parser
 
+    validate_file_path(file_path)
     df = read_sheet_df(file_path, sheet_name, header_row)
-    if column not in df.columns:
-        if re.match(r"^[A-Za-z]+$", column):
-            all_cols = list(df.columns)
-            idx = col_letter_to_index(column) - 1
-            if idx < 0 or idx >= len(all_cols):
-                raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
-            column = all_cols[idx]
-        else:
-            raise ValueError(f"Column '{column}' not found. Available columns: {list(df.columns)}")
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found. Available: {list(df.columns)}")
+    col_key = str(resolve_dataframe_column(df, column))
 
     parsed_values: list[datetime | None] = []
-    for val in df[column]:
+    raw_values = df[col_key].tolist()
+    for val in raw_values:
         if pd.isna(val) or (isinstance(val, str) and val.strip() == ""):
             parsed_values.append(None)
         elif isinstance(val, (datetime, pd.Timestamp)):
             parsed_values.append(val if isinstance(val, datetime) else val.to_pydatetime())
+        elif isinstance(val, (int, float, bool)):
+            parsed_values.append(None)
         else:
+            s = str(val).strip()
+            if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", s) and not (len(s) == 8 and s.isdigit()):
+                parsed_values.append(None)
+                continue
             try:
-                s = str(val).strip()
                 # ISO format (YYYY-MM-DD...) is unambiguous — parse without dayfirst
                 if re.match(r"^\d{4}-\d{2}-\d{2}", s):
                     parsed_values.append(dateutil_parser.parse(s))
@@ -499,28 +443,33 @@ def parse_date_column(
                 parsed_values.append(None)
 
     parsed = pd.Series(parsed_values, index=df.index)
-    formatted = parsed.apply(lambda v: v.strftime(output_format) if v is not None and not pd.isna(v) else None)
-
-    write_col = output_column if output_column else column
+    write_col = output_column if output_column else col_key
 
     wb = load_workbook_safe(file_path)
     try:
-        ws = wb[sheet_name] if sheet_name in wb.sheetnames else None
-        if ws is None:
-            raise ValueError(f"Sheet '{sheet_name}' not found.")
+        ws = wb[sheet_name]
         header_cells = [ws.cell(row=header_row, column=c).value for c in range(1, ws.max_column + 1)]
         if write_col in header_cells:
             col_idx = header_cells.index(write_col) + 1
         else:
             col_idx = ws.max_column + 1
             ws.cell(row=header_row, column=col_idx, value=write_col)
-        for r_idx, v in enumerate(formatted.tolist(), start=header_row + 1):
-            ws.cell(row=r_idx, column=col_idx, value=v)
+        for i, (parsed_dt, raw_val) in enumerate(zip(parsed_values, raw_values)):
+            r_idx = header_row + 1 + i
+            if parsed_dt is not None:
+                out_val: object = parsed_dt.strftime(output_format)
+            elif output_column is None and not (
+                pd.isna(raw_val) or (isinstance(raw_val, str) and raw_val.strip() == "")
+            ):
+                out_val = sanitize_excel_value(raw_val)
+            else:
+                out_val = None
+            ws.cell(row=r_idx, column=col_idx, value=out_val)
         save_workbook_safe(wb, file_path)
     finally:
         wb.close()
 
     parsed_count = int(parsed.notna().sum())
     failed_count = int(parsed.isna().sum())  # None values count as NaN in pd.Series
-    logger.info("parse_date_column: parsed %d/%d dates in column '%s'", parsed_count, len(df), column)
-    return {"column": column, "parsed_count": parsed_count, "failed_count": failed_count, "output_column": write_col}
+    logger.info("parse_date_column: parsed %d/%d dates in column '%s'", parsed_count, len(df), col_key)
+    return {"column": col_key, "parsed_count": parsed_count, "failed_count": failed_count, "output_column": write_col}

@@ -188,7 +188,7 @@ def deduplicate_data(
     file_path: str,
     sheet_name: str,
     columns: list[str] | None = None,
-    keep: str = "first",
+    keep: str | bool = "first",
 ) -> str:
     """Remove duplicate rows from a sheet, optionally using a subset of columns.
 
