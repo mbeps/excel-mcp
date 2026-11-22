@@ -10,8 +10,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_server.utils.excel_helpers import validate_file_path
 from mcp_server.utils.file_resolver import (
     SessionFileStore,
+    _validate_url_target,
     detect_input_type,
     encode_file_to_base64,
     resolve_to_local,
@@ -235,3 +237,25 @@ def test_session_store_expired_session_returns_none(tmp_path: Path) -> None:
     time.sleep(0.05)
     result = short_ttl_store.get(session_id)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard & URL rejection in validate_file_path
+# ---------------------------------------------------------------------------
+
+
+def test_validate_url_target_blocks_loopback_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EXCEL_MCP_ALLOW_PRIVATE_URLS", raising=False)
+    with pytest.raises(ValueError, match="Blocked URL resolving to disallowed IP address"):
+        _validate_url_target("http://127.0.0.1:9000/bucket/file.xlsx")
+
+
+def test_validate_url_target_allows_private_when_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EXCEL_MCP_ALLOW_PRIVATE_URLS", "true")
+    _validate_url_target("http://127.0.0.1:9000/bucket/file.xlsx")
+
+
+def test_validate_file_path_rejects_presigned_url_with_clear_error() -> None:
+    url = "http://localhost:9000/bucket/file.xlsx?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+    with pytest.raises(ValueError, match="Expected a local workspace file path, not a URL"):
+        validate_file_path(url)

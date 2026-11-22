@@ -68,9 +68,14 @@ def validate_file_path(
         pathlib.Path: Resolved Path object pointing to the validated file.
 
     Raises:
-        ValueError: If the path is outside ``EXCEL_MCP_ALLOWED_DIRS``, the file extension
-            is not allowed, or the file does not exist / is not a regular file.
+        ValueError: If the path is a URL, is outside ``EXCEL_MCP_ALLOWED_DIRS``, the file
+            extension is not allowed, or the file does not exist / is not a regular file.
     """
+    if file_path.strip().lower().startswith(("http://", "https://")):
+        raise ValueError(
+            "Expected a local workspace file path, not a URL. Call upload_file first to stage remote files."
+        )
+
     path = Path(file_path).resolve()
     _is_server_temp = path.parent == _SERVER_TEMP_DIR and path.name.startswith("excel_mcp_")
 
