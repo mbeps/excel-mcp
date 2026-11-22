@@ -40,6 +40,11 @@ def _get_max_file_bytes() -> int:
     return _DEFAULT_MAX_FILE_BYTES
 
 
+def _allow_private_urls() -> bool:
+    """Return whether private/loopback URL targets are permitted via env opt-in."""
+    return os.environ.get("EXCEL_MCP_ALLOW_PRIVATE_URLS", "").strip().lower() in ("1", "true", "yes")
+
+
 # ---------------------------------------------------------------------------
 # Input detection
 # ---------------------------------------------------------------------------
@@ -158,6 +163,9 @@ def _validate_url_target(url: str) -> None:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError(f"Invalid HTTP(S) URL: {url}")
+
+    if _allow_private_urls():
+        return
 
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
